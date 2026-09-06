@@ -1,0 +1,95 @@
+substitutions:
+  _REGION: asia-northeast1
+  _SERVICE: aone-lead-factory
+  _REPOSITORY: aone-lead-factory
+  _OPENAI_SECRET: aone-openai-api-key
+  _SPREADSHEET_ID: 1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo
+  _DRIVE_ROOT_FOLDER_ID: 14JY0cfJrNM9uteVmPOQ-SDoYKkSrEX3E
+  _DRIVE_SCRAPERS_FOLDER_ID: 1c5vE9oAGMXn209JKIyGonJ7pZ4-1bplk
+
+steps:
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        SERVICE_ACCOUNT="aone-lead-factory@${PROJECT_ID}.iam.gserviceaccount.com"
+        gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com cloudscheduler.googleapis.com
+        gcloud artifacts repositories describe ${_REPOSITORY} --location=${_REGION} >/dev/null 2>&1 || \
+          gcloud artifacts repositories create ${_REPOSITORY} --repository-format=docker --location=${_REGION}
+        gcloud iam service-accounts describe "$${SERVICE_ACCOUNT}" >/dev/null 2>&1 || \
+          gcloud iam service-accounts create aone-lead-factory --display-name="A-one Lead Factory"
+        gcloud secrets add-iam-policy-binding ${_OPENAI_SECRET} \
+          --member="serviceAccount:$${SERVICE_ACCOUNT}" --role=roles/secretmanager.secretAccessor
+
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-t", "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${BUILD_ID}", "."]
+
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${BUILD_ID}"]
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        SERVICE_ACCOUNT="aone-lead-factory@${PROJECT_ID}.iam.gserviceaccount.com"
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${BUILD_ID}"
+        gcloud beta run deploy ${_SERVICE} \
+          --image="$${IMAGE}" \
+          --region=${_REGION} \
+          --service-account="$${SERVICE_ACCOUNT}" \
+          --no-allow-unauthenticated \
+          --sandbox-launcher \
+          --timeout=540 \
+          --set-secrets=OPENAI_API_KEY=${_OPENAI_SECRET}:latest \
+          --set-env-vars=LEAD_FACTORY_SPREADSHEET_ID=${_SPREADSHEET_ID},LEAD_FACTORY_DRIVE_ROOT_FOLDER_ID=${_DRIVE_ROOT_FOLDER_ID},LEAD_FACTORY_DRIVE_SCRAPERS_FOLDER_ID=${_DRIVE_SCRAPERS_FOLDER_ID},LEAD_FACTORY_META_INTERVAL_SECONDS=120,LEAD_FACTORY_MAX_REPAIR_ATTEMPTS=5
+
+        URL="$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.url)')"
+        INVOKER="lead-factory-scheduler@${PROJECT_ID}.iam.gserviceaccount.com"
+        gcloud iam service-accounts describe "$${INVOKER}" >/dev/null 2>&1 || \
+          gcloud iam service-accounts create lead-factory-scheduler --display-name="Lead Factory Scheduler"
+        gcloud run services add-iam-policy-binding ${_SERVICE} --region=${_REGION} \
+          --member="serviceAccount:$${INVOKER}" --role=roles/run.invoker
+
+        # The old monolithic midnight job duplicates the two continuous supply lanes.
+        # Keep rollback simple: pause it if it exists; do not delete the job.
+        gcloud scheduler jobs pause lead-factory-daily --location=${_REGION} >/dev/null 2>&1 || true
+
+        gcloud scheduler jobs describe lead-factory-meta --location=${_REGION} >/dev/null 2>&1 && \
+          gcloud scheduler jobs update http lead-factory-meta \
+            --location=${_REGION} --schedule="*/2 * * * *" --time-zone="Asia/Tokyo" \
+            --uri="$${URL}/meta/tick" --http-method=POST \
+            --oidc-service-account-email="$${INVOKER}" --oidc-token-audience="$${URL}" || \
+          gcloud scheduler jobs create http lead-factory-meta \
+            --location=${_REGION} --schedule="*/2 * * * *" --time-zone="Asia/Tokyo" \
+            --uri="$${URL}/meta/tick" --http-method=POST \
+            --oidc-service-account-email="$${INVOKER}" --oidc-token-audience="$${URL}"
+
+        # N3 autonomous supply: two bounded lanes, 10-minute cadence, staggered by 2 minutes.
+        gcloud scheduler jobs describe lead-factory-growth-supply --location=${_REGION} >/dev/null 2>&1 && \
+          gcloud scheduler jobs update http lead-factory-growth-supply \
+            --location=${_REGION} --schedule="*/10 * * * *" --time-zone="Asia/Tokyo" \
+            --uri="$${URL}/supply/growth" --http-method=POST --attempt-deadline=540s \
+            --oidc-service-account-email="$${INVOKER}" --oidc-token-audience="$${URL}" || \
+          gcloud scheduler jobs create http lead-factory-growth-supply \
+            --location=${_REGION} --schedule="*/10 * * * *" --time-zone="Asia/Tokyo" \
+            --uri="$${URL}/supply/growth" --http-method=POST --attempt-deadline=540s \
+            --oidc-service-account-email="$${INVOKER}" --oidc-token-audience="$${URL}"
+
+        gcloud scheduler jobs describe lead-factory-mittelstand-supply --location=${_REGION} >/dev/null 2>&1 && \
+          gcloud scheduler jobs update http lead-factory-mittelstand-supply \
+            --location=${_REGION} --schedule="2-59/10 * * * *" --time-zone="Asia/Tokyo" \
+            --uri="$${URL}/supply/mittelstand" --http-method=POST --attempt-deadline=540s \
+            --oidc-service-account-email="$${INVOKER}" --oidc-token-audience="$${URL}" || \
+          gcloud scheduler jobs create http lead-factory-mittelstand-supply \
+            --location=${_REGION} --schedule="2-59/10 * * * *" --time-zone="Asia/Tokyo" \
+            --uri="$${URL}/supply/mittelstand" --http-method=POST --attempt-deadline=540s \
+            --oidc-service-account-email="$${INVOKER}" --oidc-token-audience="$${URL}"
+
+        # Deployment does not activate the factory switch. Smoke is explicit and safe:
+        # POST /source/{source_id}/smoke while LEAD_FACTORY_ENABLED=FALSE.
+        gcloud scheduler jobs run lead-factory-meta --location=${_REGION}
+
+images:
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${BUILD_ID}"
