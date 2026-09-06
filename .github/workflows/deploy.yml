@@ -34,9 +34,16 @@ jobs:
           fi
           exit "$code"
 
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Submit Cloud Build
         run: |
-          gcloud builds submit --config cloudbuild.yaml .
+          gcloud builds submit --project=${{ secrets.GCP_PROJECT_ID }} --config cloudbuild.yaml .
