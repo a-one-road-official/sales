@@ -44,33 +44,10 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Configure Docker auth
+      - name: Deploy production runtime and schedulers
         run: |
-          gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
-
-      - name: Ensure Artifact Registry
-        run: |
-          gcloud artifacts repositories create aone-lead-factory \
-            --repository-format=docker \
-            --location=asia-northeast1 \
-            --description="A-one Lead Factory images" \
-            --project=${{ secrets.GCP_PROJECT_ID }} || true
-
-      - name: Build Docker image
-        run: |
-          docker build -t asia-northeast1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/aone-lead-factory/aone-lead-factory:latest .
-
-      - name: Push Docker image
-        run: |
-          docker push asia-northeast1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/aone-lead-factory/aone-lead-factory:latest
-
-      - name: Deploy Cloud Run
-        run: |
-          gcloud run deploy aone-lead-factory \
-            --image=asia-northeast1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/aone-lead-factory/aone-lead-factory:latest \
+          gcloud builds submit \
+            --project=${{ secrets.GCP_PROJECT_ID }} \
             --region=asia-northeast1 \
-            --platform=managed \
-            --service-account=aone-lead-factory-deployer@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com \
-            --no-allow-unauthenticated \
-            --timeout=540 \
-            --project=${{ secrets.GCP_PROJECT_ID }}
+            --config=cloudbuild.yaml \
+            .
