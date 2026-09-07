@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException, Request
 
-from orchestrator import LeadFactory
+from strict_factory import StrictLeadFactory as LeadFactory
 from settings import SETTINGS
 
 
-app = FastAPI(title="A-one Lead Factory", version="0.1.0")
+app = FastAPI(title="A-one Lead Factory", version="0.2.6")
 factory: LeadFactory | None = None
 
 
@@ -19,7 +19,7 @@ def get_factory() -> LeadFactory:
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "service": "aone-lead-factory", "external_write": False, "delete": False}
+    return {"ok": True, "service": "aone-lead-factory", "external_write": False, "delete": False, "official_site_policy": "VERIFIED_FIRST_PARTY_REQUIRED"}
 
 
 @app.post("/tick")
@@ -40,8 +40,6 @@ def run_source(source_id: str):
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}:{exc}")
 
 
-
-
 @app.post("/source/{source_id}/smoke")
 def smoke_source(source_id: str):
     try:
@@ -51,9 +49,9 @@ def smoke_source(source_id: str):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}:{exc}")
 
+
 @app.post("/meta/tick")
 def meta_tick():
-    # 2-minute "てめえ大丈夫？" watchdog. It writes an auditable MetaLog row and blocks on unsafe config.
     return get_factory().watchdog_tick()
 
 
@@ -63,6 +61,7 @@ def evaluate_gate(company_context: dict):
         return get_factory().evaluate_gate(company_context)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}:{exc}")
+
 
 @app.post("/mittelstand/evaluate")
 def evaluate_mittelstand(company_context: dict):
@@ -80,13 +79,13 @@ def mittelstand_tick():
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}:{exc}")
 
 
-
 @app.post("/promotion/tick")
 def promotion_tick():
     try:
         return get_factory().promotion_tick()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}:{exc}")
+
 
 @app.post("/domain/tick")
 def domain_tick():
@@ -136,10 +135,11 @@ def growth_tick():
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}:{exc}")
 
 
-
 @app.post("/prep/tick")
 def prep_tick():
     try:
+        if hasattr(get_factory(), "outreach_ready_tick"):
+            return get_factory().outreach_ready_tick()
         return get_factory().prep_tick()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}:{exc}")
@@ -148,6 +148,12 @@ def prep_tick():
 @app.post("/pipeline/tick")
 def pipeline_tick():
     try:
-        return get_factory().pipeline_tick()
+        factory = get_factory()
+        if hasattr(factory, "supply_tick"):
+            growth = factory.supply_tick("GROWTH")
+            mittelstand = factory.supply_tick("MITTELSTAND")
+            ready = factory.outreach_ready_tick() if hasattr(factory, "outreach_ready_tick") else {}
+            return {"status": "PASS", "growth": growth, "mittelstand": mittelstand, "ready": ready}
+        return factory.pipeline_tick()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}:{exc}")
