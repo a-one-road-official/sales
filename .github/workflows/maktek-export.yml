@@ -1,0 +1,38 @@
+name: Export MAKTEK 2026 exhibitors
+
+on:
+  push:
+    paths:
+      - '.github/workflows/maktek-export.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install exporter dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Export complete directory
+        run: python tools/maktek_export.py
+
+      - name: Upload export artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: maktek-2026-full-export
+          path: |
+            maktek_2026.json
+            maktek_2026.csv
+          if-no-files-found: error
+          retention-days: 7
