@@ -1295,3 +1295,22 @@ class SheetsRepo:
             )
             return
         raise KeyError(f"lead_not_found:{lead_id}")
+
+    def count_promoted_leads(self) -> int:
+        """Count current Lead Factory promotions in the technical SSOT."""
+        rows = self.read("LeadFactory_Raw!A2:R")
+        return sum(1 for row in rows if len(row) > 17 and str(row[17] or "").strip().upper() == "PROMOTED_TO_SALES")
+
+    def recent_supply_runlogs(self, lane: str, limit: int = 10) -> list[dict]:
+        """Return recent autonomous supply run summaries for a lane."""
+        rows = self.read("LeadFactory_RunLog!A2:R")
+        lane_marker = f"lane:{str(lane or '').strip().upper()}"
+        out = []
+        for row in reversed(rows):
+            padded = row + [""] * (18 - len(row))
+            if lane_marker not in str(padded[13] or "").upper():
+                continue
+            out.append({"run_id": padded[0], "status": padded[3], "promoted": int(str(padded[11] or "0") or 0), "started_at": padded[1], "finished_at": padded[2]})
+            if len(out) >= max(0, int(limit)):
+                break
+        return out
