@@ -71,3 +71,15 @@ Then `LEAD_FACTORY_ENABLED` is set to `FALSE` and an internal stop notification 
 `.github/workflows/deploy.yml` is the production deployment path. A push to `main` compiles/tests, authenticates to Google Cloud via OIDC, builds the image, deploys private Cloud Run, injects `OPENAI_API_KEY` from Secret Manager, configures the Cloud Tasks queue, configures continuous Scheduler jobs, runs a deep authenticated health check, and immediately kicks discovery/dispatch.
 
 `cloudbuild.yaml` is legacy and must not be attached to a production trigger.
+
+## Qualified Lead Production SLO
+
+“Today +1,500 companies” is a persistent production goal, not a one-shot task.
+Use POST /autonomy/start with {"target":1500}. The controller records the
+SSOT baseline and deadline in Config, calculates velocity/forecast/backlog,
+and expands source discovery and processing when the forecast is short.
+
+Expansion never changes the authoritative Gate, official-first-party URL
+requirement, deduplication, or HITL boundary. Source failures are isolated and
+remain retryable. The loop stops only on explicit user stop or deadline
+finalization, then sends an internal result report to admin@a1-road.com.
