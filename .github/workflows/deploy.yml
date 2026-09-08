@@ -88,13 +88,10 @@ jobs:
           set -euo pipefail
           OPENAI_SECRET="aone-openai-api-key"
           if ! gcloud secrets describe "${OPENAI_SECRET}" --project=${{ secrets.GCP_PROJECT_ID }} >/dev/null 2>&1; then
-            EXISTING_OPENAI_SECRET="$(gcloud secrets list --project=${{ secrets.GCP_PROJECT_ID }} --filter="name~openai" --format="value(name)" | head -n 1 | sed "s#^.*/##")"
-            if [ -n "${EXISTING_OPENAI_SECRET}" ]; then
-              OPENAI_SECRET="${EXISTING_OPENAI_SECRET}"
-            elif [ -n "${OPENAI_GITHUB_KEY}" ]; then
+            if [ -n "${OPENAI_GITHUB_KEY}" ]; then
               printf "%s" "${OPENAI_GITHUB_KEY}" | gcloud secrets create "${OPENAI_SECRET}" --project=${{ secrets.GCP_PROJECT_ID }} --data-file=-
             else
-              echo "No OpenAI Secret Manager secret and no GitHub OPENAI_API_KEY secret configured."
+              echo "Secret ${OPENAI_SECRET} is missing and GitHub OPENAI_API_KEY is not configured."
               exit 1
             fi
           fi
