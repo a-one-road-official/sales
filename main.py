@@ -1,21 +1,48 @@
 from __future__ import annotations
 
+import os
 import uuid
 
+import google.auth
 from fastapi import FastAPI, HTTPException
+from google.cloud import secretmanager
 
 from maktek_ingest import MaktekIngestor
 from strict_factory import StrictLeadFactory as LeadFactory
 from settings import SETTINGS
 
 
-app = FastAPI(title="A-one Lead Factory", version="0.3.0")
+app = FastAPI(title="A-one Lead Factory", version="0.3.1")
 factory: LeadFactory | None = None
+
+
+def _ensure_openai_key() -> None:
+    """Resolve the API credential from Secret Manager using the Cloud Run identity.
+
+    This avoids coupling deployment authority to Secret Manager read authority.
+    The runtime service account is the only principal that needs secret access.
+    """
+    if os.getenv("OPENAI_API_KEY"):
+        return
+    _, detected_project = google.auth.default()
+    project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT") or detected_project
+    secret_name = os.getenv("LEAD_FACTORY_OPENAI_SECRET", "aone-openai-api-key")
+    if not project:
+        raise RuntimeError("missing_gcp_project_for_openai_secret")
+    client = secretmanager.SecretManagerServiceClient()
+    response = client.access_secret_version(
+        request={"name": f"projects/{project}/secrets/{secret_name}/versions/latest"}
+    )
+    key = response.payload.data.decode("utf-8").strip()
+    if not key:
+        raise RuntimeError("openai_secret_empty")
+    os.environ["OPENAI_API_KEY"] = key
 
 
 def get_factory() -> LeadFactory:
     global factory
     if factory is None:
+        _ensure_openai_key()
         factory = LeadFactory(SETTINGS)
     return factory
 
