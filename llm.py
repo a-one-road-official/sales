@@ -204,14 +204,15 @@ Important research rules:
 1. Find the actual operating/legal entity and, where relevant, its controlling parent/group.
 2. A parent/group roll-up is allowed only when majority ownership, 100% ownership, consolidation or equivalent control is evidenced.
    Never roll up to a distributor, customer, loose partner, introducer, or non-controlling investor.
-3. For Japan openness, actively search both English and Japanese signals: Japan subsidiary/entity, distributor, exclusive/sole/general agent,
-   Japanese site, customers/installations, trade-show activity, sales/service staff, JV/ownership, and channel announcements.
-4. Existing Japanese handling is not automatically bad. A weak/non-exclusive/passive/follower channel can be GO.
-5. GO requires BOTH NONEXCLUSIVE and FOLLOWER. If either exclusivity or market role cannot be determined, use UNKNOWN.
-6. For STRONG_GO, perform a reasonable targeted search for Japan signals and explain that none were found in the searched public evidence.
-7. M1/M2/M3 are the only formal decision inputs.
-8. Operational routing and Why Now are supplemental. They may prioritize or route, but never alter formal gate state.
-9. For giant plant / aircraft-platform / nuclear / EPC-scale offerings, routing may be STRATEGIC_BD even when the formal gate passes.
+3. Research employee count and Japan-market signals as supplemental context only.
+4. Do not mark a company FAIL because employee count is below 100 or because Japan presence/channel activity exists.
+5. Formal eligibility is determined by M2 revenue only:
+   PASS when current/reasonably current revenue is at least EUR 20M or USD 30M;
+   FAIL only when revenue below that threshold is clearly evidenced;
+   UNKNOWN when revenue evidence is insufficient.
+6. Parent/group revenue may be used only when control and payment/decision-making relevance are evidenced.
+7. Operational routing, Japan openness, employee count, and Why Now may prioritize or route, but never alter the formal revenue result.
+8. For giant plant / aircraft-platform / nuclear / EPC-scale offerings, routing may be STRATEGIC_BD even when the formal revenue gate passes.
 
 Return ONLY JSON in this exact structure:
 {{
