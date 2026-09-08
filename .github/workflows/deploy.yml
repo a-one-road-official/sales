@@ -165,6 +165,14 @@ jobs:
 
       - name: Kick autonomous frontier and workers now
         run: |
+          echo 'POST /autonomy/start'
+          curl --fail-with-body --retry 3 --retry-delay 3 \
+            -X POST \
+            -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"target":1500}' \
+            "${SERVICE_URL}/autonomy/start"
+          echo
           call () {
             PATH="$1"
             echo "POST $PATH"
