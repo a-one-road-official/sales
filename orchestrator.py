@@ -672,6 +672,9 @@ class LeadFactory:
         """Stop internal supply after target or repeated zero-yield runs."""
         if str(self.s.autonomy_mode or "").upper() != "UNTIL_TARGET":
             return None
+        # The persistent Qualified Lead SLO owns stopping while a goal is live.
+        if self._config().get("LEAD_FACTORY_GOAL_STATUS", "").upper() in {"RUNNING", "AT_RISK"}:
+            return None
         promoted = self.sheets.count_promoted_leads()
         added_since_start = max(0, promoted - int(self.s.autonomy_start_promoted))
         if added_since_start >= int(self.s.autonomy_target_new_companies):
@@ -721,8 +724,9 @@ class LeadFactory:
                 signals = self.llm.discover_trigger_signals(limit=max(0, fallback_limit))
                 fallback = self.sheets.append_trigger_signals(signals)
 
-            domain_limit = int(cfg.get("SUPPLY_DOMAIN_MAX_PER_TICK", "4") or 4)
-            gate_limit = int(cfg.get("SUPPLY_GATE_MAX_PER_TICK", "4") or 4)
+            multiplier = max(1, min(50, int(cfg.get("LEAD_FACTORY_CAPACITY_MULTIPLIER", "1") or 1)))
+            domain_limit = int(cfg.get("SUPPLY_DOMAIN_MAX_PER_TICK", "4") or 4) * multiplier
+            gate_limit = int(cfg.get("SUPPLY_GATE_MAX_PER_TICK", "4") or 4) * multiplier
             domain = self.domain_tick(lane=lane, limit=domain_limit)
             gate = self.mittelstand_worker.process_pending(limit=gate_limit) if lane == "MITTELSTAND" else self.gate_worker.process_pending(limit=gate_limit)
             promotion = self.promotion_tick(lane=lane)
