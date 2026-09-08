@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException, Request
 
+from maktek_ingest import MaktekIngestor
 from strict_factory import StrictLeadFactory as LeadFactory
 from settings import SETTINGS
 
 
-app = FastAPI(title="A-one Lead Factory", version="0.2.6")
+app = FastAPI(title="A-one Lead Factory", version="0.2.7")
 factory: LeadFactory | None = None
 
 
@@ -20,6 +21,14 @@ def get_factory() -> LeadFactory:
 @app.get("/healthz")
 def healthz():
     return {"ok": True, "service": "aone-lead-factory", "external_write": False, "delete": False, "official_site_policy": "VERIFIED_FIRST_PARTY_REQUIRED"}
+
+
+@app.post("/maktek/ingest")
+def maktek_ingest():
+    try:
+        return MaktekIngestor(get_factory().sheets).run()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"{type(exc).__name__}:{exc}")
 
 
 @app.post("/tick")
