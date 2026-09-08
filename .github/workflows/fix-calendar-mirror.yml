@@ -1,0 +1,91 @@
+name: Fix production calendar mirror
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-calendar-mirror.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  patch-live-apps-script:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Enable Apps Script API
+        run: |
+          gcloud services enable script.googleapis.com --project=${{ secrets.GCP_PROJECT_ID }} || true
+
+      - name: Patch live Apps Script recursion bug
+        run: |
+          python -m pip install --quiet google-api-python-client google-auth
+          python - <<'PY'
+          import google.auth
+          from googleapiclient.discovery import build
+
+          SCRIPT_ID = '14pzapk5hUf1W7dTB4v7yv-tv1YHtRPZyUSSlqM_OMb5D5PRobVPXZbqa'
+          MARK = 'A1_CALENDAR_TIME_MIN_FIX_V4'
+
+          creds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/script.projects'])
+          svc = build('script', 'v1', credentials=creds, cache_discovery=False)
+          project = svc.projects().getContent(scriptId=SCRIPT_ID).execute()
+          files = project.get('files', [])
+
+          target = None
+          for f in files:
+            src = f.get('source', '')
+            if ('syncBusyCalendar' in src or 'syncBusyToAdmin' in src) and 'timeMin' in src:
+              target = f
+              break
+          if not target:
+            raise SystemExit('CALENDAR_SOURCE_NOT_FOUND')
+
+          src = target.get('source', '')
+          print('target_file=', target.get('name'))
+          for line in src.splitlines():
+            if 'timeMin' in line or 'existingMirrors' in line or 'syncBusy' in line:
+              print(line[:240])
+
+          if MARK not in src:
+            # FreeBusy truncates an in-progress busy interval to timeMin. Querying from `now`
+            # therefore changes the interval start on every 15-minute trigger and defeats
+            # exact start/end dedupe. Query from the start of the local day instead.
+            if 'const now = new Date();' in src and 'timeMin: now.toISOString()' in src:
+              src = src.replace(
+                'const now = new Date();',
+                "const now = new Date();\n  // A1_CALENDAR_TIME_MIN_FIX_V4\n  const freeBusyStart = new Date(now);\n  freeBusyStart.setHours(0, 0, 0, 0);",
+                1,
+              )
+              src = src.replace('timeMin: now.toISOString()', 'timeMin: freeBusyStart.toISOString()', 1)
+            elif 'const now = new Date()' in src and 'timeMin: now.toISOString()' in src:
+              src = src.replace(
+                'const now = new Date()',
+                "const now = new Date()\n  // A1_CALENDAR_TIME_MIN_FIX_V4\n  const freeBusyStart = new Date(now)\n  freeBusyStart.setHours(0, 0, 0, 0)",
+                1,
+              )
+              src = src.replace('timeMin: now.toISOString()', 'timeMin: freeBusyStart.toISOString()', 1)
+            else:
+              raise SystemExit('EXPECTED_TIME_MIN_PATTERN_NOT_FOUND')
+            target['source'] = src
+            svc.projects().updateContent(scriptId=SCRIPT_ID, body={'files': files}).execute()
+
+          verify = svc.projects().getContent(scriptId=SCRIPT_ID).execute()
+          merged = '\n'.join(f.get('source', '') for f in verify.get('files', []))
+          if MARK not in merged or 'timeMin: freeBusyStart.toISOString()' not in merged:
+            raise SystemExit('LIVE_PATCH_VERIFY_FAILED')
+          print('LIVE_PATCH_VERIFY_OK')
+          PY
