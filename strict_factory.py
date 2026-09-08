@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import json
+import os
 import re
 import uuid
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 
 from gate_worker import GateWorker
-from mittelstand_worker import MittelstandWorker
 from orchestrator import LeadFactory as BaseLeadFactory
 from safe_fetch import TrustedFetcher
+from source_universe import for_lane as bootstrap_sources_for_lane
+from task_queue import TaskDispatcher
 
 
 THIRD_PARTY_HOSTS = {
@@ -60,7 +64,22 @@ def _visible_text(raw: str) -> str:
         return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", str(raw or ""))).strip()
 
 
+def _parse_iso(value: str):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
 class OfficialSiteResolver:
+    """Resolve and verify the exact first-party corporate website before screening."""
+
     def __init__(self, sheets, llm=None):
         self.sheets = sheets
         self.llm = llm
@@ -195,62 +214,55 @@ class StrictGateWorker(GateWorker):
         super().__init__(sheets_repo, drive_repo, llm)
         self.resolver = resolver or OfficialSiteResolver(sheets_repo, llm)
 
-    def process_pending(self, limit: int = 20) -> dict:
-        pending = self.sheets.list_pending_gate(limit=limit)
+    def process_company(self, company: dict) -> dict:
+        verification = self.resolver.verify_existing(company)
+        if not verification.get("verified"):
+            row = int(company.get("row_number") or 0)
+            if row > 0:
+                self.sheets.update_range(f"LeadFactory_Raw!C{row}:D{row}", [["", ""]])
+                self.sheets.update_range(f"LeadFactory_Raw!R{row}", [["NEEDS_DOMAIN"]])
+            return {"lead_id": company.get("lead_id", ""), "final_result": "REQUEUED_NEEDS_OFFICIAL_SITE"}
+        canonical = dict(company)
+        canonical["domain"] = verification.get("official_domain", "")
+        canonical["website"] = verification.get("official_website", "")
+        return self.evaluate_and_persist(canonical)
+
+    def process_pending(self, limit: int = 20, lane: str = "GROWTH") -> dict:
+        lane_key = str(lane or "GROWTH").upper()
+        pending = self.sheets.list_pending_mittelstand(limit=limit) if lane_key == "MITTELSTAND" else self.sheets.list_pending_gate(limit=limit)
         results = []
         for company in pending:
-            verification = self.resolver.verify_existing(company)
-            if not verification.get("verified"):
-                row = int(company.get("row_number") or 0)
-                if row > 0:
-                    self.sheets.update_range(f"LeadFactory_Raw!C{row}:D{row}", [["", ""]])
-                    self.sheets.update_range(f"LeadFactory_Raw!R{row}", [["NEEDS_DOMAIN"]])
-                results.append({"lead_id": company.get("lead_id", ""), "final_result": "REQUEUED_NEEDS_OFFICIAL_SITE"})
-                continue
-            canonical = dict(company)
-            canonical["domain"] = verification.get("official_domain", "")
-            canonical["website"] = verification.get("official_website", "")
-            results.append(self.evaluate_and_persist(canonical))
+            try:
+                results.append(self.process_company(company))
+            except Exception as exc:
+                results.append({
+                    "lead_id": company.get("lead_id", ""),
+                    "company_name": company.get("company_name", ""),
+                    "final_result": "ERROR",
+                    "error": f"{type(exc).__name__}:{exc}",
+                })
         return {
             "requested": limit,
             "processed": len(results),
             "GO": sum(1 for r in results if r.get("final_result") == "GO"),
             "NO-GO": sum(1 for r in results if r.get("final_result") == "NO-GO"),
             "REQUEUED": sum(1 for r in results if r.get("final_result") == "REQUEUED_NEEDS_OFFICIAL_SITE"),
+            "ERROR": sum(1 for r in results if r.get("final_result") == "ERROR"),
             "results": results,
         }
 
 
-class StrictMittelstandWorker(MittelstandWorker):
-    def __init__(self, sheets, drive, llm, resolver: OfficialSiteResolver | None = None):
-        super().__init__(sheets, drive, llm)
-        self.resolver = resolver or OfficialSiteResolver(sheets, llm)
+class UnifiedMittelstandWorker:
+    """Compatibility adapter: acquisition lanes differ; the live G1-G6 Doc is shared."""
+
+    def __init__(self, worker: StrictGateWorker):
+        self.worker = worker
 
     def process_pending(self, limit: int = 20) -> dict:
-        pending = self.sheets.list_pending_mittelstand(limit=limit)
-        results = []
-        for company in pending:
-            verification = self.resolver.verify_existing(company)
-            if not verification.get("verified"):
-                row = int(company.get("row_number") or 0)
-                if row > 0:
-                    self.sheets.update_range(f"LeadFactory_Raw!C{row}:D{row}", [["", ""]])
-                    self.sheets.update_range(f"LeadFactory_Raw!R{row}", [["NEEDS_DOMAIN"]])
-                results.append({"lead_id": company.get("lead_id", ""), "final_result": "REQUEUED_NEEDS_OFFICIAL_SITE"})
-                continue
-            canonical = dict(company)
-            canonical["domain"] = verification.get("official_domain", "")
-            canonical["website"] = verification.get("official_website", "")
-            results.append(self.evaluate_and_persist(canonical))
-        return {
-            "requested": limit,
-            "processed": len(results),
-            "GO": sum(1 for r in results if r.get("final_result") == "GO"),
-            "NO": sum(1 for r in results if r.get("final_result") == "NO"),
-            "UNKNOWN": sum(1 for r in results if r.get("final_result") == "UNKNOWN"),
-            "REQUEUED": sum(1 for r in results if r.get("final_result") == "REQUEUED_NEEDS_OFFICIAL_SITE"),
-            "results": results,
-        }
+        return self.worker.process_pending(limit=limit, lane="MITTELSTAND")
+
+    def evaluate_and_persist(self, company_context: dict) -> dict:
+        return self.worker.evaluate_and_persist(company_context)
 
 
 class StrictLeadFactory(BaseLeadFactory):
@@ -258,50 +270,330 @@ class StrictLeadFactory(BaseLeadFactory):
         super().__init__(settings)
         self.official_site_resolver = OfficialSiteResolver(self.sheets, self.llm)
         self.gate_worker = StrictGateWorker(self.sheets, self.drive, self.llm, self.official_site_resolver)
-        self.mittelstand_worker = StrictMittelstandWorker(self.sheets, self.drive, self.llm, self.official_site_resolver)
+        self.mittelstand_worker = UnifiedMittelstandWorker(self.gate_worker)
+
+    def _frontier_candidates(self, lane: str, limit: int) -> list[dict]:
+        lane_key = str(lane or "").strip().upper()
+        known = self.sheets.list_sources()
+        known_text = "\n".join(f"- {s.source_name}: {s.crawl_url}" for s in known[-120:])
+        try:
+            gate_text = self.gate_worker.loader.load().text
+        except Exception:
+            gate_text = ""
+        allowed_types = (
+            "MITTELSTAND_ASSOCIATION|MITTELSTAND_EXHIBITION|MITTELSTAND_CLUSTER|MITTELSTAND_EXPORT_DIRECTORY"
+            if lane_key == "MITTELSTAND" else
+            "GROWTH_EXHIBITION|GROWTH_ASSOCIATION|GROWTH_DIRECTORY|GROWTH_FUNDING_FEED"
+        )
+        prompt = f"""
+You are the autonomous Source Frontier Explorer for A-one road's internal Lead Factory.
+Search the public web and find up to {max(1, limit)} NEW, high-yield company-list sources for lane={lane_key}.
+The goal is to continuously expand the reachable company universe, including while the founder is offline.
+
+A useful source is a repeatable page/feed/directory that exposes MANY company records: official industrial association member lists,
+official trade-fair exhibitor indexes, industrial cluster/exporter directories, official startup/portfolio directories, or recurring
+funding feeds. Prefer sources with 100+ company records and direct company profile/website links. Search globally inside the regions
+and verticals defined by the live policy. Follow adjacent associations/events/directories suggested by already-known sources.
+Do not return a single company page, generic search-results page, Wikipedia, LinkedIn, a generic news homepage, or a duplicate below.
+
+Allowed source_type values: {allowed_types}
+Return ONLY a JSON array of objects with:
+source_type, source_name, source_url, country, event_year, exhibitor_directory_url.
+`exhibitor_directory_url` must be the actual company-list/feed entry point.
+
+LIVE POLICY SSOT (use its DISCOVERY section as governing context):
+---
+{gate_text[:12000]}
+---
+
+ALREADY KNOWN SOURCES — find different/adjacent sources:
+{known_text[:24000]}
+"""
+        resp = self.llm.client.responses.create(model=self.llm.model, tools=[{"type": "web_search"}], input=prompt)
+        data = self.llm._json(resp.output_text)
+        return data if isinstance(data, list) else []
+
+    def discover_lane(self, run_id: str, lane: str) -> dict:
+        """Continuously widen the source graph; bootstrap sources guarantee a cold start."""
+        lane_key = str(lane or "").strip().upper()
+        if lane_key not in {"GROWTH", "MITTELSTAND"}:
+            raise ValueError(f"unsupported_lane:{lane}")
+        cfg = self._config()
+        added: list[str] = []
+        existing = rejected = 0
+
+        # Deterministic bootstrap from high-yield official directories.
+        for candidate in bootstrap_sources_for_lane(lane_key):
+            try:
+                is_new, sid = self.sheets.add_source_if_new(candidate)
+                if is_new:
+                    added.append(sid)
+                else:
+                    existing += 1
+            except Exception:
+                rejected += 1
+
+        frontier_limit = int(cfg.get("SOURCE_FRONTIER_DISCOVERY_LIMIT", os.getenv("LEAD_FACTORY_SOURCE_FRONTIER_LIMIT", "40")) or 40)
+        try:
+            candidates = self._frontier_candidates(lane_key, frontier_limit)
+        except Exception as exc:
+            candidates = []
+            frontier_error = f"{type(exc).__name__}:{exc}"
+        else:
+            frontier_error = ""
+
+        for c in candidates:
+            try:
+                source_type = str(c.get("source_type", "") or "").upper()
+                is_mittel = source_type.startswith("MITTELSTAND_")
+                if (lane_key == "MITTELSTAND") != is_mittel:
+                    rejected += 1
+                    continue
+                url = str(c.get("exhibitor_directory_url") or c.get("source_url") or "").strip()
+                if not url.startswith(("http://", "https://")):
+                    rejected += 1
+                    continue
+                is_new, sid = self.sheets.add_source_if_new(c)
+                if is_new:
+                    added.append(sid)
+                else:
+                    existing += 1
+            except Exception:
+                rejected += 1
+
+        return {
+            "status": "COMPLETE_WITH_FRONTIER_ERROR" if frontier_error else "COMPLETE",
+            "lane": lane_key,
+            "bootstrap_count": len(bootstrap_sources_for_lane(lane_key)),
+            "frontier_candidates": len(candidates),
+            "added": added,
+            "existing": existing,
+            "rejected": rejected,
+            "frontier_error": frontier_error,
+        }
+
+    def _run_source_with_run_id(self, source, run_id: str) -> dict:
+        """Build -> S1-S7 -> cloud smoke -> ACTIVE -> crawl in one autonomous path."""
+        result = super()._run_source_with_run_id(source, run_id)
+        status = str(result.get("status", "")).upper()
+        if status not in {"READY_FOR_CLOUD_SMOKE", "REPAIR_READY_FOR_CLOUD_SMOKE"}:
+            return result
+        smoke = self.cloud_smoke_source(source.source_id)
+        smoke_status = str(smoke.get("status", "")).upper()
+        if smoke_status in {"ACTIVE", "ALREADY_ACTIVE"}:
+            runtime = smoke.get("runtime") if isinstance(smoke.get("runtime"), dict) else {}
+            return {"status": "RAW_CAPTURED", "source_id": source.source_id, "smoke": smoke, "runtime": runtime}
+        return {"status": smoke_status or "SMOKE_FAILED", "source_id": source.source_id, "smoke": smoke}
+
+    def _raw_by_id(self, lead_id: str) -> dict | None:
+        headers_rows = self.sheets.read("LeadFactory_Raw!1:1")
+        if not headers_rows:
+            return None
+        headers = headers_rows[0]
+        for row_number, row in enumerate(self.sheets.read("LeadFactory_Raw!A2:R"), start=2):
+            padded = row + [""] * max(0, len(headers) - len(row))
+            item = dict(zip(headers, padded))
+            if str(item.get("lead_id", "")) == str(lead_id):
+                item["row_number"] = row_number
+                return item
+        return None
+
+    def domain_one(self, lead_id: str) -> dict:
+        company = self._raw_by_id(lead_id)
+        if not company:
+            return {"status": "NOT_FOUND", "lead_id": lead_id}
+        if str(company.get("intake_status", "")).upper() != "NEEDS_DOMAIN":
+            return {"status": "NOOP_ALREADY_ADVANCED", "lead_id": lead_id, "intake_status": company.get("intake_status", "")}
+        research = self.official_site_resolver.resolve(company)
+        evidence = research.get("evidence", [])
+        evidence_text = " | ".join(str(x) for x in evidence) if isinstance(evidence, list) else str(evidence or "")
+        result = self.sheets.update_raw_domain_resolution(
+            lead_id=lead_id,
+            domain=str(research.get("official_domain", "") or ""),
+            website=str(research.get("official_website", "") or ""),
+            hq_country=str(research.get("hq_country", "") or ""),
+            confidence=str(research.get("confidence", "LOW") or "LOW"),
+            evidence=evidence_text,
+        )
+        return {"lead_id": lead_id, "verification": research.get("verification", ""), **result}
 
     def domain_tick(self, lane: str | None = None, limit: int | None = None) -> dict:
         cfg = self._config()
-        resolved_limit = int(limit if limit is not None else (cfg.get("DOMAIN_RESOLUTION_MAX_PER_RUN", "30") or 30))
+        resolved_limit = int(limit if limit is not None else (cfg.get("DOMAIN_RESOLUTION_MAX_PER_RUN", "100") or 100))
         pending = self.sheets.list_needs_domain(limit=resolved_limit, lane=lane)
         results = []
-        resolved = ready = duplicate = unresolved = errors = 0
         for company in pending:
             try:
-                research = self.official_site_resolver.resolve(company)
-                evidence = research.get("evidence", [])
-                evidence_text = " | ".join(str(x) for x in evidence) if isinstance(evidence, list) else str(evidence or "")
-                result = self.sheets.update_raw_domain_resolution(
-                    lead_id=str(company.get("lead_id", "")),
-                    domain=str(research.get("official_domain", "") or ""),
-                    website=str(research.get("official_website", "") or ""),
-                    hq_country=str(research.get("hq_country", "") or ""),
-                    confidence=str(research.get("confidence", "LOW") or "LOW"),
-                    evidence=evidence_text,
-                )
-                results.append({"company_name": company.get("company_name", ""), "verification": research.get("verification", ""), **result})
-                if result.get("status") == "RESOLVED":
-                    resolved += 1
-                    if result.get("duplicate_state") == "NEW":
-                        ready += 1
-                    else:
-                        duplicate += 1
-                else:
-                    unresolved += 1
+                results.append(self.domain_one(str(company.get("lead_id", ""))))
             except Exception as exc:
-                errors += 1
-                results.append({"company_name": company.get("company_name", ""), "status": "ERROR", "error": f"{type(exc).__name__}:{exc}"})
+                results.append({"lead_id": company.get("lead_id", ""), "status": "ERROR", "error": f"{type(exc).__name__}:{exc}"})
         return {
-            "status": "COMPLETE_WITH_ERRORS" if errors else "COMPLETE",
+            "status": "COMPLETE",
             "requested": resolved_limit,
             "processed": len(results),
-            "resolved": resolved,
-            "ready": ready,
-            "duplicates_skipped": duplicate,
-            "unresolved": unresolved,
-            "errors": errors,
-            "verification_policy": "VERIFIED_FIRST_PARTY_REQUIRED",
+            "resolved": sum(1 for r in results if r.get("status") == "RESOLVED"),
+            "unresolved": sum(1 for r in results if r.get("status") == "UNRESOLVED"),
+            "errors": sum(1 for r in results if r.get("status") == "ERROR"),
             "results": results,
+        }
+
+    def gate_one(self, lead_id: str) -> dict:
+        company = self._raw_by_id(lead_id)
+        if not company:
+            return {"status": "NOT_FOUND", "lead_id": lead_id}
+        intake = str(company.get("intake_status", "")).upper()
+        screening = str(company.get("screening_status", "")).upper()
+        if intake not in {"READY_FOR_GATE", "READY_FOR_MITTELSTAND_GATE"} or screening not in {"", "PENDING"}:
+            return {"status": "NOOP_ALREADY_ADVANCED", "lead_id": lead_id, "intake_status": intake, "screening_status": screening}
+        return self.gate_worker.process_company(company)
+
+    def dispatch_lane(self, lane: str) -> dict:
+        """Fan out source/domain/gate work into Cloud Tasks for parallel independent jobs."""
+        if not self._enabled():
+            return {"status": "DISABLED", "reason": "Config.LEAD_FACTORY_ENABLED is FALSE"}
+        lane_key = str(lane or "").strip().upper()
+        if lane_key not in {"GROWTH", "MITTELSTAND"}:
+            raise ValueError(f"unsupported_lane:{lane}")
+        cfg = self._config()
+        dispatcher = TaskDispatcher()
+        source_limit = int(cfg.get("DISPATCH_SOURCE_MAX", os.getenv("LEAD_FACTORY_DISPATCH_SOURCE_MAX", "50")) or 50)
+        domain_limit = int(cfg.get("DISPATCH_DOMAIN_MAX", os.getenv("LEAD_FACTORY_DISPATCH_DOMAIN_MAX", "2000")) or 2000)
+        gate_limit = int(cfg.get("DISPATCH_GATE_MAX", os.getenv("LEAD_FACTORY_DISPATCH_GATE_MAX", "2000")) or 2000)
+        recrawl = int(cfg.get("SOURCE_RECRAWL_AFTER_MINUTES", "1440") or 1440)
+        sources = self.sheets.sources_for_crawl(limit=source_limit, lane=lane_key.lower(), recrawl_after_minutes=recrawl)
+        domains = self.sheets.list_needs_domain(limit=domain_limit, lane=lane_key)
+        gates = self.sheets.list_pending_mittelstand(limit=gate_limit) if lane_key == "MITTELSTAND" else self.sheets.list_pending_gate(limit=gate_limit)
+        now = datetime.now(timezone.utc)
+        bucket = f"{now:%Y%m%d%H}{(now.minute // 30) * 30:02d}"
+        enqueued = {"source": 0, "domain": 0, "gate": 0, "already": 0, "errors": 0}
+        details = []
+
+        def add(path: str, payload: dict, key: str, stage: str):
+            try:
+                res = dispatcher.enqueue(path, payload, key)
+                details.append({"stage": stage, "key": key, **res})
+                if res.get("status") == "ENQUEUED":
+                    enqueued[stage] += 1
+                else:
+                    enqueued["already"] += 1
+            except Exception as exc:
+                enqueued["errors"] += 1
+                details.append({"stage": stage, "key": key, "status": "ERROR", "error": f"{type(exc).__name__}:{exc}"})
+
+        for source in sources:
+            add("/worker/source", {"source_id": source.source_id}, f"source:{source.source_id}:{bucket}", "source")
+        for company in domains:
+            lead_id = str(company.get("lead_id", ""))
+            if lead_id:
+                add("/worker/domain", {"lead_id": lead_id}, f"domain:{lead_id}:{bucket}", "domain")
+        for company in gates:
+            lead_id = str(company.get("lead_id", ""))
+            if lead_id:
+                add("/worker/gate", {"lead_id": lead_id}, f"gate:{lead_id}:{bucket}", "gate")
+
+        return {
+            "status": "DISPATCHED",
+            "lane": lane_key,
+            "candidates": {"source": len(sources), "domain": len(domains), "gate": len(gates)},
+            "enqueued": enqueued,
+            "details": details[:100],
+        }
+
+    def _backlog_snapshot(self) -> dict:
+        raw = self.sheets.read("LeadFactory_Raw!A2:R")
+        needs_domain = ready_growth = ready_mittel = 0
+        latest_raw = None
+        for r in raw:
+            padded = r + [""] * (18 - len(r))
+            intake = str(padded[17] or "").upper()
+            screening = str(padded[11] or "").upper()
+            if intake == "NEEDS_DOMAIN" and screening in {"", "PENDING"}:
+                needs_domain += 1
+            elif intake == "READY_FOR_GATE" and screening in {"", "PENDING"}:
+                ready_growth += 1
+            elif intake == "READY_FOR_MITTELSTAND_GATE" and screening in {"", "PENDING"}:
+                ready_mittel += 1
+            ts = _parse_iso(padded[9] if len(padded) > 9 else "")
+            if ts and (latest_raw is None or ts > latest_raw):
+                latest_raw = ts
+
+        sources = self.sheets.read("LeadFactory_Sources!A2:L")
+        source_work = 0
+        latest_source = None
+        for r in sources:
+            padded = r + [""] * (12 - len(r))
+            status = str(padded[9] or "").upper()
+            if status in {"", "DISCOVERED", "READY", "RETRY", "ERROR", "DEGRADED", "READY_FOR_CLOUD_SMOKE", "REPAIR_READY_FOR_CLOUD_SMOKE"}:
+                source_work += 1
+            ts = _parse_iso(padded[7] if len(padded) > 7 else "")
+            if ts and (latest_source is None or ts > latest_source):
+                latest_source = ts
+        return {
+            "needs_domain": needs_domain,
+            "ready_growth_gate": ready_growth,
+            "ready_mittelstand_gate": ready_mittel,
+            "source_work": source_work,
+            "latest_raw_at": latest_raw.isoformat() if latest_raw else "",
+            "latest_source_at": latest_source.isoformat() if latest_source else "",
+            "raw_total": len(raw),
+            "source_total": len(sources),
+            "promoted_total": self.sheets.count_promoted_leads(),
+        }
+
+    def _set_config_value(self, key: str, value: str) -> None:
+        rows = self.sheets.read("Config!A2:B200")
+        for row_number, row in enumerate(rows, start=2):
+            if row and str(row[0]) == str(key):
+                self.sheets.update_range(f"Config!B{row_number}", [[str(value)]])
+                return
+        self.sheets.append("Config", [str(key), str(value)])
+
+    def control_tick(self) -> dict:
+        """Stop only after the source frontier and all processing backlogs are genuinely quiet."""
+        if not self._enabled():
+            return {"status": "DISABLED", "reason": "Config.LEAD_FACTORY_ENABLED is FALSE"}
+        cfg = self._config()
+        quiet_minutes = int(cfg.get("AUTONOMY_EXHAUSTION_QUIET_MINUTES", os.getenv("LEAD_FACTORY_EXHAUSTION_QUIET_MINUTES", "180")) or 180)
+        snapshot = self._backlog_snapshot()
+        if snapshot["needs_domain"] or snapshot["ready_growth_gate"] or snapshot["ready_mittelstand_gate"] or snapshot["source_work"]:
+            return {"status": "RUNNING_BACKLOG", "quiet_minutes_required": quiet_minutes, **snapshot}
+        now = datetime.now(timezone.utc)
+        latest_times = [_parse_iso(snapshot.get("latest_raw_at", "")), _parse_iso(snapshot.get("latest_source_at", ""))]
+        latest_times = [x for x in latest_times if x is not None]
+        minutes_since_activity = min((now - max(latest_times)).total_seconds() / 60.0, 10**9) if latest_times else 10**9
+        if minutes_since_activity < quiet_minutes:
+            return {"status": "RUNNING_FRONTIER_QUIET_WINDOW", "minutes_since_activity": round(minutes_since_activity, 1), "quiet_minutes_required": quiet_minutes, **snapshot}
+
+        self._set_config_value("LEAD_FACTORY_ENABLED", "FALSE")
+        result = {
+            "status": "STOPPED_SOURCE_UNIVERSE_EXHAUSTED",
+            "minutes_since_activity": round(minutes_since_activity, 1),
+            "quiet_minutes_required": quiet_minutes,
+            **snapshot,
+        }
+        notice = self.notifier.notify(
+            subject="A-one Lead Factory stopped: source universe exhausted",
+            body=(
+                "Internal Lead Factory stopped after the source frontier and all internal backlogs remained empty.\n\n"
+                + json.dumps(result, ensure_ascii=False, indent=2)
+                + "\n\nNo customer-facing action was executed."
+            ),
+        )
+        return {**result, "notification": notice}
+
+    def deep_health(self) -> dict:
+        gate = self.gate_worker.loader.load()
+        task_ready = bool(os.getenv("LEAD_FACTORY_SERVICE_URL"))
+        return {
+            "ok": True,
+            "factory_enabled": self._enabled(),
+            "openai_key_present": bool(os.getenv("OPENAI_API_KEY")),
+            "gate_doc_id": gate.doc_id,
+            "gate_version": gate.version,
+            "task_service_url_present": task_ready,
+            "backlog": self._backlog_snapshot(),
+            "external_write": False,
+            "delete": False,
         }
 
     def evaluate_gate(self, company_context: dict) -> dict:
@@ -318,14 +610,5 @@ class StrictLeadFactory(BaseLeadFactory):
         return super().evaluate_gate(ctx)
 
     def evaluate_mittelstand(self, company_context: dict) -> dict:
-        verification = self.official_site_resolver.verify_existing(company_context)
-        if not verification.get("verified"):
-            return {
-                "run_id": f"mittel-preflight-{uuid.uuid4()}",
-                "final_result": "BLOCKED_UNVERIFIED_OFFICIAL_SITE",
-                "verification": verification,
-            }
-        ctx = dict(company_context)
-        ctx["domain"] = verification.get("official_domain", "")
-        ctx["website"] = verification.get("official_website", "")
-        return super().evaluate_mittelstand(ctx)
+        # The live target_screening_gate Doc declares both GROWTH and MITTELSTAND lanes.
+        return self.evaluate_gate(company_context)
