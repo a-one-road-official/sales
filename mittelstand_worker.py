@@ -9,10 +9,11 @@ from datetime import datetime, timezone
 class MittelstandWorker:
     """One-company mature-industrial screening with a fresh LLM context per call.
 
-    Formal decision is deterministic after the model returns M1/M2/M3 evidence states:
-      any FAIL -> NO
-      else any UNKNOWN -> UNKNOWN
-      else -> GO
+    Formal decision is deterministic from M2 revenue evidence only:
+      PASS -> GO
+      FAIL -> NO
+      UNKNOWN -> UNKNOWN
+    Employee count and Japan openness are retained as supplemental research fields.
     Supplemental routing can never overwrite the formal decision.
     """
 
@@ -82,13 +83,17 @@ class MittelstandWorker:
         return "UNKNOWN", "UNKNOWN"
 
     @staticmethod
-    def _final(m1: str, m2: str, m3: str) -> str:
-        states = [m1, m2, m3]
-        if "FAIL" in states:
+    def _final(m2: str) -> str:
+        """Formal Mittelstand eligibility is revenue-only.
+
+        M1 employee count and M3 Japan openness remain useful research signals,
+        but neither can block promotion or turn a company into NO.
+        """
+        if m2 == "FAIL":
             return "NO"
-        if "UNKNOWN" in states:
-            return "UNKNOWN"
-        return "GO"
+        if m2 == "PASS":
+            return "GO"
+        return "UNKNOWN"
 
     def evaluate_and_persist(self, company_context: dict) -> dict:
         gate_text, gate_version = self._load_text("MITTELSTAND_GATE_FILE_ID")
@@ -99,7 +104,7 @@ class MittelstandWorker:
         m2 = self._gate_state(data.get("M2", {}).get("result"))
         m3d = data.get("M3", {}) or {}
         m3, openness = self._enforce_m3(m3d)
-        final_result = self._final(m1, m2, m3)
+        final_result = self._final(m2)
 
         lead_id = str(company_context.get("lead_id", "")).strip()
         original_company = str(company_context.get("company_name", "")).strip()
