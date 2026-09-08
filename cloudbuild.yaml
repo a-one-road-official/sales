@@ -87,8 +87,19 @@ steps:
             --uri="$${URL}/supply/mittelstand" --http-method=POST --attempt-deadline=540s \
             --oidc-service-account-email="$${INVOKER}" --oidc-token-audience="$${URL}"
 
-        # Deployment does not activate the factory switch. Smoke is explicit and safe:
-        # POST /source/{source_id}/smoke while LEAD_FACTORY_ENABLED=FALSE.
+        # One-shot, idempotent full MAKTEK 2026 directory import. The endpoint performs
+        # public GETs plus internal Sheet writes only and is safe to rerun.
+        gcloud scheduler jobs describe lead-factory-maktek-full --location=${_REGION} >/dev/null 2>&1 && \
+          gcloud scheduler jobs update http lead-factory-maktek-full \
+            --location=${_REGION} --schedule="0 4 1 1 *" --time-zone="Asia/Tokyo" \
+            --uri="$${URL}/maktek/ingest" --http-method=POST --attempt-deadline=540s \
+            --oidc-service-account-email="$${INVOKER}" --oidc-token-audience="$${URL}" || \
+          gcloud scheduler jobs create http lead-factory-maktek-full \
+            --location=${_REGION} --schedule="0 4 1 1 *" --time-zone="Asia/Tokyo" \
+            --uri="$${URL}/maktek/ingest" --http-method=POST --attempt-deadline=540s \
+            --oidc-service-account-email="$${INVOKER}" --oidc-token-audience="$${URL}"
+
+        gcloud scheduler jobs run lead-factory-maktek-full --location=${_REGION}
         gcloud scheduler jobs run lead-factory-meta --location=${_REGION}
 
 images:
