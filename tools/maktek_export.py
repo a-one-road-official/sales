@@ -1,7 +1,6 @@
 import csv
 import json
 import re
-import sys
 import time
 from urllib.parse import urljoin
 
@@ -75,63 +74,103 @@ def parse_anchor(a, page_url: str):
     }
 
 
+def fetch_page(session, page):
+    url = BASE if page == 1 else f"{BASE}?page={page}"
+    best = []
+    for attempt in range(3):
+        try:
+            r = session.get(url, timeout=30)
+            r.raise_for_status()
+            soup = BeautifulSoup(r.text, "html.parser")
+            parsed = []
+            local_seen = set()
+            for a in soup.find_all("a"):
+                rec = parse_anchor(a, url)
+                if not rec:
+                    continue
+                key = normalize(rec["company_name"]).casefold()
+                if key in local_seen:
+                    continue
+                local_seen.add(key)
+                parsed.append(rec)
+            if len(parsed) > len(best):
+                best = parsed
+            if len(best) >= 12:
+                break
+        except requests.RequestException as exc:
+            print(f"page={page} attempt={attempt + 1} error={exc}", flush=True)
+        time.sleep(0.25 * (attempt + 1))
+    return best
+
+
 def main():
     session = requests.Session()
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (compatible; A-one-road-MAKTEK-export/1.0)"
+        "User-Agent": "Mozilla/5.0 (compatible; A-one-road-MAKTEK-export/1.1)"
     })
 
-    rows = []
-    seen = set()
-    empty_streak = 0
+    records = {}
     pages_scanned = 0
+    pass_summaries = []
 
-    for page in range(1, 121):
-        url = BASE if page == 1 else f"{BASE}?page={page}"
-        r = session.get(url, timeout=30)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
+    for pass_no in range(1, 5):
+        before = len(records)
+        empty_streak = 0
+        for page in range(1, 121):
+            page_rows = fetch_page(session, page)
+            pages_scanned = max(pages_scanned, page)
+            for rec in page_rows:
+                key = normalize(rec["company_name"]).casefold()
+                old = records.get(key)
+                if old is None or (not old.get("source_record_url") and rec.get("source_record_url")):
+                    records[key] = rec
 
-        page_rows = []
-        for a in soup.find_all("a"):
-            rec = parse_anchor(a, url)
-            if not rec:
-                continue
-            key = (
-                normalize(rec["company_name"]).casefold(),
-                normalize(rec["hall"]).casefold(),
-                normalize(rec["booth"]).casefold(),
+            print(
+                f"pass={pass_no} page={page} page_rows={len(page_rows)} union={len(records)}",
+                flush=True,
             )
-            if key in seen:
-                continue
-            seen.add(key)
-            page_rows.append(rec)
-            rows.append(rec)
 
-        pages_scanned = page
-        print(f"page={page} rows={len(page_rows)} total={len(rows)}", flush=True)
+            if page_rows:
+                empty_streak = 0
+            else:
+                empty_streak += 1
+                if page >= 80 and empty_streak >= 4:
+                    break
+            time.sleep(0.08)
 
-        if page_rows:
-            empty_streak = 0
-        else:
-            empty_streak += 1
-            if page > 1 and empty_streak >= 3:
-                break
-        time.sleep(0.15)
+        added = len(records) - before
+        pass_summaries.append({"pass": pass_no, "added": added, "total": len(records)})
+        print(f"pass={pass_no} added={added} total={len(records)}", flush=True)
+        if pass_no >= 2 and added == 0 and len(records) >= 1100:
+            break
 
-    if len(rows) < 500:
-        raise RuntimeError(f"Too few exhibitors parsed: {len(rows)}")
+    rows = sorted(records.values(), key=lambda r: normalize(r["company_name"]).casefold())
+    if len(rows) < 1100:
+        raise RuntimeError(f"Too few exhibitors parsed after reconciliation: {len(rows)}")
 
+    payload = {
+        "count": len(rows),
+        "pages_scanned": pages_scanned,
+        "passes": pass_summaries,
+        "rows": rows,
+    }
     with open("maktek_2026.json", "w", encoding="utf-8") as f:
-        json.dump({"count": len(rows), "pages_scanned": pages_scanned, "rows": rows}, f, ensure_ascii=False, indent=2)
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
-    fields = ["company_name", "country", "hall", "booth", "brands", "representatives", "source_page_url", "source_record_url"]
+    fields = [
+        "company_name", "country", "hall", "booth", "brands", "representatives",
+        "source_page_url", "source_record_url"
+    ]
     with open("maktek_2026.csv", "w", encoding="utf-8-sig", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields)
         w.writeheader()
         w.writerows(rows)
 
-    print(json.dumps({"count": len(rows), "pages_scanned": pages_scanned}, ensure_ascii=False))
+    print(json.dumps({
+        "count": len(rows),
+        "pages_scanned": pages_scanned,
+        "passes": pass_summaries,
+    }, ensure_ascii=False))
 
 
 if __name__ == "__main__":
