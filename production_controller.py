@@ -137,7 +137,7 @@ class QualifiedLeadProductionController:
         """Start the next JST production day after reporting the prior day."""
         previous_report = self._report(previous)
         now = datetime.now(UTC)
-        jst_now = now.astimezone(ZoneInfo("Asia/Tokyo"))
+        jst_now = now.astimezone(JST)
         next_deadline = (jst_now + timedelta(days=1)).replace(
             hour=23, minute=59, second=59, microsecond=0
         ).astimezone(UTC)
