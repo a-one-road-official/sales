@@ -56,3 +56,21 @@ Cloud Run request timeout and Scheduler attempt deadline are 540 seconds. Per-ti
 
 ## Deployment
 `cloudbuild.yaml` builds the container, deploys private Cloud Run, keeps the Meta watchdog, configures the two supply schedulers, and pauses the redundant daily scheduler. The current ChatGPT session can update Drive source/config but does not have authenticated Google Cloud control-plane access; deployment must be executed from a GCP-authorized environment.
+
+## Qualified Lead Production SLO
+
+A request such as “today +1,500 companies” is persisted as a daily production goal:
+POST /autonomy/start {"target":1500}.
+The controller records the SSOT baseline, deadline, current qualified additions,
+velocity, forecast, and backlog in the Config sheet. Every two minutes it checks
+the forecast and invokes capacity expansion when the target is at risk.
+
+Capacity changes may increase source frontier exploration, scraper activation,
+crawl throughput, domain workers, and Gate workers. The authoritative Gate,
+official-first-party URL requirement, deduplication rules, and human-facing SSOT
+remain fixed. A source failure is isolated to that source and recorded for
+retry; it cannot terminate the entire production loop.
+
+The loop stops on an explicit user stop or after the deadline finalization. It
+sends an internal result report to admin@a1-road.com. Customer-facing actions
+remain in the approval queue and are never sent autonomously.
