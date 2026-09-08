@@ -132,14 +132,23 @@ class LeadFactory:
             reason="N3 public-web source discovery only; no Gmail/Calendar access.",
         )
         cfg = self._config()
+        from source_universe import for_lane as bootstrap_sources
+        bootstrap = bootstrap_sources(lane)
         if lane == "MITTELSTAND":
             limit = int(cfg.get("MITTELSTAND_SOURCE_DISCOVERY_LIMIT", "6") or 6)
             policy_file_id = cfg.get("MITTELSTAND_DISCOVERY_POLICY_FILE_ID", "").strip()
             policy_text = self.drive.read_text(policy_file_id) if policy_file_id else ""
-            candidates = self.llm.discover_mittelstand_sources(policy_text, limit=max(0, limit))
+            try:
+                discovered = self.llm.discover_mittelstand_sources(policy_text, limit=max(0, limit))
+            except Exception:
+                discovered = []
         else:
             limit = int(cfg.get("GROWTH_SOURCE_DISCOVERY_LIMIT", "6") or 6)
-            candidates = self.llm.discover_sources(limit=max(0, limit))
+            try:
+                discovered = self.llm.discover_sources(limit=max(0, limit))
+            except Exception:
+                discovered = []
+        candidates = bootstrap + list(discovered)
 
         added, rejected, existing = [], 0, 0
         for c in candidates:
