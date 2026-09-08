@@ -20,6 +20,11 @@ class Settings:
     max_response_bytes: int = int(os.getenv("LEAD_FACTORY_MAX_RESPONSE_BYTES", str(8 * 1024 * 1024)))
     max_records_per_run: int = int(os.getenv("LEAD_FACTORY_MAX_RECORDS_PER_RUN", "100000"))
     repair_backoff_seconds: int = int(os.getenv("LEAD_FACTORY_REPAIR_BACKOFF_SECONDS", "5"))
+    autonomy_mode: str = os.getenv("LEAD_FACTORY_AUTONOMY_MODE", "UNTIL_TARGET")
+    autonomy_target_new_companies: int = int(os.getenv("LEAD_FACTORY_TARGET_NEW_COMPANIES", "200"))
+    autonomy_start_promoted: int = int(os.getenv("LEAD_FACTORY_AUTONOMY_START_PROMOTED", "23"))
+    autonomy_stop_after_zero_runs: int = int(os.getenv("LEAD_FACTORY_STOP_AFTER_ZERO_PROMOTION_RUNS", "3"))
+    autonomy_notify_email: str = os.getenv("LEAD_FACTORY_AUTONOMY_NOTIFY_EMAIL", "admin@a1-road.com")
     enable_browser_probe: bool = os.getenv("LEAD_FACTORY_ENABLE_BROWSER_PROBE", "TRUE").upper() == "TRUE"
     allow_external_write: bool = False
     allow_delete: bool = False
