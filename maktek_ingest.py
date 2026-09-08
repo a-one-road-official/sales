@@ -1,0 +1,336 @@
+from __future__ import annotations
+
+import hashlib
+import re
+from datetime import datetime, timezone
+from urllib.parse import urljoin
+
+from bs4 import BeautifulSoup
+
+from safe_fetch import TrustedFetcher
+
+
+BASE_URL = "https://www.maktekfuari.com/en/exhibitor-list"
+SOURCE_ID = "source-maktek-eurasia-2026"
+SOURCE_NAME = "MAKTEK Eurasia 2026"
+SOURCE_TAG = "MAKTEK2026"
+
+COUNTRIES = [
+    "Bi̇rleşi̇k Arap Emi̇rli̇kleri̇", "Republic Of Korea", "Czech Republic",
+    "United States", "United Kingdom", "South Korea", "G.kibris", "Netherlands",
+    "Switzerland", "Bulgari̇stan", "Hi̇ndi̇stan", "İngi̇ltere", "Türki̇ye",
+    "Australia", "Austria", "Belgium", "Bulgaria", "Canada", "China", "Finland",
+    "France", "Germany", "Hungary", "India", "Israel", "Italy", "Japan", "Malaysia",
+    "Poland", "Portugal", "Romania", "Spain", "Sweden", "Tayvan", "Türkiye",
+]
+
+COUNTRY_NORMALIZATION = {
+    "Türki̇ye": "Türkiye",
+    "Tayvan": "Taiwan",
+    "Hi̇ndi̇stan": "India",
+    "İngi̇ltere": "United Kingdom",
+    "Bulgari̇stan": "Bulgaria",
+    "Bi̇rleşi̇k Arap Emi̇rli̇kleri̇": "United Arab Emirates",
+    "Republic Of Korea": "South Korea",
+    "G.kibris": "Northern Cyprus",
+}
+
+
+def _norm(value: str) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _clean_company(value: str) -> str:
+    name = re.sub(r"\s+", " ", str(value or "")).strip()
+    # The directory sometimes prefixes a two-letter index token (e.g. "ER ERİŞ", "DÜ DÜNYA").
+    m = re.match(r"^([A-ZÇĞİÖŞÜ]{2})\s+(.+)$", name)
+    if m:
+        token, rest = m.group(1), m.group(2)
+        if rest.upper().startswith(token):
+            name = rest
+    return name
+
+
+def _parse_country(prefix: str) -> tuple[str, str]:
+    for country in sorted(COUNTRIES, key=len, reverse=True):
+        matches = list(re.finditer(rf"\s{re.escape(country)}(?=\s+(?:Brands|Representatives)|$)", prefix, flags=re.I))
+        if matches:
+            m = matches[-1]
+            return _clean_company(prefix[: m.start()]), COUNTRY_NORMALIZATION.get(country, country)
+    return _clean_company(prefix), ""
+
+
+def parse_exhibitors(html: str, page_url: str) -> list[dict]:
+    soup = BeautifulSoup(html or "", "html.parser")
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for a in soup.find_all("a", href=True):
+        text = re.sub(r"\s+", " ", " ".join(a.stripped_strings)).strip()
+        low = text.lower()
+        href = str(a.get("href") or "")
+        if "review in detail" not in low or "hall:" not in low or "booth:" not in low:
+            continue
+        if "/exhibitor-list/" not in href:
+            continue
+        review_pos = low.find("review in detail")
+        prefix = text[:review_pos].strip()
+        # Everything after company+country is optional brand/representative metadata.
+        prefix = re.split(r"\s+(?:Brands|Representatives)\s+", prefix, maxsplit=1, flags=re.I)[0].strip()
+        company, country = _parse_country(prefix)
+        if not company:
+            continue
+        locations = re.findall(
+            r"Hall:\s*([^\s]+(?:\s*/\s*[^\s]+)?)\s+Booth:\s*(.+?)(?=(?:\s+Hall:)|$)",
+            text[review_pos:],
+            flags=re.I,
+        )
+        location_text = " / ".join(f"Hall {h.strip()} Booth {b.strip()}" for h, b in locations)
+        key = _norm(company)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            {
+                "company_name": company,
+                "hq_country": country,
+                "source_record_url": urljoin(page_url, href),
+                "source_page_url": page_url,
+                "location": location_text,
+            }
+        )
+    return rows
+
+
+def _max_page(html: str) -> int:
+    soup = BeautifulSoup(html or "", "html.parser")
+    pages = []
+    for a in soup.find_all("a", href=True):
+        m = re.search(r"[?&]page=(\d+)", str(a.get("href") or ""))
+        if m:
+            pages.append(int(m.group(1)))
+    return max(pages or [1])
+
+
+class MaktekIngestor:
+    """One-shot idempotent full-directory ingest for MAKTEK Eurasia 2026.
+
+    This is internal-only. It performs public GETs and writes only to A-one's Sheets SSOT.
+    It never sends customer-facing messages or invokes external write APIs.
+    """
+
+    def __init__(self, sheets):
+        self.sheets = sheets
+
+    def _fetch_all(self) -> tuple[list[dict], int]:
+        cfg = self.sheets.get_config()
+        fetcher = TrustedFetcher(
+            source_url=BASE_URL,
+            rps=float(cfg.get("LEAD_FACTORY_SOURCE_RPS", "0.5") or 0.5),
+            max_requests=min(200, int(cfg.get("LEAD_FACTORY_MAX_REQUESTS_PER_RUN", "3000") or 3000)),
+            max_bytes=2_000_000,
+        )
+        first = fetcher.fetch(BASE_URL)
+        if first.status_code >= 400:
+            raise RuntimeError(f"maktek_http_{first.status_code}")
+        page_count = _max_page(first.text)
+        # The live site has changed page count while exhibitors are still being added.
+        # Crawl the discovered range and continue until three consecutive empty pages,
+        # capped at 150 to make the one-shot bounded.
+        records: dict[str, dict] = {}
+        empty_streak = 0
+        final_page = max(1, page_count)
+        for page in range(1, min(150, page_count + 4) + 1):
+            if page == 1:
+                snap = first
+                page_url = BASE_URL
+            else:
+                page_url = f"{BASE_URL}?page={page}"
+                snap = fetcher.fetch(page_url)
+            if snap.status_code >= 400:
+                if page <= page_count:
+                    raise RuntimeError(f"maktek_page_{page}_http_{snap.status_code}")
+                empty_streak += 1
+                if empty_streak >= 3:
+                    break
+                continue
+            parsed = parse_exhibitors(snap.text, page_url)
+            if parsed:
+                empty_streak = 0
+                final_page = max(final_page, page)
+                for rec in parsed:
+                    records.setdefault(_norm(rec["company_name"]), rec)
+            else:
+                empty_streak += 1
+                if page > page_count and empty_streak >= 3:
+                    break
+        if len(records) < 500:
+            raise RuntimeError(f"maktek_coverage_too_low:{len(records)}:pages={final_page}")
+        return list(records.values()), final_page
+
+    def _append_raw(self, records: list[dict], sales_names: set[str]) -> tuple[int, int]:
+        headers_rows = self.sheets.read("LeadFactory_Raw!1:1")
+        if not headers_rows:
+            raise RuntimeError("missing_header:LeadFactory_Raw")
+        headers = headers_rows[0]
+        existing = self.sheets.read("LeadFactory_Raw!A2:G")
+        existing_maktek = {
+            _norm((r + [""] * 7)[1])
+            for r in existing
+            if str((r + [""] * 7)[6]).strip() == SOURCE_NAME
+        }
+        now = datetime.now(timezone.utc).isoformat()
+        new_rows = []
+        skipped = 0
+        for rec in records:
+            key = _norm(rec["company_name"])
+            if key in existing_maktek:
+                skipped += 1
+                continue
+            lead_id = "lead-maktek2026-" + hashlib.sha256(key.encode()).hexdigest()[:20]
+            row = {
+                "lead_id": lead_id,
+                "company_name": rec["company_name"],
+                "domain": "",
+                "website": "",
+                "hq_country": rec.get("hq_country", ""),
+                "source_type": "EXHIBITION",
+                "source_name": SOURCE_NAME,
+                "source_url": BASE_URL,
+                "source_record_url": rec.get("source_record_url") or rec.get("source_page_url") or BASE_URL,
+                "discovered_at": now,
+                "last_seen_at": now,
+                "screening_status": "PENDING",
+                "normalized_domain": "",
+                "duplicate_state": "EXISTS_IN_SALES" if key in sales_names else "NEW",
+                "intake_status": "NEEDS_DOMAIN",
+                "job_id": "maktek2026-full-ingest",
+                "run_id": "maktek2026-full-ingest",
+                "worker": "deterministic_maktek_ingestor",
+                "checkpoint": "FULL_DIRECTORY_CAPTURED",
+            }
+            new_rows.append([row.get(h, "") for h in headers])
+        if new_rows:
+            self.sheets.svc.spreadsheets().values().append(
+                spreadsheetId=self.sheets.spreadsheet_id,
+                range="LeadFactory_Raw!A:ZZ",
+                valueInputOption="RAW",
+                insertDataOption="INSERT_ROWS",
+                body={"values": new_rows},
+            ).execute()
+        return len(new_rows), skipped
+
+    def _upsert_human(self, records: list[dict]) -> tuple[int, int]:
+        sheet = "営業リスト＿Factory/BPO"
+        headers_rows = self.sheets.read(f"'{sheet}'!1:1")
+        if not headers_rows:
+            raise RuntimeError(f"missing_header:{sheet}")
+        headers = headers_rows[0]
+        hidx = {str(h): i for i, h in enumerate(headers) if h}
+        existing_rows = self.sheets.read(f"'{sheet}'!A2:Z")
+        existing_by_name: dict[str, tuple[int, list[str]]] = {}
+        for row_number, r in enumerate(existing_rows, start=2):
+            if not r:
+                continue
+            name = str(r[0] or "").strip()
+            if name:
+                existing_by_name.setdefault(_norm(name), (row_number, r + [""] * (26 - len(r))))
+
+        new_dicts = []
+        updates = []
+        today = datetime.now(timezone.utc).date().isoformat()
+        for rec in records:
+            key = _norm(rec["company_name"])
+            loc = str(rec.get("location") or "").strip()
+            note = f"{SOURCE_TAG} exhibitor" + (f" / {loc}" if loc else "")
+            current = existing_by_name.get(key)
+            if current:
+                row_number, existing = current
+                # Preserve Status and human-owned fields; only augment provenance/note fields.
+                for header, value in (
+                    ("source", SOURCE_TAG),
+                    ("selection_reason", note),
+                    ("japan_opportunity_note", SOURCE_TAG),
+                    ("record_origin", "LeadFactory"),
+                ):
+                    idx = hidx.get(header)
+                    if idx is None:
+                        continue
+                    old = str(existing[idx] if idx < len(existing) else "").strip()
+                    merged = old if SOURCE_TAG.lower() in old.lower() else (f"{old} | {value}" if old else value)
+                    if merged != old:
+                        col = self.sheets._column_letter(idx + 1)
+                        updates.append({"range": f"'{sheet}'!{col}{row_number}", "values": [[merged]]})
+                for header, value in (("hq_country", rec.get("hq_country", "")), ("country", rec.get("hq_country", ""))):
+                    idx = hidx.get(header)
+                    if idx is None or not value:
+                        continue
+                    old = str(existing[idx] if idx < len(existing) else "").strip()
+                    if not old:
+                        col = self.sheets._column_letter(idx + 1)
+                        updates.append({"range": f"'{sheet}'!{col}{row_number}", "values": [[value]]})
+                continue
+
+            new_dicts.append(
+                {
+                    "company_name": rec["company_name"],
+                    "Status": "未接触",
+                    "ステータス理由": note,
+                    "hq_country": rec.get("hq_country", ""),
+                    "source": SOURCE_TAG,
+                    "added_at": today,
+                    "selection_reason": note,
+                    "record_origin": "LeadFactory",
+                    "japan_opportunity_note": SOURCE_TAG,
+                    "country": rec.get("hq_country", ""),
+                }
+            )
+
+        # Batch-update existing records in bounded chunks.
+        for start in range(0, len(updates), 400):
+            self.sheets.svc.spreadsheets().values().batchUpdate(
+                spreadsheetId=self.sheets.spreadsheet_id,
+                body={"valueInputOption": "RAW", "data": updates[start : start + 400]},
+            ).execute()
+
+        # Append all genuinely new companies in one request. Their provenance is explicit and
+        # Status starts at 未接触, matching the user's requested human-facing inventory semantics.
+        if new_dicts:
+            new_rows = [[row.get(h, "") for h in headers] for row in new_dicts]
+            self.sheets.svc.spreadsheets().values().append(
+                spreadsheetId=self.sheets.spreadsheet_id,
+                range=f"'{sheet}'!A:ZZ",
+                valueInputOption="RAW",
+                insertDataOption="INSERT_ROWS",
+                body={"values": new_rows},
+            ).execute()
+        return len(new_dicts), len(records) - len(new_dicts)
+
+    def run(self) -> dict:
+        records, pages = self._fetch_all()
+        sales_rows = self.sheets.read("'営業リスト＿Factory/BPO'!A2:A")
+        sales_names = {_norm(r[0]) for r in sales_rows if r and str(r[0] or "").strip()}
+        raw_new, raw_existing = self._append_raw(records, sales_names)
+        human_new, human_existing = self._upsert_human(records)
+        self.sheets.update_source_crawl_state(
+            SOURCE_ID,
+            crawl_status="CRAWLED_FULL",
+            exhibitor_count=len(records),
+            last_error="",
+        )
+        now = datetime.now(timezone.utc).isoformat()
+        self.sheets.append("LeadFactory_RunLog", [
+            f"run-maktek2026-full-{now}", now, now, "MAKTEK_FULL_INGEST",
+            0, raw_new, raw_existing, 0, 0, 0, 0, human_new, 0, SOURCE_TAG,
+            "maktek2026-full-ingest", "maktek2026-full-ingest", "deterministic_maktek_ingestor", "FULL_DIRECTORY_CAPTURED",
+        ])
+        return {
+            "status": "PASS",
+            "source": SOURCE_TAG,
+            "pages_crawled": pages,
+            "official_exhibitors": len(records),
+            "raw_new": raw_new,
+            "raw_existing": raw_existing,
+            "human_new": human_new,
+            "human_existing_updated_or_preserved": human_existing,
+            "customer_facing_action": False,
+        }
