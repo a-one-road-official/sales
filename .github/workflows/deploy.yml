@@ -148,7 +148,16 @@ jobs:
           gcloud scheduler jobs run lead-factory-mittelstand-supply --location=${REGION} --project=${PROJECT}
           gcloud scheduler jobs run lead-factory-growth-supply --location=${REGION} --project=${PROJECT}
 
-          echo "Cloud Run URL: ${URL}"
+          echo "Cloud Run URL: ${URL}
+
+          TOKEN="$(gcloud auth print-identity-token --audiences="${URL}")"
+          for PATH in healthz supply/mittelstand supply/growth; do
+            echo "Direct smoke: ${PATH}"
+            curl --fail-with-body --silent --show-error --max-time 90 \
+              -H "Authorization: Bearer ${TOKEN}" \
+              -X POST "${URL}/${PATH}" || true
+            echo
+          done
 
       - name: Verify autonomous schedulers
         run: |
