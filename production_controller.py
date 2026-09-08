@@ -42,7 +42,7 @@ class QualifiedLeadProductionController:
         return self.sheets.get_config()
 
     def _set_config(self, values: dict[str, Any]) -> None:
-        rows = self.sheets.read("Config!A2:B100")
+        rows = self.sheets.read("Config!A2:B1000")
         positions = {str(r[0]): i for i, r in enumerate(rows, start=2) if len(r) >= 1 and r[0]}
         for key, value in values.items():
             rendered = str(value)
