@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from gate_worker import GateWorker
+from mittelstand_worker import MittelstandWorker
 from orchestrator import LeadFactory as BaseLeadFactory
 from safe_fetch import TrustedFetcher
 from source_universe import for_lane as bootstrap_sources_for_lane
@@ -253,24 +254,61 @@ class StrictGateWorker(GateWorker):
 
 
 class UnifiedMittelstandWorker:
-    """Compatibility adapter: acquisition lanes differ; the live G1-G6 Doc is shared."""
+    """Strict official-domain verification followed by the separate revenue Gate."""
 
-    def __init__(self, worker: StrictGateWorker):
-        self.worker = worker
+    def __init__(self, sheets, drive, llm, resolver: OfficialSiteResolver):
+        self.sheets = sheets
+        self.drive = drive
+        self.llm = llm
+        self.resolver = resolver
+        self.formal_gate = MittelstandWorker(sheets, drive, llm)
+
+    def process_one(self, company: dict) -> dict:
+        verification = self.resolver.verify_existing(company)
+        if not verification.get("verified"):
+            row = int(company.get("row_number") or 0)
+            if row > 0:
+                self.sheets.update_range(f"LeadFactory_Raw!C{row}:D{row}", [["", ""]])
+                self.sheets.update_range(f"LeadFactory_Raw!R{row}", [["NEEDS_DOMAIN"]])
+            return {"lead_id": company.get("lead_id", ""), "final_result": "REQUEUED_NEEDS_OFFICIAL_SITE"}
+        canonical = dict(company)
+        canonical["domain"] = verification.get("official_domain", "")
+        canonical["website"] = verification.get("official_website", "")
+        return self.formal_gate.evaluate_and_persist(canonical)
 
     def process_pending(self, limit: int = 20) -> dict:
-        return self.worker.process_pending(limit=limit, lane="MITTELSTAND")
+        pending = self.sheets.list_pending_mittelstand(limit=limit)
+        results = []
+        for company in pending:
+            try:
+                results.append(self.process_one(company))
+            except Exception as exc:
+                results.append({
+                    "lead_id": company.get("lead_id", ""),
+                    "company_name": company.get("company_name", ""),
+                    "final_result": "ERROR",
+                    "error": f"{type(exc).__name__}:{exc}",
+                })
+        return {
+            "requested": limit,
+            "processed": len(results),
+            "GO": sum(1 for r in results if r.get("final_result") == "GO"),
+            "UNKNOWN": sum(1 for r in results if r.get("final_result") == "UNKNOWN"),
+            "NO": sum(1 for r in results if r.get("final_result") == "NO"),
+            "REQUEUED": sum(1 for r in results if r.get("final_result") == "REQUEUED_NEEDS_OFFICIAL_SITE"),
+            "ERROR": sum(1 for r in results if r.get("final_result") == "ERROR"),
+            "results": results,
+        }
 
     def evaluate_and_persist(self, company_context: dict) -> dict:
-        return self.worker.evaluate_and_persist(company_context)
-
+        return self.process_one(company_context)
 
 class StrictLeadFactory(BaseLeadFactory):
     def __init__(self, settings):
         super().__init__(settings)
         self.official_site_resolver = OfficialSiteResolver(self.sheets, self.llm)
         self.gate_worker = StrictGateWorker(self.sheets, self.drive, self.llm, self.official_site_resolver)
-        self.mittelstand_worker = UnifiedMittelstandWorker(self.gate_worker)
+        self.mittelstand_worker = UnifiedMittelstandWorker(self.sheets, self.drive, self.llm, self.official_site_resolver)
 
     def _frontier_candidates(self, lane: str, limit: int) -> list[dict]:
         lane_key = str(lane or "").strip().upper()
@@ -509,6 +547,8 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
         screening = str(company.get("screening_status", "")).upper()
         if intake not in {"READY_FOR_GATE", "READY_FOR_MITTELSTAND_GATE"} or screening not in {"", "PENDING"}:
             return {"status": "NOOP_ALREADY_ADVANCED", "lead_id": lead_id, "intake_status": intake, "screening_status": screening}
+        if intake == "READY_FOR_MITTELSTAND_GATE":
+            return self.mittelstand_worker.process_one(company)
         return self.gate_worker.process_company(company)
 
     def dispatch_lane(self, lane: str) -> dict:
@@ -674,5 +714,4 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
         return super().evaluate_gate(ctx)
 
     def evaluate_mittelstand(self, company_context: dict) -> dict:
-        # The live target_screening_gate Doc declares both GROWTH and MITTELSTAND lanes.
-        return self.evaluate_gate(company_context)
+        return self.mittelstand_worker.evaluate_and_persist(company_context)
