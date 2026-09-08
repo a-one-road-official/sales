@@ -6,6 +6,7 @@ from typing import Any
 
 
 UTC = timezone.utc
+JST = timezone(timedelta(hours=9))
 GOAL_KEYS = {
     "target": "LEAD_FACTORY_GOAL_TARGET",
     "start_at": "LEAD_FACTORY_GOAL_START_AT",
@@ -106,7 +107,7 @@ class QualifiedLeadProductionController:
         if int(target) <= 0:
             raise ValueError("goal_target_must_be_positive")
         now = datetime.now(UTC)
-        end = deadline or now.astimezone(ZoneInfo("Asia/Tokyo")).replace(hour=23, minute=59, second=59, microsecond=0).astimezone(UTC)
+        end = deadline or now.astimezone(JST).replace(hour=23, minute=59, second=59, microsecond=0).astimezone(UTC)
         baseline = self._ssot_count()
         self._set_config({
             GOAL_KEYS["target"]: int(target),
@@ -181,4 +182,3 @@ class QualifiedLeadProductionController:
         return status
 
 
-from zoneinfo import ZoneInfo
