@@ -42,11 +42,6 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Verify OpenAI runtime secret
-        run: |
-          gcloud secrets describe "$OPENAI_SECRET" --project="$PROJECT" >/dev/null
-          echo "Verified OpenAI secret: $OPENAI_SECRET"
-
       - name: Generate internal runtime token
         run: |
           TOKEN="$(openssl rand -hex 32)"
