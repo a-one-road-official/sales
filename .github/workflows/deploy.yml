@@ -44,9 +44,14 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Enable Sheets API
+      - name: Enable required APIs
         run: |
-          gcloud services enable sheets.googleapis.com \
+          gcloud services enable \
+            sheets.googleapis.com \
+            run.googleapis.com \
+            artifactregistry.googleapis.com \
+            secretmanager.googleapis.com \
+            cloudscheduler.googleapis.com \
             --project=${{ secrets.GCP_PROJECT_ID }}
 
       - name: Ingest full MAKTEK 2026 exhibitor directory
@@ -79,17 +84,89 @@ jobs:
               raise SystemExit(f"MAKTEK ingest incomplete: {result}")
           PY
 
-      - name: Bootstrap Cloud Build API
-        continue-on-error: true
+      - name: Configure Docker auth
         run: |
-          gcloud services enable cloudbuild.googleapis.com \
+          gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
+
+      - name: Ensure Artifact Registry
+        run: |
+          gcloud artifacts repositories describe aone-lead-factory \
+            --location=asia-northeast1 \
+            --project=${{ secrets.GCP_PROJECT_ID }} >/dev/null 2>&1 || \
+          gcloud artifacts repositories create aone-lead-factory \
+            --repository-format=docker \
+            --location=asia-northeast1 \
+            --description="A-one Lead Factory images" \
             --project=${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Deploy production runtime and schedulers
-        continue-on-error: true
+      - name: Build Docker image
         run: |
-          gcloud builds submit \
-            --project=${{ secrets.GCP_PROJECT_ID }} \
+          docker build -t asia-northeast1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/aone-lead-factory/aone-lead-factory:${{ github.sha }} .
+
+      - name: Push Docker image
+        run: |
+          docker push asia-northeast1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/aone-lead-factory/aone-lead-factory:${{ github.sha }}
+
+      - name: Deploy Cloud Run
+        run: |
+          gcloud run deploy aone-lead-factory \
+            --image=asia-northeast1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/aone-lead-factory/aone-lead-factory:${{ github.sha }} \
             --region=asia-northeast1 \
-            --config=cloudbuild.yaml \
-            .
+            --platform=managed \
+            --service-account=aone-lead-factory-deployer@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com \
+            --no-allow-unauthenticated \
+            --timeout=540 \
+            --project=${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Configure autonomous schedulers
+        run: |
+          PROJECT=${{ secrets.GCP_PROJECT_ID }}
+          REGION=asia-northeast1
+          SERVICE=aone-lead-factory
+          INVOKER=aone-lead-factory-deployer@${PROJECT}.iam.gserviceaccount.com
+          URL="$(gcloud run services describe ${SERVICE} --region=${REGION} --project=${PROJECT} --format='value(status.url)')"
+
+          gcloud run services add-iam-policy-binding ${SERVICE} \
+            --region=${REGION} \
+            --project=${PROJECT} \
+            --member="serviceAccount:${INVOKER}" \
+            --role=roles/run.invoker
+
+          gcloud scheduler jobs pause lead-factory-daily \
+            --location=${REGION} --project=${PROJECT} >/dev/null 2>&1 || true
+
+          upsert_job () {
+            NAME="$1"
+            SCHEDULE="$2"
+            URI="$3"
+            if gcloud scheduler jobs describe "$NAME" --location=${REGION} --project=${PROJECT} >/dev/null 2>&1; then
+              gcloud scheduler jobs update http "$NAME" \
+                --location=${REGION} \
+                --project=${PROJECT} \
+                --schedule="$SCHEDULE" \
+                --time-zone="Asia/Tokyo" \
+                --uri="$URI" \
+                --http-method=POST \
+                --attempt-deadline=540s \
+                --oidc-service-account-email="${INVOKER}" \
+                --oidc-token-audience="${URL}"
+            else
+              gcloud scheduler jobs create http "$NAME" \
+                --location=${REGION} \
+                --project=${PROJECT} \
+                --schedule="$SCHEDULE" \
+                --time-zone="Asia/Tokyo" \
+                --uri="$URI" \
+                --http-method=POST \
+                --attempt-deadline=540s \
+                --oidc-service-account-email="${INVOKER}" \
+                --oidc-token-audience="${URL}"
+            fi
+          }
+
+          upsert_job lead-factory-meta "*/2 * * * *" "${URL}/meta/tick"
+          upsert_job lead-factory-growth-supply "*/10 * * * *" "${URL}/supply/growth"
+          upsert_job lead-factory-mittelstand-supply "2-59/10 * * * *" "${URL}/supply/mittelstand"
+
+          echo "Cloud Run URL: ${URL}"
+          gcloud scheduler jobs list --location=${REGION} --project=${PROJECT} --filter='name:lead-factory' --format='table(name,state,schedule,httpTarget.uri)'
