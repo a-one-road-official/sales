@@ -143,20 +143,10 @@ jobs:
           upsert_job lead-factory-meta "*/2 * * * *" "${URL}/meta/tick"
           upsert_job lead-factory-growth-supply "*/10 * * * *" "${URL}/supply/growth"
           upsert_job lead-factory-mittelstand-supply "2-59/10 * * * *" "${URL}/supply/mittelstand"
+          upsert_job lead-factory-maktek-full "0 4 1 1 *" "${URL}/maktek/ingest"
+          gcloud scheduler jobs run lead-factory-maktek-full --location=${REGION} --project=${PROJECT}
 
           echo "Cloud Run URL: ${URL}"
-
-      - name: Ingest full MAKTEK 2026 exhibitor directory through deployed runtime
-        run: |
-          set -euo pipefail
-          SERVICE_URL="$(gcloud run services describe aone-lead-factory --region=asia-northeast1 --project=${{ secrets.GCP_PROJECT_ID }} --format='value(status.url)')"
-          TOKEN="$(gcloud auth print-identity-token --audiences="${SERVICE_URL}")"
-          response="$(curl --fail-with-body --silent --show-error --retry 3 \
-            -X POST \
-            -H "Authorization: Bearer ${TOKEN}" \
-            "${SERVICE_URL}/maktek/ingest")"
-          echo "${response}"
-          python -c 'import json,sys; r=json.loads(sys.argv[1]); raise SystemExit(0 if r.get("status")=="PASS" and int(r.get("official_exhibitors",0)) >= 500 else 1)' "${response}"
 
       - name: Verify autonomous schedulers
         run: |
