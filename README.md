@@ -1,58 +1,73 @@
 # A-one Lead Factory
 
 ## Why
-Keep qualified outbound inventory growing while the owner is away:
+Keep qualified outbound inventory growing continuously while the owner is offline.
 
-`source discovery -> company extraction -> domain/research -> Gate -> qualified SSOT -> contact research -> email draft -> READY -> HUMAN APPROVAL`
+`source frontier -> scraper build/test/smoke -> mass raw capture -> official-site resolution -> live Gate -> SSOT -> contact/draft -> READY -> HUMAN APPROVAL`
+
+The human control plane is ChatGPT / ChatGPT Work. GitHub is the code SSOT, Google Drive holds the human-editable policy/prompt SSOTs, Google Sheets holds CRM/state, and Google Cloud is the unattended runtime.
 
 ## Hard invariants
 - `LEAD_FACTORY_ALLOW_DELETE=FALSE`
 - `LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE`
-- No Gmail send path in the runtime.
 - Customer-facing execution stops in `LeadFactory_ApprovalQueue` with `requires_human_approval=TRUE` and `execution_allowed=FALSE`.
 - Generated scraper code has no network access; trusted fetchers own network I/O.
-- Generated adapters must pass S1-S7 before runtime use.
-- Gate rules are loaded from their Drive SSOT and may not be replaced by code-owned criteria.
+- Generated adapters pass S1-S7 and then a deployed Cloud smoke before production activation.
+- A company must have a verified first-party website before Gate evaluation.
+- Existing human CRM status is preserved; new qualified rows start at `未接触`.
+
+## Single sources of truth
+- Code/deployment: GitHub `a-one-road-official/sales` / `main`
+- Human sales SSOT: `営業リスト 最新版連携用` -> `営業リスト＿Factory/BPO`
+- Selection **and discovery** policy: Google Doc `target_screening_gate`
+- Outreach copy policy: Google Doc `outreach_prompt_production_v1`
+- Runtime switch/state: Sheet `Config`
+
+`target_screening_gate` is loaded live for every company. AI/web search may collect factual evidence; Python applies the Doc's G1-G6 rules deterministically. The runtime owns no independent eligibility criteria.
+
+## Autonomous source frontier
+The factory cold-starts from high-yield official industrial universes such as VDMA/VDW and large industrial exhibition directories. Every discovery cycle also uses public-web search to find adjacent official associations, exhibitions, clusters, exporter/company directories and recurring funding feeds, excluding already-known sources.
+
+A new source follows this path automatically:
+
+`DISCOVERED -> probe -> adapter generation -> S1-S7 -> READY_FOR_CLOUD_SMOKE -> cloud smoke -> ACTIVE -> full crawl`
+
+Runtime failures trigger adapter repair and the same smoke gate before reactivation.
+
+## Parallel processing
+Google Cloud Tasks is the work queue. Each source/company is an independent authenticated job:
+
+- `/worker/source` — one source crawl/build/repair
+- `/worker/domain` — one company official-site resolution
+- `/worker/gate` — one company fresh-context research + deterministic live-Doc Gate
+
+Schedulers only replenish the source frontier and fan work into the queue. Cloud Run scales the independent jobs horizontally; the 540-second monolithic supply request is no longer the production bottleneck.
 
 ## Production loops
-Two Cloud Scheduler jobs run bounded end-to-end lanes.
+- Source discovery, Growth: every 5 minutes
+- Source discovery, Mittelstand: every 5 minutes, offset by 2 minutes
+- Worker dispatch, Growth: every minute
+- Worker dispatch, Mittelstand: every minute
+- Promotion to human SSOT: every minute
+- Contact/email READY preparation: every 5 minutes
+- Exhaustion controller: every 10 minutes
+- Meta watchdog: every 2 minutes
 
-### Growth
-`POST /supply/growth` every 10 minutes.
+Legacy bounded `/supply/growth` and `/supply/mittelstand` endpoints remain for debugging/backward compatibility; their Scheduler jobs are paused in production.
 
-Exhibition/company directories are the primary source. When a cycle yields no new source and no new raw lead, funding/news discovery supplies newly funded industrial/deeptech companies.
+## Stop condition
+The factory does not stop because a few runs promoted zero companies and it does not stop after an arbitrary target such as 200 rows.
 
-### Mittelstand
-`POST /supply/mittelstand` every 10 minutes, offset by 2 minutes.
+Automatic stop requires all of the following:
+1. no unresolved official-domain backlog,
+2. no pending Growth Gate backlog,
+3. no pending Mittelstand Gate backlog,
+4. no discovered/retry/degraded source work,
+5. no new Raw company or new source for the configured quiet window (default 180 minutes).
 
-Mature-industrial sources rotate by least-recently-crawled order. Mittelstand formal eligibility is revenue-only: M2 `PASS` is sales-ready, M2 `FAIL` is excluded from promotion, and insufficient revenue evidence remains `UNKNOWN` for further research. Employee count and Japan openness are retained as supplemental signals and do not block promotion.
-
-### Each lane performs
-1. Discover sources.
-2. Crawl a bounded source set and self-build/repair adapters.
-3. Resolve official domains for a bounded backlog.
-4. Run the lane's authoritative Gate in fresh context per company.
-5. Promote qualified companies to `営業リスト＿Factory/BPO` with `Status=未接触` while preserving existing human Status values.
-6. Research one best-fit commercial contact.
-7. Load `outreach_prompt_production_v1` from Drive and generate one send-ready email.
-8. Write internal records to `LeadFactory_ContactResearch`, `LeadFactory_MessageDrafts`, and `LeadFactory_ApprovalQueue`.
-9. Stop at HUMAN APPROVAL.
-
-Raw/PENDING/NO-GO companies remain in hidden LeadFactory technical sheets and are not newly surfaced into the human sales list.
-
-## Scheduler
-- Growth supply: `*/10 * * * *`
-- Mittelstand supply: `2-59/10 * * * *`
-- Meta watchdog: `*/2 * * * *`
-- Legacy midnight `lead-factory-daily`: paused by deployment; `/tick` remains a manual catch-up/debug endpoint.
-
-Cloud Run request timeout and Scheduler attempt deadline are 540 seconds. Per-tick source/domain/Gate/READY limits are configured in the spreadsheet `Config` sheet.
-
-## Source of truth
-- Human sales SSOT: `営業リスト＿Factory/BPO`
-- Growth Gate: Drive Google Doc `target_screening_gate`
-- Mittelstand Gate: Drive file `mittelstand_screening_gate.txt`
-- Outreach copy: Drive Google Doc `outreach_prompt_production_v1`
+Then `LEAD_FACTORY_ENABLED` is set to `FALSE` and an internal stop notification is attempted to `admin@a1-road.com`. Customer-facing execution remains untouched.
 
 ## Deployment
-`cloudbuild.yaml` builds the container, deploys private Cloud Run, keeps the Meta watchdog, configures the two supply schedulers, and pauses the redundant daily scheduler. The current ChatGPT session can update Drive source/config but does not have authenticated Google Cloud control-plane access; deployment must be executed from a GCP-authorized environment.
+`.github/workflows/deploy.yml` is the production deployment path. A push to `main` compiles/tests, authenticates to Google Cloud via OIDC, builds the image, deploys private Cloud Run, injects `OPENAI_API_KEY` from Secret Manager, configures the Cloud Tasks queue, configures continuous Scheduler jobs, runs a deep authenticated health check, and immediately kicks discovery/dispatch.
+
+`cloudbuild.yaml` is legacy and must not be attached to a production trigger.
