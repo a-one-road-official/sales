@@ -42,12 +42,10 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Resolve OpenAI runtime secret
+      - name: Verify OpenAI runtime secret
         run: |
-          FOUND="$(gcloud secrets list --project="$PROJECT" --filter='name~openai' --format='value(name)' | head -n 1)"
-          test -n "$FOUND" || { echo "No OpenAI Secret Manager secret found in project"; exit 1; }
-          echo "OPENAI_SECRET=$FOUND" >> "$GITHUB_ENV"
-          echo "Resolved OpenAI secret: $FOUND"
+          gcloud secrets describe "$OPENAI_SECRET" --project="$PROJECT" >/dev/null
+          echo "Verified OpenAI secret: $OPENAI_SECRET"
 
       - name: Generate internal runtime token
         run: |
