@@ -28,28 +28,27 @@ jobs:
       - name: Export complete directory
         run: python tools/maktek_export.py
 
-      - name: Persist current export in repository
+      - name: Publish CSV on dedicated data branch
         run: |
-          mkdir -p data
-          cp maktek_2026.csv data/maktek_2026.csv
-          cp maktek_2026.json data/maktek_2026.json
+          mkdir -p /tmp/maktek-export
+          cp maktek_2026.csv /tmp/maktek-export/maktek_2026.csv
+          cp maktek_2026.json /tmp/maktek-export/maktek_2026.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/maktek_2026.csv data/maktek_2026.json
-          if git diff --cached --quiet; then
-            echo "Export unchanged"
-          else
-            git commit -m "Refresh MAKTEK 2026 full exhibitor export"
-            git pull --rebase origin main
-            git push origin HEAD:main
-          fi
+          git checkout --orphan maktek-data
+          git rm -rf .
+          cp /tmp/maktek-export/maktek_2026.csv maktek_2026.csv
+          cp /tmp/maktek-export/maktek_2026.json maktek_2026.json
+          git add maktek_2026.csv maktek_2026.json
+          git commit -m "Refresh MAKTEK 2026 full exhibitor export"
+          git push --force origin maktek-data
 
       - name: Upload export artifact
         uses: actions/upload-artifact@v4
         with:
           name: maktek-2026-full-export
           path: |
-            maktek_2026.json
-            maktek_2026.csv
+            /tmp/maktek-export/maktek_2026.json
+            /tmp/maktek-export/maktek_2026.csv
           if-no-files-found: error
           retention-days: 7
