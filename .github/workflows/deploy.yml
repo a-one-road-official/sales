@@ -16,27 +16,25 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: asia-northeast1
+      SERVICE: aone-lead-factory
+      RUNTIME_SA: aone-lead-factory-deployer@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+      OPENAI_SECRET: aone-openai-api-key
+      TASK_QUEUE: lead-factory-workers
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Python compile check
-        run: |
-          python -m compileall .
+        run: python -m compileall .
 
       - name: Run tests
         run: |
           pip install -r requirements.txt
-          set +e
           pytest -q
-          code=$?
-          set -e
-          if [ "$code" -eq 5 ]; then
-            echo "No tests collected; continuing for deployment bootstrap"
-          elif [ "$code" -ne 0 ]; then
-            exit "$code"
-          fi
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
@@ -48,109 +46,190 @@ jobs:
       - name: Verify gcloud
         run: gcloud version
 
-      - name: Enable required APIs
+      - name: Enable runtime APIs
         run: |
           gcloud services enable \
             sheets.googleapis.com \
+            drive.googleapis.com \
+            gmail.googleapis.com \
             run.googleapis.com \
             artifactregistry.googleapis.com \
             secretmanager.googleapis.com \
             cloudscheduler.googleapis.com \
-            --project=${{ secrets.GCP_PROJECT_ID }}
+            cloudtasks.googleapis.com \
+            iamcredentials.googleapis.com \
+            --project="$PROJECT"
+
+      - name: Configure runtime IAM and secret access
+        run: |
+          gcloud secrets describe "$OPENAI_SECRET" --project="$PROJECT" >/dev/null
+          gcloud secrets add-iam-policy-binding "$OPENAI_SECRET" \
+            --project="$PROJECT" \
+            --member="serviceAccount:${RUNTIME_SA}" \
+            --role=roles/secretmanager.secretAccessor >/dev/null
+
+          gcloud projects add-iam-policy-binding "$PROJECT" \
+            --member="serviceAccount:${RUNTIME_SA}" \
+            --role=roles/cloudtasks.enqueuer \
+            --condition=None >/dev/null
+
+          gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
+            --project="$PROJECT" \
+            --member="serviceAccount:${RUNTIME_SA}" \
+            --role=roles/iam.serviceAccountUser >/dev/null
 
       - name: Configure Docker auth
-        run: |
-          gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
+        run: gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
 
       - name: Ensure Artifact Registry
         run: |
           gcloud artifacts repositories describe aone-lead-factory \
-            --location=asia-northeast1 \
-            --project=${{ secrets.GCP_PROJECT_ID }} >/dev/null 2>&1 || \
+            --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || \
           gcloud artifacts repositories create aone-lead-factory \
             --repository-format=docker \
-            --location=asia-northeast1 \
+            --location="$REGION" \
             --description="A-one Lead Factory images" \
-            --project=${{ secrets.GCP_PROJECT_ID }}
+            --project="$PROJECT"
 
-      - name: Build Docker image
+      - name: Build and push Docker image
         run: |
-          docker build -t asia-northeast1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/aone-lead-factory/aone-lead-factory:${{ github.sha }} .
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
 
-      - name: Push Docker image
+      - name: Deploy Cloud Run with autonomous runtime credentials
         run: |
-          docker push asia-northeast1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/aone-lead-factory/aone-lead-factory:${{ github.sha }}
-
-      - name: Deploy Cloud Run
-        run: |
-          gcloud run deploy aone-lead-factory \
-            --image=asia-northeast1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/aone-lead-factory/aone-lead-factory:${{ github.sha }} \
-            --region=asia-northeast1 \
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
+          gcloud run deploy "$SERVICE" \
+            --image="$IMAGE" \
+            --region="$REGION" \
             --platform=managed \
-            --service-account=aone-lead-factory-deployer@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com \
+            --service-account="$RUNTIME_SA" \
             --no-allow-unauthenticated \
             --timeout=540 \
-            --remove-secrets=OPENAI_API_KEY \
-            --update-env-vars=LEAD_FACTORY_SPREADSHEET_ID=1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo,LEAD_FACTORY_DRIVE_ROOT_FOLDER_ID=14JY0cfJrNM9uteVmPOQ-SDoYKkSrEX3E,LEAD_FACTORY_DRIVE_SCRAPERS_FOLDER_ID=1c5vE9oAGMXn209JKIyGonJ7pZ4-1bplk,LEAD_FACTORY_META_INTERVAL_SECONDS=120,LEAD_FACTORY_MAX_REPAIR_ATTEMPTS=5,LEAD_FACTORY_AUTONOMY_MODE=UNTIL_TARGET,LEAD_FACTORY_TARGET_NEW_COMPANIES=200,LEAD_FACTORY_AUTONOMY_START_PROMOTED=23,LEAD_FACTORY_STOP_AFTER_ZERO_PROMOTION_RUNS=3,LEAD_FACTORY_AUTONOMY_NOTIFY_EMAIL=admin@a1-road.com \
-            --project=${{ secrets.GCP_PROJECT_ID }}
+            --concurrency=8 \
+            --min=1 \
+            --max=100 \
+            --set-secrets=OPENAI_API_KEY=${OPENAI_SECRET}:latest \
+            --update-env-vars=LEAD_FACTORY_SPREADSHEET_ID=1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo,LEAD_FACTORY_DRIVE_ROOT_FOLDER_ID=14JY0cfJrNM9uteVmPOQ-SDoYKkSrEX3E,LEAD_FACTORY_DRIVE_SCRAPERS_FOLDER_ID=1c5vE9oAGMXn209JKIyGonJ7pZ4-1bplk,LEAD_FACTORY_META_INTERVAL_SECONDS=120,LEAD_FACTORY_MAX_REPAIR_ATTEMPTS=5,LEAD_FACTORY_AUTONOMY_MODE=UNTIL_EXHAUSTED,LEAD_FACTORY_AUTONOMY_NOTIFY_EMAIL=admin@a1-road.com,LEAD_FACTORY_GMAIL_IMPERSONATE=admin@a1-road.com,LEAD_FACTORY_SOURCE_FRONTIER_LIMIT=40,LEAD_FACTORY_DISPATCH_SOURCE_MAX=50,LEAD_FACTORY_DISPATCH_DOMAIN_MAX=2000,LEAD_FACTORY_DISPATCH_GATE_MAX=2000,LEAD_FACTORY_EXHAUSTION_QUIET_MINUTES=180,LEAD_FACTORY_TASKS_LOCATION=${REGION},LEAD_FACTORY_TASKS_QUEUE=${TASK_QUEUE},LEAD_FACTORY_TASKS_SERVICE_ACCOUNT=${RUNTIME_SA} \
+            --project="$PROJECT"
 
-      - name: Configure autonomous schedulers
+      - name: Configure Cloud Tasks fan-out queue
         run: |
-          PROJECT=${{ secrets.GCP_PROJECT_ID }}
-          REGION=asia-northeast1
-          SERVICE=aone-lead-factory
-          INVOKER=aone-lead-factory-deployer@${PROJECT}.iam.gserviceaccount.com
-          URL="$(gcloud run services describe ${SERVICE} --region=${REGION} --project=${PROJECT} --format='value(status.url)')"
+          if gcloud tasks queues describe "$TASK_QUEUE" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
+            gcloud tasks queues update "$TASK_QUEUE" \
+              --location="$REGION" --project="$PROJECT" \
+              --max-dispatches-per-second=20 \
+              --max-concurrent-dispatches=80 \
+              --max-attempts=8 \
+              --min-backoff=5s \
+              --max-backoff=300s
+          else
+            gcloud tasks queues create "$TASK_QUEUE" \
+              --location="$REGION" --project="$PROJECT" \
+              --max-dispatches-per-second=20 \
+              --max-concurrent-dispatches=80 \
+              --max-attempts=8 \
+              --min-backoff=5s \
+              --max-backoff=300s
+          fi
 
-          gcloud run services add-iam-policy-binding ${SERVICE} \
-            --region=${REGION} \
-            --project=${PROJECT} \
-            --member="serviceAccount:${INVOKER}" \
-            --role=roles/run.invoker
+      - name: Bind service URL and configure invoker
+        run: |
+          URL="$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format='value(status.url)')"
+          test -n "$URL"
+          gcloud run services update "$SERVICE" \
+            --region="$REGION" --project="$PROJECT" \
+            --update-env-vars=LEAD_FACTORY_SERVICE_URL="$URL" >/dev/null
+          gcloud run services add-iam-policy-binding "$SERVICE" \
+            --region="$REGION" --project="$PROJECT" \
+            --member="serviceAccount:${RUNTIME_SA}" \
+            --role=roles/run.invoker >/dev/null
+          echo "SERVICE_URL=$URL" >> "$GITHUB_ENV"
 
-          gcloud scheduler jobs pause lead-factory-daily \
-            --location=${REGION} --project=${PROJECT} >/dev/null 2>&1 || true
+      - name: Configure continuous autonomous schedulers
+        run: |
+          URL="$SERVICE_URL"
+          INVOKER="$RUNTIME_SA"
 
           upsert_job () {
             NAME="$1"
             SCHEDULE="$2"
             URI="$3"
-            if gcloud scheduler jobs describe "$NAME" --location=${REGION} --project=${PROJECT} >/dev/null 2>&1; then
+            if gcloud scheduler jobs describe "$NAME" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
               gcloud scheduler jobs update http "$NAME" \
-                --location=${REGION} \
-                --project=${PROJECT} \
-                --schedule="$SCHEDULE" \
-                --time-zone="Asia/Tokyo" \
-                --uri="$URI" \
-                --http-method=POST \
-                --attempt-deadline=540s \
-                --oidc-service-account-email="${INVOKER}" \
-                --oidc-token-audience="${URL}"
+                --location="$REGION" --project="$PROJECT" \
+                --schedule="$SCHEDULE" --time-zone="Asia/Tokyo" \
+                --uri="$URI" --http-method=POST --attempt-deadline=540s \
+                --oidc-service-account-email="$INVOKER" \
+                --oidc-token-audience="$URL"
             else
               gcloud scheduler jobs create http "$NAME" \
-                --location=${REGION} \
-                --project=${PROJECT} \
-                --schedule="$SCHEDULE" \
-                --time-zone="Asia/Tokyo" \
-                --uri="$URI" \
-                --http-method=POST \
-                --attempt-deadline=540s \
-                --oidc-service-account-email="${INVOKER}" \
-                --oidc-token-audience="${URL}"
+                --location="$REGION" --project="$PROJECT" \
+                --schedule="$SCHEDULE" --time-zone="Asia/Tokyo" \
+                --uri="$URI" --http-method=POST --attempt-deadline=540s \
+                --oidc-service-account-email="$INVOKER" \
+                --oidc-token-audience="$URL"
             fi
           }
 
+          # Legacy bounded supply jobs can prematurely stop or serialize the pipeline.
+          for OLD in lead-factory-daily lead-factory-growth-supply lead-factory-mittelstand-supply; do
+            gcloud scheduler jobs pause "$OLD" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
+          done
+
           upsert_job lead-factory-meta "*/2 * * * *" "${URL}/meta/tick"
-          upsert_job lead-factory-growth-supply "*/10 * * * *" "${URL}/supply/growth"
-          upsert_job lead-factory-mittelstand-supply "2-59/10 * * * *" "${URL}/supply/mittelstand"
+          upsert_job lead-factory-discover-growth "*/5 * * * *" "${URL}/discover/growth"
+          upsert_job lead-factory-discover-mittelstand "2-59/5 * * * *" "${URL}/discover/mittelstand"
+          upsert_job lead-factory-dispatch-growth "* * * * *" "${URL}/dispatch/growth"
+          upsert_job lead-factory-dispatch-mittelstand "* * * * *" "${URL}/dispatch/mittelstand"
+          upsert_job lead-factory-promotion "* * * * *" "${URL}/promotion/tick"
+          upsert_job lead-factory-prep "*/5 * * * *" "${URL}/prep/tick"
+          upsert_job lead-factory-control "*/10 * * * *" "${URL}/control/tick"
           upsert_job lead-factory-maktek-full "0 4 1 1 *" "${URL}/maktek/ingest"
-          gcloud scheduler jobs run lead-factory-maktek-full --location=${REGION} --project=${PROJECT}
-          gcloud scheduler jobs run lead-factory-mittelstand-supply --location=${REGION} --project=${PROJECT}
-          gcloud scheduler jobs run lead-factory-growth-supply --location=${REGION} --project=${PROJECT}
 
-          echo "Cloud Run URL: ${URL}"
-
-
-      - name: Verify autonomous schedulers
+      - name: Runtime deep health check
         run: |
-          gcloud scheduler jobs list --location=asia-northeast1 --project=${{ secrets.GCP_PROJECT_ID }} --filter="name:lead-factory" --format="table(name,state,schedule,httpTarget.uri)"
+          URL="$SERVICE_URL"
+          TOKEN="$(gcloud auth print-identity-token --audiences="$URL")"
+          curl --fail-with-body --retry 5 --retry-delay 5 \
+            -H "Authorization: Bearer $TOKEN" \
+            "${URL}/healthz/deep" | tee /tmp/deep-health.json
+          python - <<'PY'
+          import json
+          data=json.load(open('/tmp/deep-health.json'))
+          assert data.get('ok') is True, data
+          assert data.get('openai_key_present') is True, data
+          assert data.get('task_service_url_present') is True, data
+          print(json.dumps(data, indent=2, ensure_ascii=False))
+          PY
+
+      - name: Kick autonomous frontier and workers now
+        run: |
+          URL="$SERVICE_URL"
+          TOKEN="$(gcloud auth print-identity-token --audiences="$URL")"
+          call () {
+            PATH="$1"
+            echo "POST $PATH"
+            curl --fail-with-body --retry 3 --retry-delay 3 \
+              -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+              "${URL}${PATH}"
+            echo
+          }
+          call /discover/growth
+          call /discover/mittelstand
+          call /dispatch/growth
+          call /dispatch/mittelstand
+          call /promotion/tick
+
+      - name: Verify autonomous infrastructure
+        run: |
+          echo '--- Cloud Run ---'
+          gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" \
+            --format="yaml(status.url,status.latestReadyRevisionName,spec.template.spec.containerConcurrency,spec.template.metadata.annotations)"
+          echo '--- Cloud Tasks ---'
+          gcloud tasks queues describe "$TASK_QUEUE" --location="$REGION" --project="$PROJECT" \
+            --format="yaml(name,state,rateLimits,retryConfig)"
+          echo '--- Schedulers ---'
+          gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" \
+            --filter="name:lead-factory" --format="table(name,state,schedule,httpTarget.uri)"
