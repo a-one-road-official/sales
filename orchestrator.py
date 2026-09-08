@@ -132,14 +132,23 @@ class LeadFactory:
             reason="N3 public-web source discovery only; no Gmail/Calendar access.",
         )
         cfg = self._config()
+        from source_universe import for_lane as bootstrap_sources
+        bootstrap = bootstrap_sources(lane)
         if lane == "MITTELSTAND":
             limit = int(cfg.get("MITTELSTAND_SOURCE_DISCOVERY_LIMIT", "6") or 6)
             policy_file_id = cfg.get("MITTELSTAND_DISCOVERY_POLICY_FILE_ID", "").strip()
             policy_text = self.drive.read_text(policy_file_id) if policy_file_id else ""
-            candidates = self.llm.discover_mittelstand_sources(policy_text, limit=max(0, limit))
+            try:
+                discovered = self.llm.discover_mittelstand_sources(policy_text, limit=max(0, limit))
+            except Exception:
+                discovered = []
         else:
             limit = int(cfg.get("GROWTH_SOURCE_DISCOVERY_LIMIT", "6") or 6)
-            candidates = self.llm.discover_sources(limit=max(0, limit))
+            try:
+                discovered = self.llm.discover_sources(limit=max(0, limit))
+            except Exception:
+                discovered = []
+        candidates = bootstrap + list(discovered)
 
         added, rejected, existing = [], 0, 0
         for c in candidates:
@@ -672,6 +681,9 @@ class LeadFactory:
         """Stop internal supply after target or repeated zero-yield runs."""
         if str(self.s.autonomy_mode or "").upper() != "UNTIL_TARGET":
             return None
+        # The persistent Qualified Lead SLO owns stopping while a goal is live.
+        if self._config().get("LEAD_FACTORY_GOAL_STATUS", "").upper() in {"RUNNING", "AT_RISK"}:
+            return None
         promoted = self.sheets.count_promoted_leads()
         added_since_start = max(0, promoted - int(self.s.autonomy_start_promoted))
         if added_since_start >= int(self.s.autonomy_target_new_companies):
@@ -721,8 +733,9 @@ class LeadFactory:
                 signals = self.llm.discover_trigger_signals(limit=max(0, fallback_limit))
                 fallback = self.sheets.append_trigger_signals(signals)
 
-            domain_limit = int(cfg.get("SUPPLY_DOMAIN_MAX_PER_TICK", "4") or 4)
-            gate_limit = int(cfg.get("SUPPLY_GATE_MAX_PER_TICK", "4") or 4)
+            multiplier = max(1, min(50, int(cfg.get("LEAD_FACTORY_CAPACITY_MULTIPLIER", "1") or 1)))
+            domain_limit = int(cfg.get("SUPPLY_DOMAIN_MAX_PER_TICK", "4") or 4) * multiplier
+            gate_limit = int(cfg.get("SUPPLY_GATE_MAX_PER_TICK", "4") or 4) * multiplier
             domain = self.domain_tick(lane=lane, limit=domain_limit)
             gate = self.mittelstand_worker.process_pending(limit=gate_limit) if lane == "MITTELSTAND" else self.gate_worker.process_pending(limit=gate_limit)
             promotion = self.promotion_tick(lane=lane)

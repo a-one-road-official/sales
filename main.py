@@ -7,10 +7,12 @@ from fastapi import FastAPI, HTTPException
 from maktek_ingest import MaktekIngestor
 from strict_factory import StrictLeadFactory as LeadFactory
 from settings import SETTINGS
+from production_controller import QualifiedLeadProductionController
 
 
 app = FastAPI(title="A-one Lead Factory", version="0.3.0")
 factory: LeadFactory | None = None
+production_controller: QualifiedLeadProductionController | None = None
 
 
 def get_factory() -> LeadFactory:
@@ -18,6 +20,12 @@ def get_factory() -> LeadFactory:
     if factory is None:
         factory = LeadFactory(SETTINGS)
     return factory
+
+def get_production_controller() -> QualifiedLeadProductionController:
+    global production_controller
+    if production_controller is None:
+        production_controller = QualifiedLeadProductionController(get_factory())
+    return production_controller
 
 
 def _fail(exc: Exception):
@@ -47,6 +55,42 @@ def deep_healthz():
 def maktek_ingest():
     try:
         return MaktekIngestor(get_factory().sheets).run()
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/autonomy/tick")
+def autonomy_tick():
+    try:
+        return get_production_controller().tick()
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.get("/autonomy/status")
+def autonomy_status():
+    try:
+        return get_production_controller().status()
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/autonomy/start")
+def autonomy_start(body: dict):
+    try:
+        from production_controller import _dt
+        deadline = _dt(body.get("deadline")) if body.get("deadline") else None
+        return get_production_controller().start(int(body.get("target", 0)), deadline)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/autonomy/stop")
+def autonomy_stop():
+    try:
+        return get_production_controller().stop()
     except Exception as exc:
         _fail(exc)
 

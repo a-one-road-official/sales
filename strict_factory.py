@@ -417,6 +417,72 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
         )
         return {"lead_id": lead_id, "verification": research.get("verification", ""), **result}
 
+
+    def source_tick(self, run_id: str | None = None, lane: str | None = None) -> dict:
+        """Run sources and immediately activate tested adapters through Cloud smoke."""
+        result = super().source_tick(run_id=run_id, lane=lane)
+        for item in result.get("results", []):
+            if item.get("status") not in {"READY_FOR_CLOUD_SMOKE", "REPAIR_READY_FOR_CLOUD_SMOKE"}:
+                continue
+            source_id = str(item.get("source_id") or "")
+            if not source_id:
+                continue
+            try:
+                smoke = self.cloud_smoke_source(source_id)
+                item["smoke"] = smoke
+                if smoke.get("status") == "ACTIVE":
+                    item["status"] = "RAW_CAPTURED"
+                    runtime = smoke.get("runtime") or {}
+                    item["runtime"] = runtime
+                    result["new_raw"] += int(runtime.get("new_raw", 0) or 0)
+                    result["duplicates"] += int(runtime.get("duplicates", 0) or 0)
+            except Exception as exc:
+                item["smoke"] = {"status": "ERROR", "error": f"{type(exc).__name__}:{exc}"}
+        return result
+
+    def expand_source_frontier(self, lane: str, limit: int = 25) -> dict:
+        """Discover next-hop public directories from registered source pages."""
+        from urllib.parse import urljoin, urlparse
+        lane = str(lane or "").upper()
+        if lane not in {"GROWTH", "MITTELSTAND"}:
+            raise ValueError(f"unsupported_lane:{lane}")
+        keywords = ("exhibitor", "member", "association", "directory", "portfolio", "cluster", "index", "firms")
+        added, inspected, errors = [], 0, 0
+        sources = self.sheets.sources_for_crawl(limit=max(limit * 2, limit), lane=lane.lower(), recrawl_after_minutes=1)
+        for source in sources:
+            if len(added) >= limit:
+                break
+            try:
+                snap = self._fetcher(source).fetch(source.crawl_url)
+                inspected += 1
+                for href in list(getattr(snap, "external_links", []) or []):
+                    absolute = urljoin(source.crawl_url, str(href))
+                    parsed = urlparse(absolute)
+                    path = (parsed.path + "?" + parsed.query).lower()
+                    if parsed.scheme not in {"http", "https"} or not any(k in path for k in keywords):
+                        continue
+                    candidate = {
+                        "source_type": "MITTELSTAND_DISCOVERED" if lane == "MITTELSTAND" else "GROWTH_DISCOVERED",
+                        "source_name": f"discovered:{parsed.netloc}{parsed.path[:80]}",
+                        "source_url": absolute, "exhibitor_directory_url": absolute,
+                        "country": source.country, "event_year": source.event_year,
+                    }
+                    is_new, source_id = self.sheets.add_source_if_new(candidate)
+                    if is_new:
+                        added.append(source_id)
+                        if len(added) >= limit:
+                            break
+            except Exception:
+                errors += 1
+        return {"status": "COMPLETE", "lane": lane, "inspected": inspected, "added": added, "errors": errors}
+
+    def capacity_tick(self, goal_status: dict) -> dict:
+        """Increase exploration/processing while preserving the authoritative Gate."""
+        lane = "MITTELSTAND" if int(goal_status.get("added", 0)) % 2 else "GROWTH"
+        frontier = self.expand_source_frontier(lane, limit=25)
+        supply = super().supply_tick(lane)
+        return {"lane": lane, "frontier": frontier, "supply": supply}
+
     def domain_tick(self, lane: str | None = None, limit: int | None = None) -> dict:
         cfg = self._config()
         resolved_limit = int(limit if limit is not None else (cfg.get("DOMAIN_RESOLUTION_MAX_PER_RUN", "100") or 100))
