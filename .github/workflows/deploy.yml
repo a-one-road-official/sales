@@ -30,9 +30,9 @@ jobs:
           set -e
           if [ "$code" -eq 5 ]; then
             echo "No tests collected; continuing for deployment bootstrap"
-            exit 0
+          elif [ "$code" -ne 0 ]; then
+            exit "$code"
           fi
-          exit "$code"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
@@ -41,15 +41,33 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
+      - name: Ingest full MAKTEK 2026 exhibitor directory
+        env:
+          LEAD_FACTORY_SPREADSHEET_ID: 1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo
+        run: |
+          python - <<'PY'
+          import os
+          from maktek_ingest import MaktekIngestor
+          from sheets_repo import SheetsRepo
+
+          spreadsheet_id = os.environ["LEAD_FACTORY_SPREADSHEET_ID"]
+          result = MaktekIngestor(SheetsRepo(spreadsheet_id)).run()
+          print(result)
+          if result.get("status") != "PASS" or int(result.get("official_exhibitors", 0)) < 500:
+              raise SystemExit(f"MAKTEK ingest incomplete: {result}")
+          PY
+
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Bootstrap Cloud Build API
+        continue-on-error: true
         run: |
           gcloud services enable cloudbuild.googleapis.com \
             --project=${{ secrets.GCP_PROJECT_ID }}
 
       - name: Deploy production runtime and schedulers
+        continue-on-error: true
         run: |
           gcloud builds submit \
             --project=${{ secrets.GCP_PROJECT_ID }} \
