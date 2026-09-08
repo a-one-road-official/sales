@@ -132,9 +132,38 @@ class QualifiedLeadProductionController:
             self._set_config({GOAL_KEYS["report_sent"]: "TRUE"})
         return result
 
+    def _rollover_daily_goal(self, previous: dict) -> dict:
+        """Start the next JST production day after reporting the prior day."""
+        previous_report = self._report(previous)
+        now = datetime.now(UTC)
+        jst_now = now.astimezone(ZoneInfo("Asia/Tokyo"))
+        next_deadline = (jst_now + timedelta(days=1)).replace(
+            hour=23, minute=59, second=59, microsecond=0
+        ).astimezone(UTC)
+        self._set_config({
+            GOAL_KEYS["start_at"]: now.isoformat(),
+            GOAL_KEYS["deadline"]: next_deadline.isoformat(),
+            GOAL_KEYS["baseline"]: self._ssot_count(),
+            GOAL_KEYS["status"]: "RUNNING",
+            GOAL_KEYS["report_sent"]: "FALSE",
+        })
+        current = self.status()
+        current["previous_day"] = {
+            "status": previous.get("status"),
+            "target": previous.get("target"),
+            "added": previous.get("added"),
+            "eod_forecast": previous.get("eod_forecast"),
+            "report": previous_report,
+        }
+        return current
+
     def tick(self) -> dict:
         status = self.status()
         goal_status = status["status"]
+        if goal_status in {"TARGET_ACHIEVED", "DEADLINE_REACHED"}:
+            deadline = _dt(self._config().get(GOAL_KEYS["deadline"], ""))
+            if deadline and datetime.now(UTC) >= deadline:
+                return self._rollover_daily_goal(status)
         if goal_status in {"NO_GOAL", "USER_STOP", "REPORT_SENT"}:
             return status
         if status["remaining"] > 0 and status["hours_remaining"] > 0:
