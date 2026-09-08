@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - '.github/workflows/maktek-export.yml'
+      - 'tools/maktek_export.py'
   workflow_dispatch:
 
 permissions:
@@ -39,7 +40,8 @@ jobs:
             echo "Export unchanged"
           else
             git commit -m "Refresh MAKTEK 2026 full exhibitor export"
-            git push
+            git pull --rebase origin main
+            git push origin HEAD:main
           fi
 
       - name: Upload export artifact
