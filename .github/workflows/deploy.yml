@@ -20,7 +20,7 @@ jobs:
       PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       REGION: asia-northeast1
       SERVICE: aone-lead-factory
-      RUNTIME_SA: aone-lead-factory@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+      RUNTIME_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       OPENAI_SECRET: aone-openai-api-key
 
     steps:
