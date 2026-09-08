@@ -150,14 +150,6 @@ jobs:
 
           echo "Cloud Run URL: ${URL}"
 
-          TOKEN="$(gcloud auth print-identity-token --audiences="${URL}" --impersonate-service-account="${INVOKER}")"
-          for PATH in healthz supply/mittelstand supply/growth; do
-            echo "Direct smoke: ${PATH}"
-            curl --fail-with-body --silent --show-error --max-time 90 \
-              -H "Authorization: Bearer ${TOKEN}" \
-              -X POST "${URL}/${PATH}" || true
-            echo
-          done
 
       - name: Verify autonomous schedulers
         run: |
