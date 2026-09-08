@@ -25,7 +25,7 @@ Exhibition/company directories are the primary source. When a cycle yields no ne
 ### Mittelstand
 `POST /supply/mittelstand` every 10 minutes, offset by 2 minutes.
 
-Mature-industrial sources rotate by least-recently-crawled order. M1-M3 `GO` is sales-ready; `UNKNOWN` remains in technical screening history for further research and is not promoted to outbound READY.
+Mature-industrial sources rotate by least-recently-crawled order. Mittelstand formal eligibility is revenue-only: M2 `PASS` is sales-ready, M2 `FAIL` is excluded from promotion, and insufficient revenue evidence remains `UNKNOWN` for further research. Employee count and Japan openness are retained as supplemental signals and do not block promotion.
 
 ### Each lane performs
 1. Discover sources.
