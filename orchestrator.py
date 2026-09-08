@@ -20,6 +20,7 @@ from settings import Settings
 from session_store import SessionStore
 from sheets_repo import SheetsRepo
 from tester import run_s1_to_s7
+from notifier import InternalNotifier
 
 
 JS_ADAPTER_TYPES = {"RENDERED_HTML", "JSON_API", "GRAPHQL"}
@@ -33,6 +34,7 @@ class LeadFactory:
         self.llm = LLM(settings.openai_model)
         self.meta = MetaSupervisor(self.sheets.meta_log, settings.meta_interval_seconds)
         self.sessions = SessionStore()
+        self.notifier = InternalNotifier(settings.autonomy_notify_email)
         self.gate_worker = GateWorker(self.sheets, self.drive, self.llm)
         self.mittelstand_worker = MittelstandWorker(self.sheets, self.drive, self.llm)
 
@@ -666,6 +668,31 @@ class LeadFactory:
         return {"status": "COMPLETE", "processed": len(results), "results": results}
 
 
+    def _autonomy_guard(self, lane: str) -> dict | None:
+        """Stop internal supply after target or repeated zero-yield runs."""
+        if str(self.s.autonomy_mode or "").upper() != "UNTIL_TARGET":
+            return None
+        promoted = self.sheets.count_promoted_leads()
+        added_since_start = max(0, promoted - int(self.s.autonomy_start_promoted))
+        if added_since_start >= int(self.s.autonomy_target_new_companies):
+            return {"status": "STOPPED_TARGET_REACHED", "lane": lane, "promoted_total": promoted, "new_since_start": added_since_start, "target": int(self.s.autonomy_target_new_companies)}
+        zero_limit = max(1, int(self.s.autonomy_stop_after_zero_runs))
+        recent = self.sheets.recent_supply_runlogs(lane, limit=zero_limit)
+        if len(recent) >= zero_limit and all(int(item.get("promoted", 0) or 0) == 0 for item in recent):
+            return {"status": "STOPPED_NO_NEW_COMPANIES", "lane": lane, "promoted_total": promoted, "new_since_start": added_since_start, "target": int(self.s.autonomy_target_new_companies), "zero_promotion_runs": zero_limit}
+        return None
+
+    def _notify_autonomy_stop(self, result: dict) -> dict:
+        notice = self.notifier.notify(
+            subject=f"A-one Lead Factory stopped: {result.get('status', 'STOPPED')}",
+            body=("Internal Lead Factory supply was stopped.\\n\\n" +
+                  f"status={result.get('status')}\\n" + f"lane={result.get('lane')}\\n" +
+                  f"promoted_total={result.get('promoted_total')}\\n" + f"new_since_start={result.get('new_since_start')}\\n" +
+                  f"target={result.get('target')}\\n" + f"zero_promotion_runs={result.get('zero_promotion_runs', '')}\\n" +
+                  "No customer-facing action was executed."),
+        )
+        return {**result, "notification": notice}
+
     def supply_tick(self, lane: str) -> dict:
         """One bounded end-to-end autonomous internal lane: discover -> qualify -> SSOT -> READY."""
         if not self._enabled():
@@ -673,6 +700,9 @@ class LeadFactory:
         lane = str(lane or "").strip().upper()
         if lane not in {"GROWTH", "MITTELSTAND"}:
             raise ValueError(f"unsupported_lane:{lane}")
+        guard = self._autonomy_guard(lane)
+        if guard:
+            return self._notify_autonomy_stop(guard)
         run_id = f"supply-{lane.lower()}-{uuid.uuid4()}"
         started_at = datetime.now(timezone.utc).isoformat()
         self.meta.start_heartbeat(run_id, f"SUPPLY_{lane}")
