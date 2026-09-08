@@ -789,6 +789,15 @@ class SheetsRepo:
             return {"status": "INVALID", "reason": "missing_company_name"}
         domain = self._normalize_domain(candidate.get("domain") or candidate.get("website") or "")
         website = str(candidate.get("website") or "").strip()
+        if not domain:
+            return {
+                "status": "NOT_ELIGIBLE",
+                "final_result": final_result,
+                "reason": "verified_official_domain_required",
+                "is_mittelstand": is_mittelstand,
+            }
+        if not website:
+            website = f"https://{domain}"
         lead_id = str(candidate.get("lead_id") or "").strip()
         linked_row = self._find_sales_row_by_lf_lead_id(lead_id) if lead_id else None
         if linked_row is not None:
