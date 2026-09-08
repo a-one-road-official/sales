@@ -52,14 +52,28 @@ jobs:
       - name: Ingest full MAKTEK 2026 exhibitor directory
         env:
           LEAD_FACTORY_SPREADSHEET_ID: 1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo
+          RUNTIME_SA: aone-lead-factory@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
         run: |
           python - <<'PY'
           import os
+          import google.auth
+          from google.auth import impersonated_credentials
+          from googleapiclient.discovery import build
           from maktek_ingest import MaktekIngestor
           from sheets_repo import SheetsRepo
 
-          spreadsheet_id = os.environ["LEAD_FACTORY_SPREADSHEET_ID"]
-          result = MaktekIngestor(SheetsRepo(spreadsheet_id)).run()
+          source_credentials, _ = google.auth.default(
+              scopes=["https://www.googleapis.com/auth/cloud-platform"]
+          )
+          target_credentials = impersonated_credentials.Credentials(
+              source_credentials=source_credentials,
+              target_principal=os.environ["RUNTIME_SA"],
+              target_scopes=["https://www.googleapis.com/auth/spreadsheets"],
+              lifetime=3600,
+          )
+          repo = SheetsRepo(os.environ["LEAD_FACTORY_SPREADSHEET_ID"])
+          repo.svc = build("sheets", "v4", credentials=target_credentials, cache_discovery=False)
+          result = MaktekIngestor(repo).run()
           print(result)
           if result.get("status") != "PASS" or int(result.get("official_exhibitors", 0)) < 500:
               raise SystemExit(f"MAKTEK ingest incomplete: {result}")
