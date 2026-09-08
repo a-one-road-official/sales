@@ -256,7 +256,7 @@ class SheetsRepo:
 
 
     def get_config(self) -> dict[str, str]:
-        rows = self.read("Config!A2:B100")
+        rows = self.read("Config!A2:B1000")
         return {str(r[0]): str(r[1]) for r in rows if len(r) >= 2 and r[0]}
 
 
