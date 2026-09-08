@@ -15,6 +15,9 @@ jobs:
   patch-live-apps-script:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      TARGET_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      GOOGLE_ADMIN_USER: admin@a1-road.com
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,25 +29,65 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Enable Apps Script API
+      - name: Enable required APIs
         run: |
-          gcloud services enable script.googleapis.com --project=${{ secrets.GCP_PROJECT_ID }} || true
+          gcloud services enable script.googleapis.com iamcredentials.googleapis.com --project=${{ secrets.GCP_PROJECT_ID }} || true
 
       - name: Patch live Apps Script recursion bug
         run: |
-          python -m pip install --quiet google-api-python-client google-auth
+          python -m pip install --quiet google-api-python-client google-auth requests
           python - <<'PY'
+          import os, time, requests
           import google.auth
           from googleapiclient.discovery import build
+          from googleapiclient.errors import HttpError
+          from google.oauth2.credentials import Credentials
 
           SCRIPT_ID = '14pzapk5hUf1W7dTB4v7yv-tv1YHtRPZyUSSlqM_OMb5D5PRobVPXZbqa'
           MARK = 'A1_CALENDAR_TIME_MIN_FIX_V4'
+          SCOPE = 'https://www.googleapis.com/auth/script.projects'
 
-          creds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/script.projects'])
-          svc = build('script', 'v1', credentials=creds, cache_discovery=False)
-          project = svc.projects().getContent(scriptId=SCRIPT_ID).execute()
+          base_creds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/cloud-platform'])
+
+          def apps_script_service(creds):
+            return build('script', 'v1', credentials=creds, cache_discovery=False)
+
+          # First try the WIF service account directly. If the standalone Apps Script is
+          # owned by the Workspace user, use domain-wide delegation via IAM signJwt.
+          try:
+            direct = apps_script_service(base_creds)
+            project = direct.projects().getContent(scriptId=SCRIPT_ID).execute()
+            svc = direct
+            print('AUTH_MODE=service-account-direct')
+          except HttpError as e:
+            if e.resp.status != 403:
+              raise
+            sa = os.environ['TARGET_SA']
+            admin = os.environ['GOOGLE_ADMIN_USER']
+            now = int(time.time())
+            payload = {
+              'iss': sa,
+              'sub': admin,
+              'scope': SCOPE,
+              'aud': 'https://oauth2.googleapis.com/token',
+              'iat': now,
+              'exp': now + 3600,
+            }
+            iam = build('iamcredentials', 'v1', credentials=base_creds, cache_discovery=False)
+            signed = iam.projects().serviceAccounts().signJwt(
+              name=f'projects/-/serviceAccounts/{sa}', body={'payload': __import__('json').dumps(payload)}
+            ).execute()['signedJwt']
+            tok = requests.post('https://oauth2.googleapis.com/token', data={
+              'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+              'assertion': signed,
+            }, timeout=30)
+            tok.raise_for_status()
+            user_creds = Credentials(token=tok.json()['access_token'])
+            svc = apps_script_service(user_creds)
+            project = svc.projects().getContent(scriptId=SCRIPT_ID).execute()
+            print('AUTH_MODE=workspace-admin-delegation')
+
           files = project.get('files', [])
-
           target = None
           for f in files:
             src = f.get('source', '')
@@ -61,9 +104,6 @@ jobs:
               print(line[:240])
 
           if MARK not in src:
-            # FreeBusy truncates an in-progress busy interval to timeMin. Querying from `now`
-            # therefore changes the interval start on every 15-minute trigger and defeats
-            # exact start/end dedupe. Query from the start of the local day instead.
             if 'const now = new Date();' in src and 'timeMin: now.toISOString()' in src:
               src = src.replace(
                 'const now = new Date();',
