@@ -145,7 +145,7 @@ jobs:
       - name: Ingest full MAKTEK 2026 exhibitor directory through deployed runtime
         run: |
           set -euo pipefail
-          SERVICE_URL="$(gcloud run services describe aone-lead-factory --region=asia-northeast1 --project=${{ secrets.GCP_PROJECT_ID }} --format="value(status.url)")"
+          SERVICE_URL="$(gcloud run services describe aone-lead-factory --region=asia-northeast1 --project=${{ secrets.GCP_PROJECT_ID }} --format='value(status.url)')"
           TOKEN="$(gcloud auth print-identity-token --audiences="${SERVICE_URL}")"
           response="$(curl --fail-with-body --silent --show-error --retry 3 \
             -X POST \
@@ -157,4 +157,3 @@ jobs:
       - name: Verify autonomous schedulers
         run: |
           gcloud scheduler jobs list --location=asia-northeast1 --project=${{ secrets.GCP_PROJECT_ID }} --filter="name:lead-factory" --format="table(name,state,schedule,httpTarget.uri)"
-          gcloud scheduler jobs list --location=${REGION} --project=${PROJECT} --filter='name:lead-factory' --format='table(name,state,schedule,httpTarget.uri)'
