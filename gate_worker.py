@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-
 import json
 import uuid
 from datetime import datetime, timezone
 
-
 from gate_loader import GateLoader
-
-
+from gate_rules import evaluate_gate, research_gate_facts
 
 
 class GateWorker:
-    """One-company / one-evaluation gate worker using the live Google Doc SSOT."""
+    """One-company fresh-context worker.
 
+    Web/AI is used only to collect factual evidence. PASS/FAIL is calculated by
+    Python from the live Google Doc, so the document remains the business-rule SSOT.
+    """
 
     def __init__(self, sheets_repo, drive_repo, llm):
         self.sheets = sheets_repo
@@ -21,12 +21,10 @@ class GateWorker:
         self.llm = llm
         self.loader = GateLoader(sheets_repo, drive_repo)
 
-
     @staticmethod
     def _gate(result: dict, key: str) -> dict:
         value = result.get(key, {})
         return value if isinstance(value, dict) else {}
-
 
     @staticmethod
     def _evidence(value) -> str:
@@ -34,33 +32,15 @@ class GateWorker:
             return json.dumps(value, ensure_ascii=False)
         return str(value or "")
 
-
     def evaluate_and_persist(self, company_context: dict) -> dict:
-        # LIVE_PER_EVALUATION: intentionally load here, not at worker startup.
+        # LIVE_PER_EVALUATION is intentional: a Doc edit changes the next company.
         gate = self.loader.load()
-        result = self.llm.evaluate_gate(gate.text, company_context)
+        facts = research_gate_facts(self.llm, company_context)
+        result = evaluate_gate(gate.text, company_context, facts)
 
-
-        # Deterministic binary finalization. UNKNOWN may remain at gate level,
-        # but it never creates a third final outcome.
-        gate_states = []
-        for gate_no in range(1, 7):
-            gate_states.append(str(self._gate(result, f"G{gate_no}").get("result", "UNKNOWN")).upper())
-        has_fail = any(state == "FAIL" for state in gate_states)
-        result["final_result"] = "NO-GO" if has_fail else "GO"
-
-
-        risk = str(result.get("projectization_risk", "UNKNOWN")).upper()
-        if has_fail:
-            result["standard_gtm"] = "FALSE"
-            result["routing"] = "NO_GO"
-        elif risk == "HIGH":
-            result["standard_gtm"] = "FALSE"
-            result["routing"] = "STRATEGIC_BD_REVIEW"
-        else:
-            result["standard_gtm"] = "TRUE"
-            result["routing"] = "STANDARD_GTM"
-
+        # The live Doc contract is binary: all six PASS => GO; any FAIL => NO-GO.
+        gate_states = [str(self._gate(result, f"G{i}").get("result", "FAIL")).upper() for i in range(1, 7)]
+        result["final_result"] = "GO" if all(state == "PASS" for state in gate_states) else "NO-GO"
 
         now = datetime.now(timezone.utc).isoformat()
         row = {
@@ -74,21 +54,21 @@ class GateWorker:
         for gate_no in range(1, 7):
             key = f"G{gate_no}"
             g = self._gate(result, key)
-            row[f"{key}_result"] = str(g.get("result", "UNKNOWN"))
+            row[f"{key}_result"] = str(g.get("result", "FAIL"))
             row[f"{key}_reason"] = str(g.get("reason", ""))
             row[f"{key}_evidence"] = self._evidence(g.get("evidence", []))
 
-
-        row["final_result"] = str(result.get("final_result", "GO"))
-        row["model"] = str(getattr(self.llm, "model", ""))
+        row["final_result"] = str(result.get("final_result", "NO-GO"))
+        row["model"] = f"facts:{getattr(self.llm, 'model', '')}|decision:python"
         row["error"] = ""
         row["projectization_risk"] = str(result.get("projectization_risk", "UNKNOWN"))
         row["standard_gtm"] = str(result.get("standard_gtm", "UNKNOWN"))
-        row["routing"] = str(result.get("routing", "STANDARD_GTM"))
+        row["routing"] = str(result.get("routing", "NO_GO"))
         row["most_important_reason"] = str(result.get("most_important_reason", ""))
         row["first_failed_gate"] = str(result.get("first_failed_gate", ""))
         row["missing_evidence"] = self._evidence(result.get("missing_evidence", []))
         self.sheets.append_dict("LeadFactory_GateResults", row)
+
         lead_id = str(company_context.get("lead_id", "")).strip()
         if lead_id:
             self.sheets.update_raw_screening(
