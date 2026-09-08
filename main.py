@@ -1,28 +1,48 @@
 from __future__ import annotations
 
+import hmac
 import os
 import uuid
 
 import google.auth
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from google.cloud import secretmanager
 
 from maktek_ingest import MaktekIngestor
-from strict_factory import StrictLeadFactory as LeadFactory
-from settings import SETTINGS
 from production_controller import QualifiedLeadProductionController
+from self_dispatch import dispatch_lane as self_dispatch_lane
+from settings import SETTINGS
+from strict_factory import StrictLeadFactory as LeadFactory
 
 
-app = FastAPI(title="A-one Lead Factory", version="0.3.1")
+app = FastAPI(title="A-one Lead Factory", version="0.3.2")
 factory: LeadFactory | None = None
 production_controller: QualifiedLeadProductionController | None = None
+
+
+@app.middleware("http")
+async def internal_runtime_guard(request: Request, call_next):
+    """App-level interlock for a public Cloud Run ingress.
+
+    `/healthz` is intentionally shallow and public. Every stateful/research endpoint,
+    including deep health, requires the per-deployment internal token used by
+    Scheduler and self-dispatched workers. Customer-facing execution remains absent.
+    """
+    if request.method == "GET" and request.url.path == "/healthz":
+        return await call_next(request)
+    expected = os.getenv("LEAD_FACTORY_INTERNAL_TOKEN", "")
+    supplied = request.headers.get("X-Aone-Internal-Token", "")
+    if not expected or not supplied or not hmac.compare_digest(expected, supplied):
+        return JSONResponse(status_code=401, content={"detail": "internal_runtime_token_required"})
+    return await call_next(request)
 
 
 def _ensure_openai_key() -> None:
     """Resolve the API credential from Secret Manager using the Cloud Run identity.
 
-    This avoids coupling deployment authority to Secret Manager read authority.
-    The runtime service account is the only principal that needs secret access.
+    Deployment authority never needs to read the secret. The runtime identity reads
+    the already-existing `aone-openai-api-key` secret when the first real task starts.
     """
     if os.getenv("OPENAI_API_KEY"):
         return
@@ -47,6 +67,7 @@ def get_factory() -> LeadFactory:
         _ensure_openai_key()
         factory = LeadFactory(SETTINGS)
     return factory
+
 
 def get_production_controller() -> QualifiedLeadProductionController:
     global production_controller
@@ -149,7 +170,7 @@ def discover_mittelstand():
 @app.post("/dispatch/growth")
 def dispatch_growth():
     try:
-        return get_factory().dispatch_lane("GROWTH")
+        return self_dispatch_lane(get_factory(), "GROWTH")
     except Exception as exc:
         _fail(exc)
 
@@ -157,7 +178,7 @@ def dispatch_growth():
 @app.post("/dispatch/mittelstand")
 def dispatch_mittelstand():
     try:
-        return get_factory().dispatch_lane("MITTELSTAND")
+        return self_dispatch_lane(get_factory(), "MITTELSTAND")
     except Exception as exc:
         _fail(exc)
 
@@ -316,10 +337,10 @@ def growth_tick():
 @app.post("/prep/tick")
 def prep_tick():
     try:
-        factory = get_factory()
-        if hasattr(factory, "outreach_ready_tick"):
-            return factory.outreach_ready_tick()
-        return factory.prep_tick()
+        lf = get_factory()
+        if hasattr(lf, "outreach_ready_tick"):
+            return lf.outreach_ready_tick()
+        return lf.prep_tick()
     except Exception as exc:
         _fail(exc)
 
@@ -327,11 +348,11 @@ def prep_tick():
 @app.post("/pipeline/tick")
 def pipeline_tick():
     try:
-        factory = get_factory()
-        discovery_growth = factory.discover_lane(f"pipeline-growth-{uuid.uuid4()}", "GROWTH")
-        discovery_mittel = factory.discover_lane(f"pipeline-mittel-{uuid.uuid4()}", "MITTELSTAND")
-        dispatch_growth_result = factory.dispatch_lane("GROWTH")
-        dispatch_mittel_result = factory.dispatch_lane("MITTELSTAND")
+        lf = get_factory()
+        discovery_growth = lf.discover_lane(f"pipeline-growth-{uuid.uuid4()}", "GROWTH")
+        discovery_mittel = lf.discover_lane(f"pipeline-mittel-{uuid.uuid4()}", "MITTELSTAND")
+        dispatch_growth_result = self_dispatch_lane(lf, "GROWTH")
+        dispatch_mittel_result = self_dispatch_lane(lf, "MITTELSTAND")
         return {
             "status": "DISPATCHED",
             "discovery_growth": discovery_growth,
