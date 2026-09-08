@@ -41,6 +41,14 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Enable Sheets API
+        run: |
+          gcloud services enable sheets.googleapis.com \
+            --project=${{ secrets.GCP_PROJECT_ID }}
+
       - name: Ingest full MAKTEK 2026 exhibitor directory
         env:
           LEAD_FACTORY_SPREADSHEET_ID: 1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo
@@ -56,9 +64,6 @@ jobs:
           if result.get("status") != "PASS" or int(result.get("official_exhibitors", 0)) < 500:
               raise SystemExit(f"MAKTEK ingest incomplete: {result}")
           PY
-
-      - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v2
 
       - name: Bootstrap Cloud Build API
         continue-on-error: true
