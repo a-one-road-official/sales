@@ -43,7 +43,7 @@ steps:
           --sandbox-launcher \
           --timeout=540 \
           --set-secrets=OPENAI_API_KEY=${_OPENAI_SECRET}:latest \
-          --set-env-vars=LEAD_FACTORY_SPREADSHEET_ID=${_SPREADSHEET_ID},LEAD_FACTORY_DRIVE_ROOT_FOLDER_ID=${_DRIVE_ROOT_FOLDER_ID},LEAD_FACTORY_DRIVE_SCRAPERS_FOLDER_ID=${_DRIVE_SCRAPERS_FOLDER_ID},LEAD_FACTORY_META_INTERVAL_SECONDS=120,LEAD_FACTORY_MAX_REPAIR_ATTEMPTS=5
+          --set-env-vars=LEAD_FACTORY_SPREADSHEET_ID=${_SPREADSHEET_ID},LEAD_FACTORY_DRIVE_ROOT_FOLDER_ID=${_DRIVE_ROOT_FOLDER_ID},LEAD_FACTORY_DRIVE_SCRAPERS_FOLDER_ID=${_DRIVE_SCRAPERS_FOLDER_ID},LEAD_FACTORY_META_INTERVAL_SECONDS=120,LEAD_FACTORY_MAX_REPAIR_ATTEMPTS=5,LEAD_FACTORY_CAPACITY_MULTIPLIER=4
 
         URL="$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.url)')"
         INVOKER="lead-factory-scheduler@${PROJECT_ID}.iam.gserviceaccount.com"
@@ -65,6 +65,17 @@ steps:
             --location=${_REGION} --schedule="*/2 * * * *" --time-zone="Asia/Tokyo" \
             --uri="$${URL}/meta/tick" --http-method=POST \
             --oidc-service-account-email="$${INVOKER}" --oidc-token-audience="$${URL}"
+
+        # Persistent Qualified Lead Production SLO forecast/capacity loop.
+        gcloud scheduler jobs describe lead-factory-autonomy-slo --location=\$\{_REGION\} >/dev/null 2>&1 && \
+          gcloud scheduler jobs update http lead-factory-autonomy-slo \
+            --location=\$\{_REGION\} --schedule="*/2 * * * *" --time-zone="Asia/Tokyo" \
+            --uri="\$\{URL}/autonomy/tick" --http-method=POST --attempt-deadline=540s \
+            --oidc-service-account-email="\$\{INVOKER\}" --oidc-token-audience="\$\{URL\}" || \
+          gcloud scheduler jobs create http lead-factory-autonomy-slo \
+            --location=\$\{_REGION\} --schedule="*/2 * * * *" --time-zone="Asia/Tokyo" \
+            --uri="\$\{URL}/autonomy/tick" --http-method=POST --attempt-deadline=540s \
+            --oidc-service-account-email="\$\{INVOKER\}" --oidc-token-audience="\$\{URL\}"
 
         # N3 autonomous supply: two bounded lanes, 10-minute cadence, staggered by 2 minutes.
         gcloud scheduler jobs describe lead-factory-growth-supply --location=${_REGION} >/dev/null 2>&1 && \
@@ -100,7 +111,7 @@ steps:
             --oidc-service-account-email="$${INVOKER}" --oidc-token-audience="$${URL}"
 
         gcloud scheduler jobs run lead-factory-maktek-full --location=${_REGION}
-        gcloud scheduler jobs run lead-factory-meta --location=${_REGION}
+        gcloud scheduler jobs run lead-factory-meta --location=${_REGION}\n        gcloud scheduler jobs run lead-factory-autonomy-slo --location=${_REGION}
 
 images:
   - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/${_SERVICE}:${BUILD_ID}"
