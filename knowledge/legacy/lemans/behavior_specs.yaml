@@ -1,0 +1,22 @@
+behaviors:
+  - id: LEMANS-DISCOVERY-001
+    name: robots-aware-url-discovery
+    expected: collect candidate URLs, apply robots filtering, categorize pages
+  - id: LEMANS-DISCOVERY-002
+    name: compliance-before-contact
+    expected: determine whether outreach is allowed before preparing a contact action
+  - id: LEMANS-CONTACT-001
+    name: email-and-form-discovery
+    expected: produce contact candidates with source evidence
+  - id: LEMANS-CONTACT-002
+    name: email-first-form-fallback
+    expected: form execution is skipped when email execution succeeds in the legacy flow
+  - id: LEMANS-SAFETY-001
+    name: bounded-retry
+    expected: retry is finite and records failure
+  - id: LEMANS-SAFETY-002
+    name: phase-level-result
+    expected: each phase returns a typed status/result
+  - id: LEMANS-MIGRATION-001
+    name: prep-execution-separation
+    expected: new system must stop before any external action until approval
