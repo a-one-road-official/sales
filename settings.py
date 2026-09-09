@@ -24,7 +24,7 @@ class Settings:
     # Production default: keep widening and draining the source universe until the
     # exhaustion controller proves the frontier and all backlogs are quiet.
     autonomy_mode: str = os.getenv("LEAD_FACTORY_AUTONOMY_MODE", "UNTIL_EXHAUSTED")
-    autonomy_target_new_companies: int = int(os.getenv("LEAD_FACTORY_TARGET_NEW_COMPANIES", "200"))
+    autonomy_target_new_companies: int = int(os.getenv("LEAD_FACTORY_TARGET_NEW_COMPANIES", "1500"))
     autonomy_start_promoted: int = int(os.getenv("LEAD_FACTORY_AUTONOMY_START_PROMOTED", "0"))
     autonomy_stop_after_zero_runs: int = int(os.getenv("LEAD_FACTORY_STOP_AFTER_ZERO_PROMOTION_RUNS", "3"))
     autonomy_notify_email: str = os.getenv("LEAD_FACTORY_AUTONOMY_NOTIFY_EMAIL", "admin@a1-road.com")
