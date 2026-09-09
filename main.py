@@ -16,6 +16,7 @@ from settings import SETTINGS
 from strict_factory import StrictLeadFactory as LeadFactory
 from notifier import InternalNotifier
 from outreach_execution import SacrificialEmailExecutor
+from outreach_stability import CRITICAL, SacrificeStability
 
 
 app = FastAPI(title="A-one Lead Factory", version="0.3.2")
@@ -386,7 +387,7 @@ def prep_tick():
 
 @app.post("/outreach/execute-sacrificial")
 def execute_sacrificial(payload: dict):
-    """Execute one EC/retail canary draft; Factory lanes remain blocked."""
+    """Execute one approved EC/retail canary draft; Factory lanes remain blocked."""
     try:
         lf = get_factory()
         draft_id = str(payload.get("draft_id") or "").strip()
@@ -397,6 +398,39 @@ def execute_sacrificial(payload: dict):
         if not draft:
             raise HTTPException(status_code=404, detail="draft_not_found")
         return SacrificialEmailExecutor(lf.sheets).execute(draft, lf._config())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/outreach/sacrificial-tick")
+def sacrificial_tick(payload: dict):
+    """Execute at most one isolated 10-draft batch and persist its gate result."""
+    try:
+        lf = get_factory()
+        cfg = lf._config()
+        if str(cfg.get("OUTREACH_FACTORY_SEND_ENABLED", "FALSE")).upper() == "TRUE":
+            raise HTTPException(status_code=409, detail="factory_send_must_remain_false")
+        rows = lf.sheets._rows_as_dicts("LeadFactory_MessageDrafts", "ZZ")
+        wanted = {str(v).strip() for v in (payload.get("draft_ids") or []) if str(v).strip()}
+        candidates = [r for r in rows if str(r.get("status") or "") == "READY_SACRIFICIAL_EXECUTION"]
+        if wanted:
+            candidates = [r for r in candidates if str(r.get("draft_id") or "") in wanted]
+        limit = min(10, int(cfg.get("OUTREACH_MAX_SENDS_PER_BATCH", "10") or 10))
+        results = [SacrificialEmailExecutor(lf.sheets).execute(row, cfg) for row in candidates[:limit]]
+        critical = []
+        for result in results:
+            critical.extend(str(v) for v in result.get("critical_errors", []) if str(v) in CRITICAL)
+            if result.get("status") == "DUPLICATE_BLOCKED":
+                critical.append("DUPLICATE_EXTERNAL_ACTION")
+        successes = sum(1 for result in results if result.get("status") == "SENT" and result.get("preflight", {}).get("ok"))
+        gate = SacrificeStability(lf.sheets).record(
+            lane="EC", attempted=len(results), successes=successes,
+            critical_errors=critical, cfg=cfg,
+        )
+        return {"status": "EXECUTED", "results": results, "gate": gate,
+                "forms": "NOT_IMPLEMENTED_FAIL_CLOSED"}
     except HTTPException:
         raise
     except Exception as exc:
