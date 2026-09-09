@@ -305,8 +305,14 @@ Probe snapshot:
 {json.dumps(probe_payload, ensure_ascii=False)[:160000]}
 Previous failure if any:
 {prior_error[:12000]}
+
+When Previous failure is non-empty, investigate it before writing code. Use web_search to consult
+current official documentation and public engineering discussions (including GitHub issues and
+Stack Overflow where relevant). Compare at least two plausible fixes, select the safest one,
+and encode the chosen fix in the adapter while preserving the sandbox restrictions.
 """
-        resp = self.client.responses.create(model=self.model, input=prompt)
+        repair_tools = [{"type": "web_search"}] if prior_error.strip() else []
+        resp = self.client.responses.create(model=self.model, tools=repair_tools, input=prompt)
         code = resp.output_text.strip()
         if code.startswith("```"):
             code = re.sub(r"^```(?:python)?\s*", "", code)
