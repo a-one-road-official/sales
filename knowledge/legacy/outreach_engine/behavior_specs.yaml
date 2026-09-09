@@ -1,0 +1,17 @@
+behaviors:
+  - id: OE-REPORTED-FORM-001
+    name: japanese-required-semantics
+    expected: interpret required, ※, *, aria-required, dt/dd, th/td, and adjacent label structures
+    provenance: user-supplied legacy behavior summary; repository verification pending
+  - id: OE-REPORTED-FORM-002
+    name: non-button-submit-control
+    expected: evaluate button, input, anchor, role=button, onclick, event listeners, and custom components
+  - id: OE-REPORTED-FORM-003
+    name: staged-form-state-machine
+    expected: fill -> confirm -> confirmation -> final submit -> success
+  - id: OE-REPORTED-FORM-004
+    name: multi-signal-success
+    expected: combine text, URL, DOM, network, reset, confirmation ID, and error signals
+  - id: OE-REPORTED-SAFETY-001
+    name: bounded-fingerprint-retry
+    expected: classify errors and open a circuit on repeated fingerprints
