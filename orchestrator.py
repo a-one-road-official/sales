@@ -758,6 +758,37 @@ class LeadFactory:
             self.meta.stop_heartbeat()
 
 
+    def capacity_tick(self, status: dict) -> dict:
+        """Expand production inputs/workers when the SLO forecast is below target."""
+        cfg = self._config()
+        current = max(1, int(cfg.get("LEAD_FACTORY_CAPACITY_MULTIPLIER", "1") or 1))
+        requested = int(status.get("required_velocity_per_hour", 0) or 0)
+        multiplier = min(50, max(current + 1, math.ceil(max(1, requested) / 60)))
+        values = {
+            "LEAD_FACTORY_CAPACITY_MULTIPLIER": str(multiplier),
+            "SUPPLY_DOMAIN_MAX_PER_TICK": str(min(200, 30 * multiplier)),
+            "SUPPLY_GATE_MAX_PER_TICK": str(min(200, 30 * multiplier)),
+            "LEAD_FACTORY_DISCOVERY_SOURCE_LIMIT": str(min(100, 20 * multiplier)),
+            "DISPATCH_SOURCE_MAX": str(min(50, 5 * multiplier)),
+            "DISPATCH_DOMAIN_MAX": str(min(500, 100 * multiplier)),
+            "DISPATCH_GATE_MAX": str(min(500, 100 * multiplier)),
+        }
+        rows = self.sheets.read("Config!A2:B1000")
+        positions = {str(r[0]): i for i, r in enumerate(rows, start=2) if r and r[0]}
+        for key, value in values.items():
+            if key in positions:
+                self.sheets.update_range(f"Config!B{positions[key]}", [[value]])
+            else:
+                self.sheets.append("Config", [key, value])
+        return {
+            "status": "CAPACITY_EXPANDED",
+            "previous_multiplier": current,
+            "multiplier": multiplier,
+            "required_velocity_per_hour": requested,
+            "controls": values,
+        }
+
+
     def evaluate_gate(self, company_context: dict) -> dict:
         run_id = f"gate-{uuid.uuid4()}"
         self.meta.check(
