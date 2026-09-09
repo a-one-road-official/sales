@@ -744,16 +744,48 @@ class LeadFactory:
             gate_pass = int(gate.get("GO", 0) or 0)
             gate_verify = int(gate.get("UNKNOWN", 0) or 0)
             gate_fail = int(gate.get("NO", gate.get("NO-GO", 0)) or 0)
+            system_errors = (
+                int(sources.get("errors", 0) or 0)
+                + int(domain.get("errors", 0) or 0)
+                + int(gate.get("ERROR", 0) or 0)
+                + int(discovery.get("rejected", 0) or 0)
+            )
+            frontier_error = str(discovery.get("frontier_error") or "").strip()
+            if frontier_error or system_errors:
+                outcome = "SYSTEM_ERROR"
+                next_action = "AUTO_REPAIR_AND_RETRY"
+                remediation = {"action": next_action, "reason": frontier_error or "pipeline_component_error"}
+            elif screened > 0 and gate_pass == 0:
+                outcome = "NO_QUALIFYING_TARGETS"
+                next_action = "EXPAND_SOURCE_FRONTIER"
+                remediation = {"action": next_action}
+                expand = getattr(self, "expand_source_frontier", None)
+                if callable(expand):
+                    try:
+                        remediation["result"] = expand(lane, limit=max(10, int(cfg.get("SOURCE_FRONTIER_EXPANSION_LIMIT", "25") or 25)))
+                    except Exception as exc:
+                        outcome = "SYSTEM_ERROR"
+                        remediation = {"action": "AUTO_REPAIR_AND_RETRY", "reason": f"frontier_expansion:{type(exc).__name__}:{exc}"}
+            elif int(promotion.get("promoted", 0) or 0) == 0 and gate_pass > 0:
+                outcome = "PROMOTION_BLOCKED"
+                next_action = "RETRY_PROMOTION_AND_RECONCILE"
+                remediation = {"action": next_action}
+            else:
+                outcome = "QUALIFIED_OUTPUT" if gate_pass > 0 else "NO_NEW_RAW"
+                remediation = {"action": "CONTINUE_FRONTIER"}
+            finished_at = datetime.now(timezone.utc).isoformat()
+            runlog_detail = json.dumps({"outcome": outcome, "remediation": remediation}, ensure_ascii=False)[:5000]
             self.sheets.append_runlog([
-                run_id, started_at, datetime.now(timezone.utc).isoformat(), "PASS",
+                run_id, started_at, finished_at, outcome,
                 len(discovery.get("added", []) or []), int(sources.get("new_raw", 0) or 0),
                 int(sources.get("duplicates", 0) or 0) + int(domain.get("duplicates_skipped", 0) or 0),
                 screened, gate_pass, gate_verify, gate_fail, int(promotion.get("promoted", 0) or 0),
-                int(sources.get("errors", 0) or 0) + int(domain.get("errors", 0) or 0), f"lane:{lane}",
+                system_errors, f"lane:{lane}", run_id, "cloud", runlog_detail,
             ])
             return {
-                "status": "PASS", "run_id": run_id, "lane": lane, "discovery": discovery, "sources": sources,
+                "status": outcome, "run_id": run_id, "lane": lane, "discovery": discovery, "sources": sources,
                 "funding_fallback": fallback, "domain": domain, "gate": gate, "promotion": promotion, "ready": ready,
+                "outcome": outcome, "remediation": remediation,
             }
         finally:
             self.meta.stop_heartbeat()
