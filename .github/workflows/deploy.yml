@@ -4,6 +4,12 @@ on:
   # Production deployment is a control-plane operation.
   # Development commits must never enqueue or cancel production deploys.
   workflow_dispatch:
+    inputs:
+      execute_sacrifice:
+        description: "Run the isolated non-factory sales_leads ten-company send after deploy"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -206,6 +212,25 @@ jobs:
               -H "Content-Type: application/json" \
               "${SERVICE_URL}${PATH_NAME}" || echo "bootstrap_failed path=${PATH_NAME}"
           done
+
+      - name: Execute isolated ten-company sacrifice batch
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true }}
+        run: |
+          curl --fail-with-body --retry 3 --retry-all-errors --retry-delay 2 \
+            -X POST \
+            -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"limit":10,"execute_external":true}' \
+            -o /tmp/sacrifice.json \
+            "${SERVICE_URL}/outreach/sales-leads-sacrifice-run"
+          python - <<'PY'
+          import json
+          d=json.load(open('/tmp/sacrifice.json'))
+          summary={"run_id":d.get("run_id"),"attempted":d.get("attempted"),"production_ssot_touched":d.get("production_ssot_touched"),"results":[{"company_name":x.get("company_name"),"status":x.get("status"),"stage":x.get("stage"),"external_action":x.get("external_action"),"message_id":(x.get("execution") or {}).get("message_id","")} for x in d.get("results",[])]}
+          print(json.dumps(summary,ensure_ascii=False))
+          assert summary["production_ssot_touched"] is False
+          assert summary["attempted"] == 10
+          PY
 
       - name: Verify autonomous infrastructure
         run: |
