@@ -1,0 +1,12 @@
+status: PENDING_OFFICIAL_API_INTAKE
+required_events:
+  - reply_received
+  - bounce
+  - opt_out
+  - account_error
+required_states:
+  - GENERATED_DRAFT
+  - PENDING_APPROVAL
+  - SENT
+  - REPLIED
+  - BOUNCED
