@@ -157,6 +157,7 @@ jobs:
           PY
 
       - name: Kick autonomous frontier and workers now
+        continue-on-error: true
         run: |
           echo 'POST /autonomy/start'
           curl --fail-with-body --retry 10 --retry-all-errors --retry-delay 5 \
