@@ -40,8 +40,9 @@ def _result_base(candidate: dict) -> dict:
     }
 
 
-def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, limit: int = 10) -> dict:
-    """Research and draft one ten-company batch, stopping before external send."""
+def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, limit: int = 10,
+                            executor=None, execute_external: bool = False) -> dict:
+    """Run one ten-company sacrifice batch, optionally executing EC/retail sends."""
     if int(limit) != 10:
         raise ValueError("sacrifice_batch_must_be_exactly_ten")
     cfg = dict(cfg or {})
@@ -128,7 +129,16 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
                     result["message_hash"] = _hash_text(row["recipient"], row["subject"], row["body"])
                     result["preflight"] = semantic_email_preflight(row, cfg)
                     if result["preflight"]["ok"]:
-                        result.update({"status": "READY_FOR_APPROVAL", "stage": "DRAFT_PREP"})
+                        row["draft_id"] = f"{run_id}:{candidate.get('source_row', '')}"
+                        if execute_external:
+                            if executor is None:
+                                raise RuntimeError("sacrifice_executor_not_configured")
+                            execution = executor.execute(row, cfg)
+                            result["execution"] = execution
+                            result["external_action"] = execution.get("status", "UNKNOWN")
+                            result.update({"status": execution.get("status", "UNKNOWN"), "stage": "EXTERNAL_EXECUTION"})
+                        else:
+                            result.update({"status": "READY_FOR_APPROVAL", "stage": "DRAFT_PREP"})
                     else:
                         result.update({"status": "FAILED", "stage": "DRAFT_PREFLIGHT", "error_message": ",".join(result["preflight"]["critical_errors"] or result["preflight"]["missing"])})
         except Exception as exc:  # preserve every company failure for repair
