@@ -1,0 +1,32 @@
+source:
+  repository: A1-Road/python
+  commit_sha: ea092e809fc455663bdab4c708e104f95dbf39b6
+capabilities:
+  orchestration:
+    - company-level processing
+    - bounded retry
+    - semaphore-based concurrency
+  discovery:
+    - initial website check
+    - robots.txt retrieval and filtering
+    - URL discovery
+    - URL categorization
+    - compliance-page detection
+    - content collection
+    - email discovery
+    - form discovery
+  execution:
+    - Gmail API email send
+    - Playwright form submission
+    - email-first then form fallback behavior
+  persistence:
+    - Supabase repository
+    - sales history/result recording
+    - successful-contact recording
+  observability:
+    - structured phase logging
+    - status/result models
+    - error messages
+  known_boundary_gap:
+    - preparation and external execution are coupled in the legacy phase flow
+    - no approval-bound execution contract in the inspected orchestrator
