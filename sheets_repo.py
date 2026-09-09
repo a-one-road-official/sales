@@ -2,6 +2,8 @@ from __future__ import annotations
 
 
 import hashlib
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Iterable
@@ -16,6 +18,11 @@ from models import Source
 from safety import canonicalize_url
 
 
+
+
+_CONFIG_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
+_CONFIG_CACHE_LOCK = threading.Lock()
+_CONFIG_CACHE_TTL_SECONDS = 30.0
 
 
 SOURCE_HEADERS = [
@@ -49,6 +56,8 @@ class SheetsRepo:
             insertDataOption="INSERT_ROWS",
             body={"values": [values]},
         ).execute()
+        if sheet == "Config":
+            self.invalidate_config_cache()
 
 
     def append_dict(self, sheet: str, row: dict) -> None:
@@ -223,6 +232,8 @@ class SheetsRepo:
             valueInputOption="RAW",
             body={"values": values},
         ).execute()
+        if str(range_).startswith("Config!") or str(range_).startswith("'Config'!"):
+            self.invalidate_config_cache()
 
 
     def read_formulas(self, range_: str) -> list[list[str]]:
@@ -256,8 +267,21 @@ class SheetsRepo:
 
 
     def get_config(self) -> dict[str, str]:
+        now = time.monotonic()
+        cache_key = self.spreadsheet_id
+        with _CONFIG_CACHE_LOCK:
+            cached = _CONFIG_CACHE.get(cache_key)
+            if cached and now - cached[0] < _CONFIG_CACHE_TTL_SECONDS:
+                return dict(cached[1])
         rows = self.read("Config!A2:B1000")
-        return {str(r[0]): str(r[1]) for r in rows if len(r) >= 2 and r[0]}
+        config = {str(r[0]): str(r[1]) for r in rows if len(r) >= 2 and r[0]}
+        with _CONFIG_CACHE_LOCK:
+            _CONFIG_CACHE[cache_key] = (time.monotonic(), config)
+        return dict(config)
+
+    def invalidate_config_cache(self) -> None:
+        with _CONFIG_CACHE_LOCK:
+            _CONFIG_CACHE.pop(self.spreadsheet_id, None)
 
 
     def list_sources(self) -> list[Source]:
