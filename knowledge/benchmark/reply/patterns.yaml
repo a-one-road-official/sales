@@ -1,0 +1,6 @@
+patterns:
+  - ai_draft_to_pending_approval
+  - reply_event_to_state_transition
+  - reply_to_draft_reply
+  - bounce_to_sender_circuit_breaker
+  - account_error_to_channel_pause
