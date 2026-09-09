@@ -15,6 +15,7 @@ from self_dispatch import dispatch_lane as self_dispatch_lane
 from settings import SETTINGS
 from strict_factory import StrictLeadFactory as LeadFactory
 from notifier import InternalNotifier
+from outreach_execution import SacrificialEmailExecutor
 
 
 app = FastAPI(title="A-one Lead Factory", version="0.3.2")
@@ -100,7 +101,7 @@ def healthz():
     return {
         "ok": True,
         "service": "aone-lead-factory",
-        "external_write": False,
+        "external_write": os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE").upper() == "TRUE",
         "delete": False,
         "official_site_policy": "VERIFIED_FIRST_PARTY_REQUIRED",
     }
@@ -115,8 +116,8 @@ def deep_healthz():
         "service": "aone-lead-factory",
         "factory_enabled": os.getenv("LEAD_FACTORY_ENABLED", "TRUE").upper() == "TRUE",
         "gemini_vertex_ready": bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")),
-        "external_write": False,
-        "customer_facing_send": False,
+        "external_write": os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE").upper() == "TRUE",
+        "customer_facing_send": os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE").upper() == "TRUE",
     }
 
 
@@ -379,6 +380,25 @@ def prep_tick():
         if hasattr(lf, "outreach_ready_tick"):
             return lf.outreach_ready_tick()
         return lf.prep_tick()
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/outreach/execute-sacrificial")
+def execute_sacrificial(payload: dict):
+    """Execute one EC/retail canary draft; Factory lanes remain blocked."""
+    try:
+        lf = get_factory()
+        draft_id = str(payload.get("draft_id") or "").strip()
+        if not draft_id:
+            raise HTTPException(status_code=400, detail="missing_draft_id")
+        rows = lf.sheets._rows_as_dicts("LeadFactory_MessageDrafts", "ZZ")
+        draft = next((row for row in rows if str(row.get("draft_id") or "") == draft_id), None)
+        if not draft:
+            raise HTTPException(status_code=404, detail="draft_not_found")
+        return SacrificialEmailExecutor(lf.sheets).execute(draft, lf._config())
+    except HTTPException:
+        raise
     except Exception as exc:
         _fail(exc)
 
