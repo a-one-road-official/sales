@@ -554,7 +554,30 @@ class LeadFactory:
                 source_outcome = "SYSTEM_ERROR"
                 source_reason = str(result.get("reason") or result.get("error") or "authentication_required")
                 source_next_action = "REQUEST_AUTH_OR_SWITCH_SOURCE"
-            elif status in {"READY_FOR_CLOUD_SMOKE", "REPAIR_READY_FOR_CLOUD_SMOKE", "NOT_ACTIVE"}:
+            elif status in {"READY_FOR_CLOUD_SMOKE", "REPAIR_READY_FOR_CLOUD_SMOKE"}:
+                # A generated adapter must not strand the source at a local-test state.
+                # Run the deployed-runtime smoke immediately; successful smoke activates
+                # the scraper and captures the first bounded Raw batch in the same tick.
+                try:
+                    smoke = self.cloud_smoke_source(source.source_id)
+                    if str(smoke.get("status", "")).upper() == "ACTIVE":
+                        result = {**result, **smoke, "runtime": smoke.get("runtime", {})}
+                        status = "RAW_CAPTURED"
+                    else:
+                        result = {**result, "cloud_smoke": smoke}
+                        status = str(smoke.get("status") or status).upper()
+                except Exception as smoke_exc:
+                    result = {**result, "cloud_smoke_error": f"{type(smoke_exc).__name__}:{smoke_exc}"}
+                    status = "ERROR"
+                if status == "RAW_CAPTURED":
+                    source_outcome = "RAW_CAPTURED"
+                    source_reason = f"cloud_smoke_active;records={int((result.get('runtime') or {}).get('records', 0) or 0)}"
+                    source_next_action = "CONTINUE"
+                else:
+                    source_outcome = "SYSTEM_ERROR"
+                    source_reason = str(result.get("error") or result.get("cloud_smoke_error") or result.get("scraper_status") or "cloud_smoke_not_active")
+                    source_next_action = "AUTO_REPAIR_AND_RETRY"
+            elif status == "NOT_ACTIVE":
                 source_outcome = "SYSTEM_ERROR"
                 source_reason = str(result.get("error") or result.get("scraper_status") or "production_adapter_not_active")
                 source_next_action = "AUTO_REPAIR_AND_CLOUD_SMOKE"
