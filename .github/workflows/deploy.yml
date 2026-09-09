@@ -70,6 +70,14 @@ jobs:
             --condition=None >/dev/null 2>&1 || \
             echo "Gemini IAM grant unavailable to deploy identity; remediation remains visible in runtime health/logs."
 
+      - name: Grant runtime queue permission
+        run: |
+          gcloud projects add-iam-policy-binding "$PROJECT" \
+            --member="serviceAccount:$RUNTIME_SA" \
+            --role="roles/cloudtasks.enqueuer" \
+            --condition=None >/dev/null 2>&1 || \
+            echo "Cloud Tasks IAM grant unavailable to deploy identity; runtime fallback lane remains required."
+
       - name: Configure Docker auth
         run: gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
 
