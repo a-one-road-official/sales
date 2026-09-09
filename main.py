@@ -315,6 +315,23 @@ def mittelstand_supply_tick():
         _fail(exc)
 
 
+@app.post("/discover/fallback")
+def discover_fallback():
+    """Independent discovery lane for public funding/news/association signals."""
+    try:
+        lf = get_factory()
+        cfg = lf._config()
+        enabled = (
+            cfg.get("TRIGGER_SIGNAL_ENABLED", "FALSE").upper() == "TRUE"
+            or cfg.get("TRIGGER_LLM_ENABLED", "FALSE").upper() == "TRUE"
+        )
+        if not enabled:
+            return {"status": "DISABLED", "lane": "FALLBACK"}
+        return lf.trigger_tick()
+    except Exception as exc:
+        _fail(exc)
+
+
 @app.post("/sources/tick")
 def sources_tick():
     try:
