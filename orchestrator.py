@@ -66,7 +66,7 @@ class LeadFactory:
 
     def discover(self, run_id: str) -> dict:
         self.meta.check(
-            run_id=run_id, stage="SOURCE_DISCOVERY", action="OPENAI_WEB_SOURCE_DISCOVERY", target="PUBLIC_WEB",
+            run_id=run_id, stage="SOURCE_DISCOVERY", action="GEMINI_WEB_SOURCE_DISCOVERY", target="PUBLIC_WEB",
             requested_scope_ok=True, target_exists_checked=True, destructive=False, external_effect=False,
             simpler_option_checked=True, concept_boundary_ok=True, fact_or_inference="INFERENCE",
         )
@@ -619,6 +619,18 @@ class LeadFactory:
                 errors += 1
                 result = {**result, "source_state_error": f"{type(state_exc).__name__}:{state_exc}"}
 
+            notification = None
+            if source_outcome == "SYSTEM_ERROR":
+                notification = self.notifier.notify(
+                    subject=f"A-one Lead Factory source error: {source.source_name}",
+                    body=(
+                        "Internal source processing failed; automatic repair/retry remains enabled.\n\n"
+                        f"source_id={source.source_id}\nsource={source.source_name}\n"
+                        f"status={status}\noutcome={source_outcome}\n"
+                        f"reason={source_reason[:4000]}\nnext_action={source_next_action}\n"
+                        "Customer-facing sending was not executed."
+                    ),
+                )
             results.append({
                 "source_id": source.source_id,
                 "source_name": source.source_name,
@@ -897,7 +909,7 @@ class LeadFactory:
         limit = int(cfg.get("TRIGGER_SIGNAL_LIMIT", "20") or 20)
         run_id = f"trigger-{uuid.uuid4()}"
         self.meta.check(
-            run_id=run_id, stage="TRIGGER_SIGNAL_DISCOVERY", action="OPENAI_WEB_TRIGGER_DISCOVERY", target="PUBLIC_WEB",
+            run_id=run_id, stage="TRIGGER_SIGNAL_DISCOVERY", action="GEMINI_WEB_TRIGGER_DISCOVERY", target="PUBLIC_WEB",
             requested_scope_ok=True, target_exists_checked=True, destructive=False, external_effect=False,
             simpler_option_checked=True, concept_boundary_ok=True, fact_or_inference="INFERENCE",
             reason="Internal-only event discovery; records signals and may create Raw leads, with no customer-facing action.",
