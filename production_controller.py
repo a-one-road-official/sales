@@ -7,6 +7,10 @@ from typing import Any
 
 UTC = timezone.utc
 JST = timezone(timedelta(hours=9))
+THROUGHPUT_MIN_PER_MINUTE = 30
+THROUGHPUT_TARGET_PER_MINUTE = 60
+THROUGHPUT_WINDOW_MINUTES = 5
+THROUGHPUT_LONG_WINDOW_MINUTES = 10
 GOAL_KEYS = {
     "target": "LEAD_FACTORY_GOAL_TARGET",
     "start_at": "LEAD_FACTORY_GOAL_START_AT",
@@ -73,6 +77,47 @@ class QualifiedLeadProductionController:
             "active_sources": len([s for s in self.sheets.list_sources() if str(s.crawl_status).upper() not in {"ERROR", "CIRCUIT_OPEN", "AUTH_REQUIRED"}]),
         }
 
+    def _throughput_metrics(self) -> dict[str, Any]:
+        """Measure qualified SSOT promotions over short control windows."""
+        now = datetime.now(UTC)
+        windows = {5: 0, 10: 0}
+        latest_finished = None
+        try:
+            rows = self.sheets.read("LeadFactory_RunLog!B2:L")
+        except Exception as exc:
+            return {"throughput_status": "METRICS_UNAVAILABLE", "throughput_error": str(exc)[:300]}
+        for row in rows:
+            padded = row + [""] * (11 - len(row))
+            finished = _dt(padded[1])
+            if not finished:
+                continue
+            if latest_finished is None or finished > latest_finished:
+                latest_finished = finished
+            try:
+                promoted = int(float(str(padded[10] or "0")))
+            except (TypeError, ValueError):
+                promoted = 0
+            age_min = (now - finished).total_seconds() / 60.0
+            for minutes in windows:
+                if 0 <= age_min <= minutes:
+                    windows[minutes] += promoted
+        five = windows[5]
+        ten = windows[10]
+        five_rate = five / 5.0
+        ten_rate = ten / 10.0
+        breach = five < THROUGHPUT_MIN_PER_MINUTE * 5 or ten < 100
+        return {
+            "promoted_last_5m": five,
+            "promoted_last_10m": ten,
+            "qualified_per_minute_5m": round(five_rate, 2),
+            "qualified_per_minute_10m": round(ten_rate, 2),
+            "throughput_minimum_5m": THROUGHPUT_MIN_PER_MINUTE * 5,
+            "throughput_minimum_10m": 100,
+            "throughput_target_5m": THROUGHPUT_TARGET_PER_MINUTE * 5,
+            "throughput_status": "THROUGHPUT_BREACH" if breach else ("ON_TARGET" if five >= THROUGHPUT_TARGET_PER_MINUTE * 5 else "ABOVE_MINIMUM"),
+            "latest_promotion_at": latest_finished.isoformat() if latest_finished else "",
+        }
+
     def status(self) -> dict:
         cfg = self._config()
         target = int(cfg.get(GOAL_KEYS["target"], "0") or 0)
@@ -88,6 +133,7 @@ class QualifiedLeadProductionController:
         required = max(0, target - added) / remaining_h if remaining_h > 0 else 0.0
         forecast = added + velocity * remaining_h
         metrics = self._queue_counts()
+        throughput = self._throughput_metrics()
         return {
             "status": cfg.get(GOAL_KEYS["status"], "NO_GOAL"),
             "target": target,
@@ -101,6 +147,7 @@ class QualifiedLeadProductionController:
             "required_velocity_per_hour": round(required, 3),
             "eod_forecast": round(forecast, 3),
             **metrics,
+            **throughput,
         }
 
     def start(self, target: int, deadline: datetime | None = None) -> dict:
@@ -170,7 +217,8 @@ class QualifiedLeadProductionController:
         if status["remaining"] > 0 and status["hours_remaining"] > 0:
             # Capacity expansion is deliberately isolated from the Gate. The
             # factory may add sources/workers, while its authoritative Gate stays fixed.
-            if status["eod_forecast"] < status["target"]:
+            throughput_breach = status.get("throughput_status") == "THROUGHPUT_BREACH"
+            if status["eod_forecast"] < status["target"] or throughput_breach:
                 action = self.factory.capacity_tick(status)
                 status["capacity_action"] = action
             status["status"] = "AT_RISK" if status.get("capacity_action") else "RUNNING"
