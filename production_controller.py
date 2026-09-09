@@ -153,8 +153,24 @@ class QualifiedLeadProductionController:
     def start(self, target: int, deadline: datetime | None = None) -> dict:
         if int(target) <= 0:
             raise ValueError("goal_target_must_be_positive")
+        existing = self._config()
         now = datetime.now(UTC)
         end = deadline or now.astimezone(JST).replace(hour=23, minute=59, second=59, microsecond=0).astimezone(UTC)
+
+        # Deployment is deliberately independent from production progress. The
+        # deploy workflow may call /autonomy/start after a redeploy, so an
+        # already-running goal with the same target must remain untouched.
+        existing_target = int(existing.get(GOAL_KEYS["target"], "0") or 0)
+        existing_status = str(existing.get(GOAL_KEYS["status"], "")).upper()
+        existing_deadline = _dt(existing.get(GOAL_KEYS["deadline"], ""))
+        if (
+            existing_target == int(target)
+            and existing_status in {"RUNNING", "AT_RISK"}
+            and existing_deadline
+            and existing_deadline > now
+        ):
+            return self.status()
+
         baseline = self._ssot_count()
         self._set_config({
             GOAL_KEYS["target"]: int(target),
@@ -228,5 +244,4 @@ class QualifiedLeadProductionController:
         status["status"] = final_status
         status["report"] = self._report(status)
         return status
-
 
