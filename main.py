@@ -14,6 +14,7 @@ from production_controller import QualifiedLeadProductionController
 from self_dispatch import dispatch_lane as self_dispatch_lane
 from settings import SETTINGS
 from strict_factory import StrictLeadFactory as LeadFactory
+from notifier import InternalNotifier
 
 
 app = FastAPI(title="A-one Lead Factory", version="0.3.2")
@@ -76,7 +77,22 @@ def get_production_controller() -> QualifiedLeadProductionController:
 
 
 def _fail(exc: Exception):
-    raise HTTPException(status_code=500, detail=f"{type(exc).__name__}:{exc}")
+    error = f"{type(exc).__name__}:{exc}"
+    # Every internal endpoint failure is operationally visible to admin.
+    # Customer-facing send paths do not exist in this runtime.
+    try:
+        recipient = os.getenv("LEAD_FACTORY_AUTONOMY_NOTIFY_EMAIL", "admin@a1-road.com")
+        InternalNotifier(recipient).notify(
+            subject="A-one Lead Factory internal error",
+            body=(
+                "An internal autonomous endpoint failed and will remain eligible for retry/repair.\\n\\n"
+                f"error={error[:5000]}\\n"
+                "Customer-facing sending was not executed."
+            ),
+        )
+    except Exception:
+        pass
+    raise HTTPException(status_code=500, detail=error)
 
 
 @app.get("/healthz")
