@@ -149,7 +149,7 @@ jobs:
             -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
             -o /tmp/deep-health.json \
             "${SERVICE_URL}/healthz/deep"
-          python -c 'import json; d=json.load(open("/tmp/deep-health.json")); assert d.get("ok") is True, d; assert d.get("openai_key_present") is True, d; print(json.dumps(d, indent=2, ensure_ascii=False))'
+          python -c 'import json; d=json.load(open("/tmp/deep-health.json")); assert d.get("ok") is True, d; assert d.get("gemini_vertex_ready") is True, d; print(json.dumps(d, indent=2, ensure_ascii=False))'
 
       - name: Kick autonomous frontier and workers now
         continue-on-error: true
