@@ -19,6 +19,7 @@ from outreach_execution import SacrificialEmailExecutor
 from outreach_stability import CRITICAL, SacrificeStability
 from sales_leads_sacrifice import load_rows, sacrifice_candidates, make_research_context
 from sacrifice_failure_loop import classify_batch, batch_gate
+from sales_leads_sacrifice_run import run_ten_sacrifice_batch
 
 
 app = FastAPI(title="A-one Lead Factory", version="0.3.2")
@@ -439,6 +440,25 @@ def sales_leads_sacrifice_failure_analysis(payload: dict):
         "failure_analysis": classify_batch(results),
         "gate": batch_gate(results),
     }
+
+
+@app.post("/outreach/sales-leads-sacrifice-run")
+def sales_leads_sacrifice_run(payload: dict):
+    """Run one exact ten-company research/draft batch on sales_leads only.
+
+    This route deliberately stops before email/form execution. It does not
+    instantiate SheetsRepo, touch production SSOT, or append to any queue.
+    """
+    try:
+        if int((payload or {}).get("limit", 10)) != 10:
+            raise HTTPException(status_code=400, detail="sacrifice_batch_must_be_exactly_ten")
+        lf = get_factory()
+        cfg = lf._config()
+        return run_ten_sacrifice_batch(llm=lf.llm, drive=lf.drive, cfg=cfg, limit=10)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _fail(exc)
 
 
 @app.post("/pipeline/tick")
