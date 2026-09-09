@@ -1,0 +1,12 @@
+source:
+  starter_kit_tree_sha: 7649e6e4f820ad18cc563d5075f34b1a8daceb36
+  n8n_nodes_tree_sha: 925f1e35fb5e127bbdd8b114a8e4609292a3b0e0
+patterns:
+  - draft_before_activation
+  - read_only_preflight
+  - verify_before_send
+  - async_job_polling
+  - webhook_events
+  - stop_on_reply
+  - sender_health
+  - explicit_campaign_scope
