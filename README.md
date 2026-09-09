@@ -69,6 +69,6 @@ Automatic stop requires all of the following:
 Then `LEAD_FACTORY_ENABLED` is set to `FALSE` and an internal stop notification is attempted to `admin@a1-road.com`. Customer-facing execution remains untouched.
 
 ## Deployment
-`.github/workflows/deploy.yml` is the production deployment path. A push to `main` compiles/tests, authenticates to Google Cloud via OIDC, builds the image, deploys private Cloud Run, injects `OPENAI_API_KEY` from Secret Manager, configures the Cloud Tasks queue, configures continuous Scheduler jobs, runs a deep authenticated health check, and immediately kicks discovery/dispatch.
+`.github/workflows/deploy.yml` is the production deployment path and is intentionally `workflow_dispatch` only. It compiles/tests, authenticates to Google Cloud via OIDC, builds the image, deploys Cloud Run, configures the Cloud Tasks queue and continuous Scheduler jobs, runs a deep authenticated health check, and immediately kicks discovery/dispatch. Runtime production is driven by the configured Cloud Scheduler jobs; redeploying does not reset an already-running daily SLO goal.
 
 `cloudbuild.yaml` is legacy and must not be attached to a production trigger.
