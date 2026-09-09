@@ -688,14 +688,15 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
     def deep_health(self) -> dict:
         # Readiness must stay cheap. Backlog totals are exposed by the
         # autonomy status endpoint and must not block deployment probes.
-        gate = self.gate_worker.loader.load()
+        # Deployment probes must not call Drive, Sheets, Gate or LLM APIs.
+        # Those are production operations and belong to the scheduled pipeline.
         task_ready = bool(os.getenv("LEAD_FACTORY_SERVICE_URL"))
         return {
             "ok": True,
             "factory_enabled": self._enabled(),
             "gemini_vertex_ready": bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")),
-            "gate_doc_id": gate.doc_id,
-            "gate_version": gate.version,
+            "gate_doc_id": os.getenv("TARGET_SCREENING_GATE_DOC_ID", ""),
+            "gate_version": "LIVE_PER_EVALUATION",
             "task_service_url_present": task_ready,
             "backlog": {},
             "backlog_status": "AVAILABLE_VIA_AUTONOMY_STATUS",
