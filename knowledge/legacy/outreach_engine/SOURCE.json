@@ -1,0 +1,23 @@
+{
+  "repository": null,
+  "branch": null,
+  "commit_sha": null,
+  "source_root": null,
+  "ingested_at": "2026-09-09T00:00:00Z",
+  "permission": "READ_ONLY",
+  "status": "UNRESOLVED",
+  "requested_paths": [
+    "src/outreach/form_submission/browser.py",
+    "src/outreach/form_submission/detector.py",
+    "src/outreach/enterprise_scale.py",
+    "src/outreach/triage_report.py",
+    "outreach.cli",
+    "target_list_abc.csv",
+    "a1road_gtm"
+  ],
+  "search_scope": [
+    "A1-Road organization repository inventory",
+    "A1-Road/python pinned tree"
+  ],
+  "reason": "No matching repository/path was exposed by the connected GitHub read surface. No repository name or SHA was inferred."
+}
