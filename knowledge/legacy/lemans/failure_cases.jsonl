@@ -1,0 +1,4 @@
+{"id":"LEMANS-F-001","category":"architecture","failure":"legacy orchestrator can reach Gmail send and form submission from the same company-processing flow","required_repair":"separate PREP from approval-bound execution"}
+{"id":"LEMANS-F-002","category":"contact","failure":"email candidates are limited/selected without a new recipient-verification contract","required_repair":"store address, source_url, domain_match, MX status, evidence, confidence"}
+{"id":"LEMANS-F-003","category":"form","failure":"form execution result is represented as success/failure without a durable staged state machine","required_repair":"FORM_FOUND -> FORM_PARSED -> FORM_FILLABLE -> ... -> SUCCESS|FAILED|MANUAL_REQUIRED|UNCERTAIN"}
+{"id":"LEMANS-F-004","category":"tracking","failure":"tracking and send result recording are coupled to the legacy persistence model","required_repair":"emit provider-independent events and persist idempotently"}
