@@ -668,17 +668,21 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
         if minutes_since_activity < quiet_minutes:
             return {"status": "RUNNING_FRONTIER_QUIET_WINDOW", "minutes_since_activity": round(minutes_since_activity, 1), "quiet_minutes_required": quiet_minutes, **snapshot}
 
-        self._set_config_value("LEAD_FACTORY_ENABLED", "FALSE")
+        # Quiet time is a diagnostic condition, not permission to stop production.
+        # Keep the global enable flag untouched; the next scheduler cycle must
+        # expand discovery or switch lanes. Notify internally and continue.
         result = {
-            "status": "STOPPED_SOURCE_UNIVERSE_EXHAUSTED",
+            "status": "FRONTIER_QUIET_CONTINUE_DISCOVERY",
             "minutes_since_activity": round(minutes_since_activity, 1),
             "quiet_minutes_required": quiet_minutes,
+            "next_action": "REQUEUE_SOURCE_DISCOVERY_AND_KEEP_OTHER_LANES_RUNNING",
             **snapshot,
         }
         notice = self.notifier.notify(
-            subject="A-one Lead Factory stopped: source universe exhausted",
+            subject="A-one Lead Factory warning: frontier quiet; continuing",
             body=(
-                "Internal Lead Factory stopped after the source frontier and all internal backlogs remained empty.\n\n"
+                "Internal warning: no recent activity was observed, but production was not stopped. "
+                "The next scheduler cycle must expand discovery or switch lanes.\n\n"
                 + json.dumps(result, ensure_ascii=False, indent=2)
                 + "\n\nNo customer-facing action was executed."
             ),
