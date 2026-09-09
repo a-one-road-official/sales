@@ -21,4 +21,4 @@ def test_sacrificial_lane_is_explicit_and_factory_is_blocked():
 
 def test_email_url_is_allowed_but_identity_corruption_is_critical():
     cfg = {"OUTREACH_SACRIFICE_LANES": "EC"}
-    assert semantic_email_preflight(_row, cfg)["ok"] is True
+    assert semantic_email_preflight(_row(), cfg)["ok"] is True
