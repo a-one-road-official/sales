@@ -1,14 +1,34 @@
 from __future__ import annotations
 
+import concurrent.futures
+import json
+import os
+import urllib.request
+
 from task_queue import TaskDispatcher
 
 
-def dispatch_lane(factory, lane: str) -> dict:
-    """Enqueue independent source/domain/gate jobs and return immediately.
+def _post_fallback(factory, path: str, payload: dict) -> None:
+    """Best-effort independent lane when Cloud Tasks administration is unavailable."""
+    base = str(os.getenv("LEAD_FACTORY_SERVICE_URL", "")).rstrip("/")
+    token = str(os.getenv("LEAD_FACTORY_INTERNAL_TOKEN", ""))
+    if not base:
+        return
+    req = urllib.request.Request(
+        f"{base}/{path.lstrip('/')}",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json", "X-Aone-Internal-Token": token},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=530):
+            pass
+    except Exception:
+        pass
 
-    Cloud Tasks owns retries and delivery. Each task is idempotent at the worker
-    endpoint, so one slow or failed lane cannot hold the other lanes open.
-    """
+
+def dispatch_lane(factory, lane: str) -> dict:
+    """Queue independent jobs; fall back to parallel HTTP workers if queue is absent."""
     if not factory._enabled():
         return {"status": "DISABLED", "reason": "Config.LEAD_FACTORY_ENABLED is FALSE"}
     lane_key = str(lane or "").strip().upper()
@@ -32,31 +52,46 @@ def dispatch_lane(factory, lane: str) -> dict:
         else factory.sheets.list_pending_gate(limit=gate_limit)
     )
 
-    dispatcher = TaskDispatcher()
-    queued = {"source": 0, "domain": 0, "gate": 0, "already_queued": 0, "errors": 0}
-    errors = []
-
-    def enqueue(path, payload, stage, key):
-        try:
-            result = dispatcher.enqueue(path, payload, f"{lane_key.lower()}:{stage}:{key}")
-            if result.get("status") == "ALREADY_QUEUED":
-                queued["already_queued"] += 1
-            else:
-                queued[stage] += 1
-        except Exception as exc:
-            queued["errors"] += 1
-            errors.append({"stage": stage, "key": key, "error": f"{type(exc).__name__}:{exc}"})
-
+    jobs = []
     for source in sources:
-        enqueue("/worker/source", {"source_id": source.source_id}, "source", source.source_id)
+        jobs.append(("/worker/source", {"source_id": source.source_id}, "source"))
     for company in domains:
         lead_id = str(company.get("lead_id", "")).strip()
         if lead_id:
-            enqueue("/worker/domain", {"lead_id": lead_id}, "domain", lead_id)
+            jobs.append(("/worker/domain", {"lead_id": lead_id}, "domain"))
     for company in gates:
         lead_id = str(company.get("lead_id", "")).strip()
         if lead_id:
-            enqueue("/worker/gate", {"lead_id": lead_id}, "gate", lead_id)
+            jobs.append(("/worker/gate", {"lead_id": lead_id}, "gate"))
+
+    queued = {"source": 0, "domain": 0, "gate": 0, "already_queued": 0, "errors": 0}
+    errors = []
+    mode = "CLOUD_TASKS_ASYNC"
+    try:
+        dispatcher = TaskDispatcher()
+        for path, payload, stage in jobs:
+            key = f"{lane_key.lower()}:{stage}:{payload.get('source_id') or payload.get('lead_id')}"
+            try:
+                result = dispatcher.enqueue(path, payload, key)
+                if result.get("status") == "ALREADY_QUEUED":
+                    queued["already_queued"] += 1
+                else:
+                    queued[stage] += 1
+            except Exception as exc:
+                queued["errors"] += 1
+                errors.append({"stage": stage, "error": f"{type(exc).__name__}:{exc}"})
+    except Exception as exc:
+        mode = "HTTP_FALLBACK_ASYNC"
+        errors.append({"stage": "dispatcher", "error": f"{type(exc).__name__}:{exc}"})
+        with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+            futures = [pool.submit(_post_fallback, factory, path, payload) for path, payload, _ in jobs]
+            for future, (_, _, stage) in zip(futures, jobs):
+                try:
+                    future.result(timeout=535)
+                    queued[stage] += 1
+                except Exception as inner:
+                    queued["errors"] += 1
+                    errors.append({"stage": stage, "error": f"{type(inner).__name__}:{inner}"})
 
     return {
         "status": "ENQUEUED_WITH_ERRORS" if queued["errors"] else "ENQUEUED",
@@ -64,5 +99,6 @@ def dispatch_lane(factory, lane: str) -> dict:
         "candidates": {"source": len(sources), "domain": len(domains), "gate": len(gates)},
         "queued": queued,
         "errors": errors[:100],
-        "execution": "CLOUD_TASKS_ASYNC",
+        "execution": mode,
+        "customer_facing_send": "BLOCKED",
     }
