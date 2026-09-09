@@ -19,7 +19,8 @@ from sacrifice_failure_loop import classify_failure
 from sales_leads_consistency import validate_row
 
 
-PROMPT_DOC_ID = "1vBn_rX9gy9pidTubNGHgEM17cSdQSwd6u5xiSoh5ZXE"
+PROMPT_DOC_ID = "1joNEah7AuIF0-28PmVtgV9TcprEYneHSE5giUIayq5U"
+PROMPT_TITLE = "outreach_prompt_production_v1"
 
 
 def _hash_text(*values: object) -> str:
@@ -61,7 +62,20 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
         if not prompt.strip():
             prompt_error = "outreach_prompt_empty"
     except Exception as exc:
-        prompt_error = f"prompt_read_failed:{type(exc).__name__}:{exc}"
+        # A Drive Doc can be recreated under the same title. Resolve that
+        # case explicitly so a stale hard-coded ID cannot block the lane.
+        replacement = getattr(drive, "find_native_doc_by_name", lambda _name: None)(PROMPT_TITLE)
+        replacement_id = str((replacement or {}).get("id") or "").strip()
+        if replacement_id and replacement_id != prompt_id:
+            prompt_id = replacement_id
+            try:
+                prompt, prompt_meta = drive.read_plain_text(prompt_id)
+                if not prompt.strip():
+                    prompt_error = "outreach_prompt_empty"
+            except Exception as replacement_exc:
+                prompt_error = f"prompt_read_failed:{type(replacement_exc).__name__}:{replacement_exc}"
+        else:
+            prompt_error = f"prompt_read_failed:{type(exc).__name__}:{exc}"
 
     results = []
     for candidate in candidates:
