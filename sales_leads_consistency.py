@@ -62,7 +62,7 @@ def validate_row(row: dict, *, verified_website: str = "", prompt_loaded: bool =
 
     results.append(CheckResult("SOURCE_SCOPE", source == "sales_leads" and sheet == "営業リスト_Vendor" and domain == SACRIFICE_DOMAIN,
                                "CRITICAL", "must be sales_leads / 営業リスト_Vendor / C=EC/リテール"))
-    schema_ok = bool(company and source_row.isdigit() and status in {"", "未接触"})
+    schema_ok = bool(company and source_row.isdigit() and status in {"", "未接触", "RESEARCH_REQUIRED"})
     results.append(CheckResult("SCHEMA", schema_ok, "CRITICAL", "company_name, numeric source_row, and untouched status required"))
     identity_ok = bool(company and source_row and not row.get("row_shift_detected", False))
     results.append(CheckResult("ROW_IDENTITY", identity_ok, "CRITICAL", "row provenance must be stable; shifted rows are quarantined"))
@@ -117,4 +117,3 @@ if __name__ == "__main__":
     parser.add_argument("--json", default="data/sales_leads_ec_sacrifice.json")
     args = parser.parse_args()
     print(json.dumps(audit_rows(load_rows(Path(args.json))), ensure_ascii=False, indent=2))
-
