@@ -60,3 +60,14 @@ def test_at_risk_requests_capacity_without_changing_gate():
     status = controller.tick()
     assert factory.capacity_calls == 1
     assert status["target"] == 1500
+
+
+def test_restarting_same_running_goal_preserves_baseline():
+    factory = FakeFactory()
+    controller = QualifiedLeadProductionController(factory)
+    first = controller.start(1500, datetime.now(timezone.utc) + timedelta(hours=1))
+    baseline = first["baseline_ssot_count"]
+    second = controller.start(1500, datetime.now(timezone.utc) + timedelta(hours=1))
+    assert second["baseline_ssot_count"] == baseline
+    assert second["target"] == 1500
+    assert factory.sheets.config["LEAD_FACTORY_GOAL_STATUS"] == "RUNNING"
