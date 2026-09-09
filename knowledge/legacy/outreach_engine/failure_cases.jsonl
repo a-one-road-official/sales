@@ -1,0 +1,10 @@
+{"id":"OE-F-001","category":"contact","failure":"unrelated third-party email selected","required_repair":"same-domain priority, MX/domain consistency, evidence URL, candidate scoring"}
+{"id":"OE-F-002","category":"contact","failure":"placeholder/example/test email treated as real","required_repair":"placeholder and fake-address filtering"}
+{"id":"OE-F-003","category":"contact","failure":"FAQ page mistaken for contact page","required_repair":"semantic contact-page scoring and evidence"}
+{"id":"OE-F-004","category":"form","failure":"Japanese メール field not recognized as email input","required_repair":"Japanese label normalization and semantic field graph"}
+{"id":"OE-F-005","category":"form","failure":"required state inferred only from HTML required attribute","required_repair":"include ※, *, aria-required, table and adjacent-label semantics"}
+{"id":"OE-F-006","category":"form","failure":"anchor labelled 送信内容を確認 not recognized as submit control","required_repair":"clickability, form association, navigation, DOM mutation, and network observation"}
+{"id":"OE-F-007","category":"form","failure":"confirmation action treated as final submission","required_repair":"explicit staged-form state machine"}
+{"id":"OE-F-008","category":"form","failure":"form remaining in DOM treated as submission failure after success","required_repair":"multi-signal success confidence and error-signal inspection"}
+{"id":"OE-F-009","category":"bot_defense","failure":"CAPTCHA/iframe treated as an ordinary form","required_repair":"AUTO_OK/MANUAL_ONE_CLICK/MANUAL_CHALLENGE/BLOCKED/UNKNOWN classification"}
+{"id":"OE-F-010","category":"retry","failure":"same form failure retried indefinitely","required_repair":"error fingerprint and circuit breaker"}
