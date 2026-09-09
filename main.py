@@ -64,7 +64,6 @@ def _ensure_openai_key() -> None:
 def get_factory() -> LeadFactory:
     global factory
     if factory is None:
-        _ensure_openai_key()
         factory = LeadFactory(SETTINGS)
     return factory
 
