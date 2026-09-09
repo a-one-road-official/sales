@@ -693,7 +693,7 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
         return {
             "ok": True,
             "factory_enabled": self._enabled(),
-            "openai_key_present": bool(os.getenv("OPENAI_API_KEY")),
+            "gemini_vertex_ready": bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")),
             "gate_doc_id": gate.doc_id,
             "gate_version": gate.version,
             "task_service_url_present": task_ready,
