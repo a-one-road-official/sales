@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 
 SOURCE_PATH = Path(__file__).with_name("data") / "sales_leads_ec_sacrifice.json"
+SACRIFICE_DOMAIN = "EC/リテール"
 
 # The workbook's category label is not authoritative. These companies are
 # deliberately kept out of the sacrifice lane because their actual business is
@@ -69,7 +70,13 @@ def sacrifice_candidates(rows: list[dict], limit: int = 10) -> list[dict]:
     """Select only the EC sacrifice population and preserve source provenance."""
     selected = []
     for row in rows:
-        if str(row.get("record_origin") or "") != "SACRIFICE_EC":
+        # The source of truth for the sacrifice population is column C:
+        # `domain == EC/リテール`. `record_origin` is only a derived snapshot
+        # marker kept for provenance and must not drive selection.
+        domain = str(row.get("domain") or "").strip()
+        if not domain and str(row.get("record_origin") or "") == "SACRIFICE_EC":
+            domain = SACRIFICE_DOMAIN
+        if domain != SACRIFICE_DOMAIN:
             continue
         if str(row.get("status") or "未接触").strip() not in {"", "未接触"}:
             continue
@@ -82,6 +89,7 @@ def sacrifice_candidates(rows: list[dict], limit: int = 10) -> list[dict]:
             "source": "sales_leads",
             "source_sheet": row.get("source_sheet", "営業リスト_Vendor"),
             "source_row": row.get("source_row", ""),
+            "domain": domain,
             "company_name": company_name,
             "country": str(row.get("hq_country") or "").strip(),
             "company_description": str(row.get("what_it_solves") or "").strip(),
