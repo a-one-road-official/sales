@@ -9,8 +9,9 @@ The human control plane is ChatGPT / ChatGPT Work. GitHub is the code SSOT, Goog
 
 ## Hard invariants
 - `LEAD_FACTORY_ALLOW_DELETE=FALSE`
-- `LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE`
-- Customer-facing execution stops in `LeadFactory_ApprovalQueue` with `requires_human_approval=TRUE` and `execution_allowed=FALSE`.
+- `LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE` by default. Runtime Config may explicitly enable isolated EC/retail sacrifice execution.
+- Factory/BPO execution always stops in `LeadFactory_ApprovalQueue` with `requires_human_approval=TRUE` and `execution_allowed=FALSE`.
+- Sacrifice execution is restricted to `OUTREACH_SACRIFICE_LANES` and requires semantic preflight, idempotency, and `OUTREACH_SACRIFICE_SEND_ENABLED=TRUE`.
 - Generated scraper code has no network access; trusted fetchers own network I/O.
 - Generated adapters pass S1-S7 and then a deployed Cloud smoke before production activation.
 - A company must have a verified first-party website before Gate evaluation.
