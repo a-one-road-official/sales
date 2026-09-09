@@ -1,0 +1,15 @@
+{
+  "repository": "A1-Road/python",
+  "branch": "main",
+  "commit_sha": "ea092e809fc455663bdab4c708e104f95dbf39b6",
+  "source_root": "lemans/eigyo-lemans-app/**",
+  "additional_roots": [
+    "lemans/gmail-checker-app/**",
+    "lemans/back/**",
+    "lemans/docs/**",
+    ".github/workflows/deploy-eigyo-lemans-app.yml"
+  ],
+  "ingested_at": "2026-09-09T00:00:00Z",
+  "permission": "READ_ONLY",
+  "external_writes_performed": false
+}
