@@ -94,11 +94,11 @@ BOOTSTRAP_SOURCES: tuple[dict, ...] = (
     },
     {
         "source_type": "GROWTH_EXHIBITION",
-        "source_name": "K Exhibitor Search",
-        "source_url": "https://www.k-online.com/en/Exhibitors_Products/All_Exhibitors_Products_2025/Exhibitor_Search",
+        "source_name": "K Exhibitors & Products 2025",
+        "source_url": "https://www.k-online.com/vis/v1/en/directory/a",
         "country": "Germany",
         "event_year": "2025",
-        "exhibitor_directory_url": "https://www.k-online.com/en/Exhibitors_Products/All_Exhibitors_Products_2025/Exhibitor_Search",
+        "exhibitor_directory_url": "https://www.k-online.com/vis/v1/en/directory/a",
     },
     {
         "source_type": "GROWTH_EXHIBITION",
@@ -118,11 +118,11 @@ BOOTSTRAP_SOURCES: tuple[dict, ...] = (
     },
     {
         "source_type": "GROWTH_EXHIBITION",
-        "source_name": "Formnext Exhibitors & Products",
-        "source_url": "https://formnext.mesago.com/events/en/expo/visitor-information.html",
+        "source_name": "Formnext AM Directory",
+        "source_url": "https://formnext.mesago.com/frankfurt/en/exhibitor-search.html",
         "country": "Germany",
         "event_year": "2026",
-        "exhibitor_directory_url": "https://formnext.mesago.com/events/en/expo/visitor-information.html",
+        "exhibitor_directory_url": "https://formnext.mesago.com/frankfurt/en/exhibitor-search.html",
     },
     {
         "source_type": "GROWTH_EXHIBITION",
