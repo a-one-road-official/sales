@@ -190,8 +190,18 @@ jobs:
             "${SERVICE_URL}/autonomy/start"
           echo
 
-      - name: Verify autonomous infrastructure
+      - name: Bootstrap first autonomous tick
         run: |
+          for PATH_NAME in /meta/tick /dispatch/growth /dispatch/mittelstand /promotion/tick; do
+            echo "POST ${PATH_NAME}"
+            curl --fail-with-body --retry 3 --retry-all-errors --retry-delay 2 \
+              -X POST \
+              -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "${SERVICE_URL}${PATH_NAME}" || echo "bootstrap_failed path=${PATH_NAME}"
+          done
+
+      - name: Verify autonomous infrastructure        run: |
           echo '--- Cloud Run ---'
           gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" \
             --format="yaml(status.url,status.latestReadyRevisionName,spec.template.spec.containerConcurrency,spec.template.spec.serviceAccountName)"
