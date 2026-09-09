@@ -4,13 +4,43 @@ import json
 import os
 import re
 
-from openai import OpenAI
+from google import genai
+from google.genai import types
+
+
+class _GeminiResponses:
+    def __init__(self, client):
+        self._client = client
+
+    def create(self, model: str, input: str, tools=None):
+        use_search = bool(tools)
+        config = types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())] if use_search else None,
+        )
+        response = self._client.models.generate_content(
+            model=model,
+            contents=input,
+            config=config,
+        )
+        class Result:
+            output_text = response.text or ""
+        return Result()
+
+
+class _GeminiCompatClient:
+    def __init__(self):
+        project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
+        location = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
+        if not project:
+            raise RuntimeError("missing_google_cloud_project")
+        self._client = genai.Client(vertexai=True, project=project, location=location)
+        self.responses = _GeminiResponses(self._client)
 
 
 class LLM:
     def __init__(self, model: str):
-        self.model = model
-        self.client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+        self.model = model or os.getenv("LEAD_FACTORY_GEMINI_MODEL", "gemini-2.5-flash")
+        self.client = _GeminiCompatClient()
 
     @staticmethod
     def _json(text: str):
