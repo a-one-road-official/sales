@@ -16,6 +16,19 @@ from urllib.parse import urlparse
 
 SOURCE_PATH = Path(__file__).with_name("data") / "sales_leads_ec_sacrifice.json"
 
+# The workbook's category label is not authoritative. These companies are
+# deliberately kept out of the sacrifice lane because their actual business is
+# manufacturing, industrial software, additive manufacturing, inspection, or
+# factory operations—the exact population the production pipeline targets.
+FACTORY_OR_INDUSTRIAL_NAMES = {
+    "Bambu Lab", "Guidewheel", "Smartex", "Arch Systems", "Augury", "Cognite",
+    "m4p material solutions", "PostProcess Technologies", "ProovStation", "nTop(旧nTopology)", "Litmus",
+    "6K Additive", "Ai Build", "AM Solutions(Röslerグループ)", "Divergent Technologies",
+    "DyeMansion", "Eplus3D", "Fictiv", "Forward AM", "Instrumental", "Kitov.ai",
+    "Markforged", "Metal Powder Works", "Nexa3D", "Roboze", "Raise3D", "Tractable",
+    "Tulip Interfaces", "UnitX", "VoxelDance", "Ravin AI", "Pensa Systems", "Trigo",
+}
+
 
 def _host(value: str) -> str:
     raw = str(value or "").strip()
@@ -61,17 +74,21 @@ def sacrifice_candidates(rows: list[dict], limit: int = 10) -> list[dict]:
         if str(row.get("status") or "未接触").strip() not in {"", "未接触"}:
             continue
         evidence = source_website_check(row)
+        company_name = str(row.get("company_name") or "").strip()
+        if company_name in FACTORY_OR_INDUSTRIAL_NAMES:
+            continue
         selected.append({
             "sacrifice_lane": "EC_SACRIFICE",
             "source": "sales_leads",
             "source_sheet": row.get("source_sheet", "営業リスト_Vendor"),
             "source_row": row.get("source_row", ""),
-            "company_name": str(row.get("company_name") or "").strip(),
+            "company_name": company_name,
             "country": str(row.get("hq_country") or "").strip(),
             "company_description": str(row.get("what_it_solves") or "").strip(),
             "candidate_website": str(row.get("website") or "").strip(),
             "candidate_website_evidence": evidence,
             "status": "RESEARCH_REQUIRED",
+            "sacrifice_eligibility": "NON_FACTORY_TEST_COMPANY",
         })
         if len(selected) >= max(0, int(limit)):
             break
@@ -90,3 +107,4 @@ def make_research_context(candidate: dict) -> dict:
         "source_record": f"sales_leads:{candidate['source_sheet']}:{candidate['source_row']}",
         "instruction": "Verify official company website and contact evidence independently. Never trust the candidate URL without evidence.",
     }
+
