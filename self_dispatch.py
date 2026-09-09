@@ -29,10 +29,11 @@ def dispatch_lane(factory, lane: str) -> dict:
 
     # At 1 dispatch/minute these defaults provide theoretical capacity of 48k
     # domain jobs + 48k gate jobs per lane in an 8-hour window.
-    source_limit = int(cfg.get("DISPATCH_SOURCE_MAX", os.getenv("LEAD_FACTORY_DISPATCH_SOURCE_MAX", "5")) or 5)
-    domain_limit = int(cfg.get("DISPATCH_DOMAIN_MAX", os.getenv("LEAD_FACTORY_DISPATCH_DOMAIN_MAX", "100")) or 100)
-    gate_limit = int(cfg.get("DISPATCH_GATE_MAX", os.getenv("LEAD_FACTORY_DISPATCH_GATE_MAX", "100")) or 100)
-    max_workers = int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_WORKERS", "40") or 40)
+    multiplier = max(1, min(50, int(cfg.get("LEAD_FACTORY_CAPACITY_MULTIPLIER", "1") or 1)))
+    source_limit = int(cfg.get("DISPATCH_SOURCE_MAX", os.getenv("LEAD_FACTORY_DISPATCH_SOURCE_MAX", "5")) or 5) * multiplier
+    domain_limit = int(cfg.get("DISPATCH_DOMAIN_MAX", os.getenv("LEAD_FACTORY_DISPATCH_DOMAIN_MAX", "100")) or 100) * multiplier
+    gate_limit = int(cfg.get("DISPATCH_GATE_MAX", os.getenv("LEAD_FACTORY_DISPATCH_GATE_MAX", "100")) or 100) * multiplier
+    max_workers = int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_WORKERS", "120") or 120)
     recrawl = int(cfg.get("SOURCE_RECRAWL_AFTER_MINUTES", "1440") or 1440)
 
     sources = factory.sheets.sources_for_crawl(limit=source_limit, lane=lane_key.lower(), recrawl_after_minutes=recrawl)
