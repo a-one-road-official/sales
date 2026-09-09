@@ -59,6 +59,7 @@ jobs:
             secretmanager.googleapis.com \
             cloudscheduler.googleapis.com \
             cloudtasks.googleapis.com \
+            aiplatform.googleapis.com \
             --project="$PROJECT"
 
       - name: Configure Docker auth
