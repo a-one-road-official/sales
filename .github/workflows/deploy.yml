@@ -201,7 +201,8 @@ jobs:
               "${SERVICE_URL}${PATH_NAME}" || echo "bootstrap_failed path=${PATH_NAME}"
           done
 
-      - name: Verify autonomous infrastructure        run: |
+      - name: Verify autonomous infrastructure
+        run: |
           echo '--- Cloud Run ---'
           gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" \
             --format="yaml(status.url,status.latestReadyRevisionName,spec.template.spec.containerConcurrency,spec.template.spec.serviceAccountName)"
