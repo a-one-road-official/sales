@@ -18,6 +18,7 @@ from notifier import InternalNotifier
 from outreach_execution import SacrificialEmailExecutor
 from outreach_stability import CRITICAL, SacrificeStability
 from sales_leads_sacrifice import load_rows, sacrifice_candidates, make_research_context
+from sacrifice_failure_loop import classify_batch, batch_gate
 
 
 app = FastAPI(title="A-one Lead Factory", version="0.3.2")
@@ -423,6 +424,21 @@ def sales_leads_sacrifice_tick(payload: dict):
         }
     except Exception as exc:
         _fail(exc)
+
+
+@app.post("/outreach/sales-leads-sacrifice-failure-analysis")
+def sales_leads_sacrifice_failure_analysis(payload: dict):
+    """Classify one completed ten-company run and decide the next repair action."""
+    results = list((payload or {}).get("results") or [])
+    if len(results) > 10:
+        raise HTTPException(status_code=400, detail="maximum_ten_results")
+    return {
+        "source": "sales_leads",
+        "lane": "EC_SACRIFICE",
+        "production_ssot_touched": False,
+        "failure_analysis": classify_batch(results),
+        "gate": batch_gate(results),
+    }
 
 
 @app.post("/pipeline/tick")
