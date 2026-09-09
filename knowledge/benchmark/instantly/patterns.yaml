@@ -1,0 +1,15 @@
+patterns:
+  - name: create_not_activate
+    adopt: true
+  - name: accepted_not_completed
+    adopt: true
+  - name: http_200_not_business_success
+    adopt: true
+  - name: retry_not_idempotency
+    adopt: true
+  - name: webhook_deduplication
+    adopt: true
+  - name: verification_before_send
+    adopt: true
+  - name: sender_health_preflight
+    adopt: true
