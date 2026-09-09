@@ -444,17 +444,26 @@ def sales_leads_sacrifice_failure_analysis(payload: dict):
 
 @app.post("/outreach/sales-leads-sacrifice-run")
 def sales_leads_sacrifice_run(payload: dict):
-    """Run one exact ten-company research/draft batch on sales_leads only.
+    """Run one exact ten-company batch on sales_leads only.
 
-    This route deliberately stops before email/form execution. It does not
-    instantiate SheetsRepo, touch production SSOT, or append to any queue.
+    External execution is opt-in per request and hard-scoped to the attached
+    EC/retail sacrifice source. Production SSOT is never touched here.
     """
     try:
         if int((payload or {}).get("limit", 10)) != 10:
             raise HTTPException(status_code=400, detail="sacrifice_batch_must_be_exactly_ten")
         lf = get_factory()
         cfg = lf._config()
-        return run_ten_sacrifice_batch(llm=lf.llm, drive=lf.drive, cfg=cfg, limit=10)
+        execute_external = bool((payload or {}).get("execute_external", False))
+        if execute_external:
+            cfg = dict(cfg)
+            cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = "TRUE"
+            cfg["OUTREACH_FACTORY_SEND_ENABLED"] = "FALSE"
+        executor = SacrificialEmailExecutor(lf.sheets) if execute_external else None
+        return run_ten_sacrifice_batch(
+            llm=lf.llm, drive=lf.drive, cfg=cfg, limit=10,
+            executor=executor, execute_external=execute_external,
+        )
     except HTTPException:
         raise
     except Exception as exc:
