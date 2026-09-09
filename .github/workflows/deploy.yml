@@ -107,15 +107,18 @@ jobs:
 
       - name: Ensure durable worker queue
         run: |
-          gcloud tasks queues describe lead-factory-workers \
-            --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || \
-          gcloud tasks queues create lead-factory-workers \
-            --location="$REGION" --project="$PROJECT"
-          gcloud tasks queues update lead-factory-workers \
-            --location="$REGION" --project="$PROJECT" \
-            --max-concurrent-dispatches=500 \
-            --max-attempts=10 \
-            --max-retry-duration=0s
+          if gcloud tasks queues describe lead-factory-workers \
+            --location="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
+            gcloud tasks queues update lead-factory-workers \
+              --location="$REGION" --project="$PROJECT" \
+              --max-concurrent-dispatches=500 \
+              --max-attempts=10 \
+              --max-retry-duration=0s
+            echo "TASK_QUEUE=AVAILABLE" >> "$GITHUB_ENV"
+          else
+            echo "Cloud Tasks queue is unavailable to this deploy identity; runtime will use its independent HTTP fallback lane."
+            echo "TASK_QUEUE=UNAVAILABLE" >> "$GITHUB_ENV"
+          fi
 
       - name: Configure continuous autonomous schedulers
         run: |
