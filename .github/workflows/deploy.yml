@@ -149,6 +149,7 @@ jobs:
           upsert_job lead-factory-autonomy-slo "*/2 * * * *" "${URL}/autonomy/tick"
           upsert_job lead-factory-discover-growth "*/5 * * * *" "${URL}/discover/growth"
           upsert_job lead-factory-discover-mittelstand "2-59/5 * * * *" "${URL}/discover/mittelstand"
+          upsert_job lead-factory-discover-fallback "4-59/5 * * * *" "${URL}/discover/fallback"
           upsert_job lead-factory-dispatch-growth "* * * * *" "${URL}/dispatch/growth"
           upsert_job lead-factory-dispatch-mittelstand "* * * * *" "${URL}/dispatch/mittelstand"
           upsert_job lead-factory-promotion "* * * * *" "${URL}/promotion/tick"
