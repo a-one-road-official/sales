@@ -538,11 +538,34 @@ class LeadFactory:
                 result = self._run_source_with_run_id(source, rid)
             except Exception as exc:
                 result = {"status": "ERROR", "error": f"{type(exc).__name__}:{exc}"}
-            status = str(result.get("status", ""))
+            status = str(result.get("status", "")).upper()
             runtime = result.get("runtime") if isinstance(result.get("runtime"), dict) else {}
             records = int(runtime.get("records", 0) or 0)
             new_raw += int(runtime.get("new_raw", 0) or 0)
             duplicates += int(runtime.get("duplicates", 0) or 0)
+
+            # Distinguish transport/build/runtime failure from a normal empty
+            # yield. Rejected discovery candidates remain a data outcome.
+            if status in {"RAW_CAPTURED", "RAW_CAPTURED_AFTER_REPAIR"}:
+                source_outcome = "RAW_CAPTURED"
+                source_reason = f"records={records};new_raw={int(runtime.get('new_raw', 0) or 0)}"
+                source_next_action = "CONTINUE"
+            elif status == "AUTH_REQUIRED":
+                source_outcome = "SYSTEM_ERROR"
+                source_reason = str(result.get("reason") or result.get("error") or "authentication_required")
+                source_next_action = "REQUEST_AUTH_OR_SWITCH_SOURCE"
+            elif status in {"READY_FOR_CLOUD_SMOKE", "REPAIR_READY_FOR_CLOUD_SMOKE", "NOT_ACTIVE"}:
+                source_outcome = "SYSTEM_ERROR"
+                source_reason = str(result.get("error") or result.get("scraper_status") or "production_adapter_not_active")
+                source_next_action = "AUTO_REPAIR_AND_CLOUD_SMOKE"
+            elif status in {"CIRCUIT_OPEN", "ERROR", "FAILED"}:
+                source_outcome = "SYSTEM_ERROR"
+                source_reason = str(result.get("error") or result.get("reason") or "source_pipeline_failure")
+                source_next_action = "AUTO_REPAIR_AND_RETRY"
+            else:
+                source_outcome = "NO_QUALIFYING_TARGETS"
+                source_reason = f"pipeline_completed_status={status or 'EMPTY'};records={records}"
+                source_next_action = "EXPAND_SOURCE_FRONTIER"
 
             source_state = None
             try:
@@ -599,6 +622,10 @@ class LeadFactory:
             results.append({
                 "source_id": source.source_id,
                 "source_name": source.source_name,
+                "outcome": source_outcome,
+                "reason": source_reason[:5000],
+                "next_action": source_next_action,
+                "repair_attempted": bool(result.get("repair")),
                 **result,
                 "source_state": source_state,
             })
@@ -611,6 +638,9 @@ class LeadFactory:
             "duplicates": duplicates,
             "auth_required": auth_required,
             "errors": errors,
+            "system_error_sources": sum(1 for r in results if r.get("outcome") == "SYSTEM_ERROR"),
+            "no_qualifying_sources": sum(1 for r in results if r.get("outcome") == "NO_QUALIFYING_TARGETS"),
+            "raw_captured_sources": sum(1 for r in results if r.get("outcome") == "RAW_CAPTURED"),
             "results": results,
         }
 
