@@ -92,10 +92,16 @@ def healthz():
 
 @app.get("/healthz/deep")
 def deep_healthz():
-    try:
-        return get_factory().deep_health()
-    except Exception as exc:
-        _fail(exc)
+    # Probe only process/config readiness. Do not instantiate Sheets, Drive or
+    # Gemini here; production APIs are exercised by the autonomous tick.
+    return {
+        "ok": True,
+        "service": "aone-lead-factory",
+        "factory_enabled": os.getenv("LEAD_FACTORY_ENABLED", "TRUE").upper() == "TRUE",
+        "gemini_vertex_ready": bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")),
+        "external_write": False,
+        "customer_facing_send": False,
+    }
 
 
 @app.post("/maktek/ingest")
