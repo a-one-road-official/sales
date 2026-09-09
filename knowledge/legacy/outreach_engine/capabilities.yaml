@@ -1,0 +1,14 @@
+source_status: UNRESOLVED
+reported_capabilities:
+  - real-site browser execution
+  - Japanese form required-field interpretation
+  - anchor/custom control submit detection
+  - form-builder-specific DOM handling
+  - CAPTCHA and iframe classification
+  - email candidate correction
+  - multi-stage confirmation handling
+  - success detection beyond DOM presence
+  - batch triage and failure diagnosis
+verification:
+  required: true
+  blocked_until: repository_and_commit_are_identified
