@@ -8,12 +8,12 @@ import urllib.request
 from task_queue import TaskDispatcher
 
 
-def _post_fallback(factory, path: str, payload: dict) -> None:
+def _post_fallback(factory, path: str, payload: dict) -> dict:
     """Best-effort independent lane when Cloud Tasks administration is unavailable."""
     base = str(os.getenv("LEAD_FACTORY_SERVICE_URL", "")).rstrip("/")
     token = str(os.getenv("LEAD_FACTORY_INTERNAL_TOKEN", ""))
     if not base:
-        return
+        return {"ok": False, "error": "missing_service_url"}
     req = urllib.request.Request(
         f"{base}/{path.lstrip('/')}",
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -21,10 +21,10 @@ def _post_fallback(factory, path: str, payload: dict) -> None:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=530):
-            pass
-    except Exception:
-        pass
+        with urllib.request.urlopen(req, timeout=530) as response:
+            return {"ok": 200 <= response.status < 300, "status_code": response.status}
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}:{exc}"}
 
 
 def dispatch_lane(factory, lane: str) -> dict:
@@ -67,8 +67,24 @@ def dispatch_lane(factory, lane: str) -> dict:
     queued = {"source": 0, "domain": 0, "gate": 0, "already_queued": 0, "errors": 0}
     errors = []
     mode = "CLOUD_TASKS_ASYNC"
+    def enqueue_http_fallback(fallback_jobs: list[tuple[str, dict, str]]) -> None:
+        nonlocal mode
+        if not fallback_jobs:
+            return
+        mode = "HTTP_FALLBACK_ASYNC"
+        with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+            futures = [pool.submit(_post_fallback, factory, path, payload) for path, payload, _ in fallback_jobs]
+            for future, (path, payload, stage) in zip(futures, fallback_jobs):
+                result = future.result(timeout=535)
+                if result.get("ok"):
+                    queued[stage] += 1
+                else:
+                    queued["errors"] += 1
+                    errors.append({"stage": stage, "path": path, "error": result.get("error", "fallback_failed")})
+
     try:
         dispatcher = TaskDispatcher()
+        fallback_jobs = []
         for path, payload, stage in jobs:
             key = f"{lane_key.lower()}:{stage}:{payload.get('source_id') or payload.get('lead_id')}"
             try:
@@ -78,20 +94,18 @@ def dispatch_lane(factory, lane: str) -> dict:
                 else:
                     queued[stage] += 1
             except Exception as exc:
-                queued["errors"] += 1
-                errors.append({"stage": stage, "error": f"{type(exc).__name__}:{exc}"})
+                # PermissionDenied/queue outages must degrade to the independent
+                # HTTP worker lane instead of dropping the job.
+                fallback_jobs.append((path, payload, stage))
+                errors.append({"stage": stage, "error": f"cloud_tasks:{type(exc).__name__}:{exc}"})
+        enqueue_http_fallback(fallback_jobs)
     except Exception as exc:
-        mode = "HTTP_FALLBACK_ASYNC"
         errors.append({"stage": "dispatcher", "error": f"{type(exc).__name__}:{exc}"})
-        with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
-            futures = [pool.submit(_post_fallback, factory, path, payload) for path, payload, _ in jobs]
-            for future, (_, _, stage) in zip(futures, jobs):
-                try:
-                    future.result(timeout=535)
-                    queued[stage] += 1
-                except Exception as inner:
-                    queued["errors"] += 1
-                    errors.append({"stage": stage, "error": f"{type(inner).__name__}:{inner}"})
+        try:
+            enqueue_http_fallback(jobs)
+        except Exception as inner:
+            queued["errors"] += len(jobs)
+            errors.append({"stage": "fallback", "error": f"{type(inner).__name__}:{inner}"})
 
     return {
         "status": "ENQUEUED_WITH_ERRORS" if queued["errors"] else "ENQUEUED",
