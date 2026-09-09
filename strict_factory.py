@@ -686,31 +686,22 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
         return {**result, "notification": notice}
 
     def deep_health(self) -> dict:
+        # Readiness must stay cheap. Backlog totals are exposed by the
+        # autonomy status endpoint and must not block deployment probes.
         gate = self.gate_worker.loader.load()
         task_ready = bool(os.getenv("LEAD_FACTORY_SERVICE_URL"))
-        snapshot = {}
-        snapshot_error = ""
-        try:
-            snapshot = self._backlog_snapshot()
-        except Exception as exc:
-            # Health must remain observable during a Sheets quota burst. The
-            # scheduler/control loops retain the error and retry independently.
-            snapshot_error = f"{type(exc).__name__}:{exc}"[:500]
-        result = {
+        return {
             "ok": True,
             "factory_enabled": self._enabled(),
             "openai_key_present": bool(os.getenv("OPENAI_API_KEY")),
             "gate_doc_id": gate.doc_id,
             "gate_version": gate.version,
             "task_service_url_present": task_ready,
-            "backlog": snapshot,
+            "backlog": {},
+            "backlog_status": "AVAILABLE_VIA_AUTONOMY_STATUS",
             "external_write": False,
             "delete": False,
         }
-        if snapshot_error:
-            result["backlog_status"] = "TEMPORARILY_UNAVAILABLE"
-            result["backlog_error"] = snapshot_error
-        return result
 
     def evaluate_gate(self, company_context: dict) -> dict:
         verification = self.official_site_resolver.verify_existing(company_context)
