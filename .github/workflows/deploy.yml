@@ -145,17 +145,11 @@ jobs:
 
       - name: Runtime deep health check
         run: |
-          curl --fail-with-body --retry 10 --retry-all-errors --retry-delay 5 \
-            -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
-            -o /tmp/deep-health.json \
+          curl --fail-with-body --retry 10 --retry-all-errors --retry-delay 5 \\
+            -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \\
+            -o /tmp/deep-health.json \\
             "${SERVICE_URL}/healthz/deep"
-          python - <<'PY
-          import json
-          data=json.load(open('/tmp/deep-health.json'))
-          assert data.get('ok') is True, data
-          assert data.get('openai_key_present') is True, data
-          print(json.dumps(data, indent=2, ensure_ascii=False))
-          PY
+          python -c 'import json; d=json.load(open("/tmp/deep-health.json")); assert d.get("ok") is True, d; assert d.get("openai_key_present") is True, d; print(json.dumps(d, indent=2, ensure_ascii=False))'
 
       - name: Kick autonomous frontier and workers now
         continue-on-error: true
