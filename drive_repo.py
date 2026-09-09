@@ -24,6 +24,19 @@ class DriveRepo:
         files = res.get("files", [])
         return files[0] if files else None
 
+    def find_native_doc_by_name(self, name: str) -> dict | None:
+        """Resolve a renamed/recreated prompt by exact title and native Doc MIME."""
+        escaped = name.replace("'", "\\'")
+        q = (
+            f"name='{escaped}' and trashed=false and "
+            "mimeType='application/vnd.google-apps.document'"
+        )
+        files = self.svc.files().list(
+            q=q, fields="files(id,name,mimeType,modifiedTime)",
+            orderBy="modifiedTime desc", pageSize=10,
+        ).execute().get("files", [])
+        return files[0] if files else None
+
     def upsert_text(self, name: str, text: str) -> str:
         media = MediaIoBaseUpload(io.BytesIO(text.encode("utf-8")), mimetype="text/x-python", resumable=False)
         current = self._find(name)
@@ -68,3 +81,4 @@ class DriveRepo:
         while not done:
             _, done = downloader.next_chunk()
         return fh.getvalue().decode("utf-8"), meta
+
