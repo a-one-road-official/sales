@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from production_controller import QualifiedLeadProductionController
 
@@ -56,7 +56,7 @@ def test_start_persists_goal_and_baseline():
 def test_at_risk_requests_capacity_without_changing_gate():
     factory = FakeFactory()
     controller = QualifiedLeadProductionController(factory)
-    controller.start(1500, datetime(2026, 9, 8, 23, 59, tzinfo=timezone.utc))
+    controller.start(1500, datetime.now(timezone.utc) + timedelta(hours=1))
     status = controller.tick()
     assert factory.capacity_calls == 1
     assert status["target"] == 1500
