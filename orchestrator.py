@@ -22,6 +22,7 @@ from session_store import SessionStore
 from sheets_repo import SheetsRepo
 from tester import run_s1_to_s7
 from notifier import InternalNotifier
+from outreach_execution import is_sacrificial_lane
 
 
 JS_ADAPTER_TYPES = {"RENDERED_HTML", "JSON_API", "GRAPHQL"}
@@ -760,9 +761,9 @@ class LeadFactory:
     def outreach_ready_tick(self, lane: str | None = None) -> dict:
         """Internal-only Contact Research -> Message Draft -> Human Approval Queue. No send API exists in this path."""
         cfg = self._config()
-        if cfg.get("OUTREACH_READY_ENABLED", "FALSE").upper() != "TRUE":
+        if cfg.get("OUTREACH_READY_ENABLED", "TRUE").upper() != "TRUE":
             return {"status": "DISABLED", "reason": "Config.OUTREACH_READY_ENABLED is FALSE"}
-        prompt_doc_id = cfg.get("OUTREACH_PROMPT_DOC_ID", "").strip()
+        prompt_doc_id = cfg.get("OUTREACH_PROMPT_DOC_ID", "1joNEah7AuIF0-28PmVtgV9TcprEYneHSE5giUIayq5U").strip()
         if not prompt_doc_id:
             return {"status": "DISABLED", "reason": "missing OUTREACH_PROMPT_DOC_ID"}
         limit = int(cfg.get("OUTREACH_READY_MAX_PER_TICK", "2") or 2)
@@ -799,22 +800,28 @@ class LeadFactory:
                 self.sheets.append_contact_research(contact)
             draft = self.llm.draft_outreach_email(production_prompt, company, contact)
             recipient = str(contact.get("email") or "").strip()
-            state = "READY_HUMAN_APPROVAL" if recipient else "BLOCKED_NEEDS_RECIPIENT"
+            lane = str(company.get("lane") or company.get("source_lane") or "").strip().upper()
+            if not lane:
+                source_type = str(company.get("source_type") or "").upper()
+                lane = "EC" if any(x in source_type for x in ("EC", "RETAIL", "SACRIFICE")) else source_type
+            execution_row = {**company, **contact, "recipient": recipient, "subject": draft["subject"], "body": draft["body"], "lane": lane}
+            sacrificial = bool(recipient and is_sacrificial_lane(execution_row, cfg))
+            state = ("READY_SACRIFICIAL_EXECUTION" if sacrificial else "READY_HUMAN_APPROVAL" if recipient else "BLOCKED_NEEDS_RECIPIENT")
             now = datetime.now(timezone.utc).isoformat()
             draft_id = f"draft-{uuid.uuid4().hex}"
             self.sheets.append_message_draft({
                 "draft_id": draft_id, "company_key": company_key, "contact_id": contact.get("contact_id", ""),
-                "company_name": company.get("company_name", ""), "recipient": recipient,
+                "company_name": company.get("company_name", ""), "recipient": recipient, "lane": lane,
                 "recipient_name": contact.get("contact_name", ""), "subject": draft["subject"], "body": draft["body"],
                 "research_basis": str(company.get("research_sources") or company.get("G1_evidence") or company.get("M1_evidence") or ""),
                 "prompt_version": f"gdoc:{prompt_meta.get('modifiedTime','')}", "generated_at": now,
-                "state": state, "customer_facing": "TRUE", "execution_allowed": "FALSE",
+                "state": state, "customer_facing": "TRUE", "execution_allowed": "TRUE" if sacrificial and cfg.get("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE").upper() == "TRUE" else "FALSE",
             })
             queue_id = f"queue-{uuid.uuid4().hex}"
             self.sheets.append_approval_queue({
                 "queue_id": queue_id, "created_at": now, "company_key": company_key, "action_type": "EMAIL_SEND",
                 "recipient": recipient, "subject": draft["subject"], "draft_id": draft_id, "state": state,
-                "requires_human_approval": "TRUE", "approved_at": "", "approved_by": "",
+                "requires_human_approval": "FALSE" if sacrificial else "TRUE", "approved_at": now if sacrificial else "", "approved_by": "SYSTEM_SACRIFICE" if sacrificial else "",
                 "executed_at": "", "execution_result": "", "guardrail": "A_ONE_BEN_HITL",
             })
             results.append({"company_key": company_key, "company_name": company.get("company_name", ""), "state": state})
