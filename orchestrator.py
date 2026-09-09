@@ -27,6 +27,40 @@ from notifier import InternalNotifier
 JS_ADAPTER_TYPES = {"RENDERED_HTML", "JSON_API", "GRAPHQL"}
 
 
+FALLBACK_ADAPTER = r'''from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+import re
+
+def extract(snapshot):
+    html = str(snapshot.get("html") or snapshot.get("text") or "")
+    base = str(snapshot.get("final_url") or snapshot.get("url") or "")
+    soup = BeautifulSoup(html, "html.parser")
+    records, seen = [], set()
+    def add(name, website="", record_url=""):
+        name = re.sub(r"\\s+", " ", str(name or "")).strip()
+        website = str(website or "").strip()
+        if len(name) < 2 or len(name) > 240 or name.lower() in seen:
+            return
+        if not website.startswith(("http://", "https://")):
+            website = ""
+        domain = (urlparse(website).hostname or "").lower().removeprefix("www.") if website else ""
+        seen.add(name.lower())
+        records.append({"company_name": name, "website": website, "domain": domain, "source_record_url": record_url or base})
+    for row in soup.select("table tr"):
+        cells = [re.sub(r"\\s+", " ", x.get_text(" ", strip=True)) for x in row.select("th,td")]
+        links = [urljoin(base, a.get("href")) for a in row.select("a[href]")]
+        if cells:
+            name = next((x for x in cells if 2 <= len(x) <= 240 and not re.fullmatch(r"[0-9.,/% -]+", x)), "")
+            add(name, next((x for x in links if urlparse(x).scheme in ("http","https")), ""), base)
+    for a in soup.select("a[href]"):
+        label = re.sub(r"\\s+", " ", a.get_text(" ", strip=True))
+        href = urljoin(base, a.get("href"))
+        if label and href.startswith(("http://", "https://")) and 2 <= len(label) <= 180:
+            if any(k in label.lower() for k in ("company","inc.","ltd","gmbh","corp","robot","automation","machine","systems","technolog","industr")):
+                add(label, href, href)
+    return {"records": records, "next_urls": []}
+'''
+
 class LeadFactory:
     def __init__(self, settings: Settings):
         self.s = settings
@@ -227,7 +261,23 @@ class LeadFactory:
             "network": probe.network[:1000],
             "api_payloads": probe.api_payloads[:50],
         }
-        analysis = self.llm.analyze_probe(analysis_payload)
+        try:
+            analysis = self.llm.analyze_probe(analysis_payload)
+        except Exception as exc:
+            analysis = {
+                "adapter_type": probe.render_mode or "HTML",
+                "auth_required": False,
+                "expected_count": int(source.exhibitor_count or 0),
+                "notes": f"llm_unavailable_fallback:{type(exc).__name__}:{exc}",
+            }
+            self.notifier.notify(
+                subject=f"A-one Lead Factory Gemini error: {source.source_name}",
+                body=(
+                    "Gemini/Vertex analysis failed; deterministic source extraction fallback is active.\\n\\n"
+                    f"source_id={source.source_id}\\nerror={type(exc).__name__}:{exc}\\n"
+                    "Customer-facing sending was not executed."
+                ),
+            )
         expected = int(analysis.get("expected_count") or source.exhibitor_count or 0)
         prior_error = repair_reason
         existing = self.sheets.get_scraper(source.source_id)
@@ -249,18 +299,30 @@ class LeadFactory:
                 fact_or_inference="INFERENCE",
                 reason=(repair_reason or "initial_build") + f";attempt={attempt}",
             )
-            code = self.llm.build_adapter({
-                "url": probe.url,
-                "final_url": probe.final_url,
-                "content_type": probe.content_type,
-                "render_mode": probe.render_mode,
-                "signals": probe.signals,
-                "html": probe.html[:160000],
-                "links": probe.links[:1500],
-                "network": probe.network[:1500],
-                "api_payloads": probe.api_payloads[:100],
-                "analysis": analysis,
-            }, prior_error=prior_error)
+            try:
+                code = self.llm.build_adapter({
+                    "url": probe.url,
+                    "final_url": probe.final_url,
+                    "content_type": probe.content_type,
+                    "render_mode": probe.render_mode,
+                    "signals": probe.signals,
+                    "html": probe.html[:160000],
+                    "links": probe.links[:1500],
+                    "network": probe.network[:1500],
+                    "api_payloads": probe.api_payloads[:100],
+                    "analysis": analysis,
+                }, prior_error=prior_error)
+            except Exception as exc:
+                prior_error = f"llm_adapter_generation_unavailable:{type(exc).__name__}:{exc}"
+                code = FALLBACK_ADAPTER
+                self.notifier.notify(
+                    subject=f"A-one Lead Factory scraper fallback: {source.source_name}",
+                    body=(
+                        "Gemini adapter generation failed; deterministic HTML/link adapter is being tested.\\n\\n"
+                        f"source_id={source.source_id}\\nerror={prior_error[:4000]}\\n"
+                        "Customer-facing sending was not executed."
+                    ),
+                )
             tr = run_s1_to_s7(code, source, probe, expected_count=expected)
             version = base_version + attempt
             test_id = f"test-{uuid.uuid4()}"
@@ -664,6 +726,22 @@ class LeadFactory:
                 **result,
                 "source_state": source_state,
             })
+        try:
+            self.sheets.append_runlog([
+                rid, datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat(),
+                "SOURCE_TICK" if not errors else "SOURCE_TICK_WITH_ERRORS",
+                0, new_raw, duplicates, 0, 0, 0, 0, 0, errors + auth_required,
+                "source_tick", "", rid, "cloud", json.dumps({
+                    "lane": lane_key or "ALL", "sources_processed": len(results),
+                    "system_error_sources": sum(1 for r in results if r.get("outcome") == "SYSTEM_ERROR"),
+                    "no_qualifying_sources": sum(1 for r in results if r.get("outcome") == "NO_QUALIFYING_TARGETS"),
+                }, ensure_ascii=False)[:5000],
+            ])
+        except Exception as log_exc:
+            self.notifier.notify(
+                subject="A-one Lead Factory RunLog write error",
+                body=f"source_tick_runlog_failed={type(log_exc).__name__}:{log_exc}\\nCustomer-facing sending was not executed."
+            )
         return {
             "status": "COMPLETE_WITH_ERRORS" if errors else "COMPLETE",
             "requested": limit,
