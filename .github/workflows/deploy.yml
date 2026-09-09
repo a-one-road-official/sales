@@ -153,8 +153,6 @@ jobs:
             fi
           }
 
-            # update preserves a prior PAUSED state; internal production resumes after deploy.
-            gcloud scheduler jobs resume "$NAME" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
           for OLD in lead-factory-daily lead-factory-growth-supply lead-factory-mittelstand-supply; do
             gcloud scheduler jobs pause "$OLD" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
           done
