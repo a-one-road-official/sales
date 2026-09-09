@@ -30,9 +30,10 @@ class Settings:
     autonomy_notify_email: str = os.getenv("LEAD_FACTORY_AUTONOMY_NOTIFY_EMAIL", "admin@a1-road.com")
 
     enable_browser_probe: bool = os.getenv("LEAD_FACTORY_ENABLE_BROWSER_PROBE", "TRUE").upper() == "TRUE"
-    allow_external_write: bool = False
-    allow_delete: bool = False
-    gmail_mode: str = "DRAFT_ONLY"
+    # External execution is explicitly scoped. The default remains fail-closed.
+    allow_external_write: bool = os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE").upper() == "TRUE"
+    allow_delete: bool = os.getenv("LEAD_FACTORY_ALLOW_DELETE", "FALSE").upper() == "TRUE"
+    gmail_mode: str = os.getenv("LEAD_FACTORY_GMAIL_MODE", "DRAFT_ONLY").upper()
 
 
 SETTINGS = Settings()
