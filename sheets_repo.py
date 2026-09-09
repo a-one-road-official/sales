@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 from google.auth import default
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 
 from models import Source
@@ -36,16 +37,34 @@ SOURCE_HEADERS = [
 
 class SheetsRepo:
     def __init__(self, spreadsheet_id: str):
+        self._read_lock = threading.Lock()
+        self._last_read_at = 0.0
         creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
         self.svc = build("sheets", "v4", credentials=creds, cache_discovery=False)
         self.spreadsheet_id = spreadsheet_id
 
 
     def read(self, range_: str) -> list[list[str]]:
-        res = self.svc.spreadsheets().values().get(
-            spreadsheetId=self.spreadsheet_id, range=range_
-        ).execute()
-        return res.get("values", [])
+        # Sheets quota is shared by the runtime identity. Serialize reads per
+        # container and back off on transient quota/server responses so parallel
+        # Scheduler ticks do not turn a recoverable burst into a dead pipeline.
+        with self._read_lock:
+            for attempt in range(5):
+                elapsed = time.monotonic() - self._last_read_at
+                if elapsed < 0.15:
+                    time.sleep(0.15 - elapsed)
+                try:
+                    res = self.svc.spreadsheets().values().get(
+                        spreadsheetId=self.spreadsheet_id, range=range_
+                    ).execute()
+                    self._last_read_at = time.monotonic()
+                    return res.get("values", [])
+                except HttpError as exc:
+                    status = getattr(exc.resp, "status", None)
+                    if status not in {429, 500, 502, 503, 504} or attempt == 4:
+                        raise
+                    time.sleep(min(8.0, 2 ** attempt))
+            return []
 
 
     def append(self, sheet: str, values: list) -> None:
