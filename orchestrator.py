@@ -37,7 +37,7 @@ def extract(snapshot):
     soup = BeautifulSoup(html, "html.parser")
     records, seen = [], set()
     def add(name, website="", record_url=""):
-        name = re.sub(r"\\s+", " ", str(name or "")).strip()
+        name = re.sub(r"\s+", " ", str(name or "")).strip()
         website = str(website or "").strip()
         if len(name) < 2 or len(name) > 240 or name.lower() in seen:
             return
@@ -47,13 +47,13 @@ def extract(snapshot):
         seen.add(name.lower())
         records.append({"company_name": name, "website": website, "domain": domain, "source_record_url": record_url or base})
     for row in soup.select("table tr"):
-        cells = [re.sub(r"\\s+", " ", x.get_text(" ", strip=True)) for x in row.select("th,td")]
+        cells = [re.sub(r"\s+", " ", x.get_text(" ", strip=True)) for x in row.select("th,td")]
         links = [urljoin(base, a.get("href")) for a in row.select("a[href]")]
         if cells:
             name = next((x for x in cells if 2 <= len(x) <= 240 and not re.fullmatch(r"[0-9.,/% -]+", x)), "")
             add(name, next((x for x in links if urlparse(x).scheme in ("http","https")), ""), base)
     for a in soup.select("a[href]"):
-        label = re.sub(r"\\s+", " ", a.get_text(" ", strip=True))
+        label = re.sub(r"\s+", " ", a.get_text(" ", strip=True))
         href = urljoin(base, a.get("href"))
         if label and href.startswith(("http://", "https://")) and 2 <= len(label) <= 180:
             if any(k in label.lower() for k in ("company","inc.","ltd","gmbh","corp","robot","automation","machine","systems","technolog","industr")):
