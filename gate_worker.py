@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from gate_loader import GateLoader
 from gate_rules import evaluate_gate, research_gate_facts
+from observability import failure_code, record_event
 
 
 class GateWorker:
@@ -78,6 +79,18 @@ class GateWorker:
                 error="",
             )
 
+        record_event(
+            self.sheets,
+            event_type="PIPELINE_STAGE",
+            reason_code="GATE_COMPLETED",
+            reason_note=(
+                f"gate_version={gate.version};first_failed_gate={row['first_failed_gate']};"
+                f"missing_evidence={row['missing_evidence'][:1000]}"
+            ),
+            company_name=row["company_name"], domain=row["domain"],
+            source_id=lead_id, status=row["final_result"],
+        )
+
         return {
             **result,
             "gate_version": gate.version,
@@ -94,18 +107,28 @@ class GateWorker:
                 results.append(self.evaluate_and_persist(company))
             except Exception as exc:
                 lead_id = str(company.get("lead_id", ""))
+                reason = f"{type(exc).__name__}:{exc}"
                 if lead_id:
                     self.sheets.update_raw_screening(
                         lead_id=lead_id,
                         screening_status="ERROR",
                         gate_version="",
-                        error=f"{type(exc).__name__}:{exc}"[:5000],
+                        error=reason[:5000],
                     )
+                record_event(
+                    self.sheets,
+                    event_type="PIPELINE_FAILURE",
+                    reason_code=failure_code(reason),
+                    reason_note=f"stage=GATE;error={reason}",
+                    company_name=str(company.get("company_name") or ""),
+                    domain=str(company.get("domain") or ""),
+                    source_id=lead_id, status="ERROR",
+                )
                 results.append({
                     "lead_id": lead_id,
                     "company_name": company.get("company_name", ""),
                     "final_result": "ERROR",
-                    "error": f"{type(exc).__name__}:{exc}",
+                    "error": reason,
                 })
         return {
             "requested": limit,
