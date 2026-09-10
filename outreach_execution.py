@@ -311,7 +311,19 @@ class OutboundEmailExecutor:
             cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL"
         ):
             return "explicit_factory_send_approval_required"
-        # Even a fully approved-looking config cannot send in this deployment.
+        if lane == "EC_SACRIFICE":
+            if not _cfg_truthy(cfg, "LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME"):
+                return "isolated_sacrifice_runtime_required"
+            if not str(
+                cfg.get(
+                    "OUTREACH_SACRIFICE_TARGET_COMPANIES",
+                    os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES", ""),
+                )
+                or ""
+            ).strip():
+                return "sacrifice_target_companies_required"
+            return ""
+        # All other production lanes remain list-only in this isolated executor.
         return "list_only_mode"
 
     def _send_enabled(self, draft: dict, cfg: dict[str, str]) -> bool:
