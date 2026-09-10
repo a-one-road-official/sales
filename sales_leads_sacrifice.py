@@ -23,14 +23,23 @@ SOURCE_PATH = Path(os.getenv(
 ))
 if not SOURCE_PATH.exists():
     SOURCE_PATH = _LEGACY_SOURCE_PATH
+BPO_SOURCE_PATH = _DATA_DIR / "sales_leads_bpo_verified.json"
 SACRIFICE_DOMAIN = "EC/リテール"
+BPO_DOMAIN = "BPO"
+
+
+def source_path_for_lane(lane: str) -> Path:
+    normalized = str(lane or "").strip().upper()
+    if normalized == "BPO":
+        return BPO_SOURCE_PATH
+    return SOURCE_PATH
 
 # The workbook's category label is not authoritative. These companies are
 # deliberately kept out of the sacrifice lane because their actual business is
 # manufacturing, industrial software, additive manufacturing, inspection, or
 # factory operations—the exact population the production pipeline targets.
 FACTORY_OR_INDUSTRIAL_MARKERS = (
-    "FACTORY", "BPO", "SSOT", "MANUFACTUR", "INDUSTRIAL",
+    "FACTORY", "SSOT", "MANUFACTUR", "INDUSTRIAL",
     "ADDITIVE", "MACHINE TOOL", "SHIPBUILD", "PRODUCTION LINE",
     "製造", "工場", "造船",
 )
@@ -93,17 +102,30 @@ def source_website_check(row: dict) -> dict:
     return {"status": "MISMATCH_REJECTED", "host": host, "matched_tokens": []}
 
 
-def sacrifice_candidates(rows: list[dict], limit: int = 10) -> list[dict]:
-    """Select only the EC sacrifice population and preserve source provenance."""
+def sacrifice_candidates(
+    rows: list[dict],
+    limit: int = 10,
+    *,
+    domain: str | None = None,
+    lane: str = "EC_SACRIFICE",
+) -> list[dict]:
+    """Select only the explicitly permitted lane and preserve provenance."""
+    normalized_lane = str(lane or "EC_SACRIFICE").strip().upper()
+    if normalized_lane not in {"EC_SACRIFICE", "BPO"}:
+        raise RuntimeError("unsupported_sacrifice_lane")
+    target_domain = str(
+        domain or (BPO_DOMAIN if normalized_lane == "BPO" else SACRIFICE_DOMAIN)
+    ).strip()
     selected = []
     for row in rows:
-        # The source of truth for the sacrifice population is column C:
-        # `domain == EC/リテール`. `record_origin` is only a derived snapshot
-        # marker kept for provenance and must not drive selection.
-        domain = str(row.get("domain") or "").strip()
-        if not domain and str(row.get("record_origin") or "") == "SACRIFICE_EC":
-            domain = SACRIFICE_DOMAIN
-        if domain != SACRIFICE_DOMAIN:
+        row_domain = str(row.get("domain") or "").strip()
+        if (
+            normalized_lane == "EC_SACRIFICE"
+            and not row_domain
+            and str(row.get("record_origin") or "") == "SACRIFICE_EC"
+        ):
+            row_domain = SACRIFICE_DOMAIN
+        if row_domain != target_domain:
             continue
         if str(row.get("status") or "未接触").strip() not in {"", "未接触"}:
             continue
@@ -112,11 +134,12 @@ def sacrifice_candidates(rows: list[dict], limit: int = 10) -> list[dict]:
         if company_name in FACTORY_OR_INDUSTRIAL_NAMES or is_forbidden_factory_target(row):
             continue
         selected.append({
-            "sacrifice_lane": "EC_SACRIFICE",
+            "sacrifice_lane": normalized_lane,
             "source": "sales_leads",
             "source_sheet": row.get("source_sheet", "営業リスト_Vendor"),
+            "source_sheet_actual": row.get("source_sheet_actual", ""),
             "source_row": row.get("source_row", ""),
-            "domain": domain,
+            "domain": row_domain,
             "company_name": company_name,
             "country": str(row.get("hq_country") or "").strip(),
             "company_description": str(row.get("what_it_solves") or "").strip(),
@@ -124,7 +147,9 @@ def sacrifice_candidates(rows: list[dict], limit: int = 10) -> list[dict]:
             "candidate_email": str(row.get("email") or "").strip(),
             "candidate_website_evidence": evidence,
             "status": "RESEARCH_REQUIRED",
-            "sacrifice_eligibility": "NON_FACTORY_TEST_COMPANY",
+            "sacrifice_eligibility": (
+                "BPO_TEST_COMPANY" if normalized_lane == "BPO" else "NON_FACTORY_TEST_COMPANY"
+            ),
         })
         if len(selected) >= max(0, int(limit)):
             break
@@ -133,6 +158,12 @@ def sacrifice_candidates(rows: list[dict], limit: int = 10) -> list[dict]:
 
 def make_research_context(candidate: dict) -> dict:
     """Context for the existing research worker; supplied URL is only a lead."""
+    lane = str(candidate.get("sacrifice_lane") or "EC_SACRIFICE").strip().upper()
+    source_sheet = str(
+        candidate.get("source_sheet_actual")
+        or candidate.get("source_sheet")
+        or "sales_leads"
+    ).strip()
     return {
         "company_name": candidate["company_name"],
         "country": candidate["country"],
@@ -140,8 +171,8 @@ def make_research_context(candidate: dict) -> dict:
         "candidate_website": candidate["candidate_website"],
         "candidate_website_evidence": candidate["candidate_website_evidence"],
         "candidate_email": candidate.get("candidate_email", ""),
-        "source_lane": "EC_SACRIFICE",
-        "source_record": f"sales_leads:{candidate['source_sheet']}:{candidate['source_row']}",
+        "source_lane": lane,
+        "source_record": f"sales_leads:{source_sheet}:{candidate['source_row']}",
         "instruction": "Verify official company website and contact evidence independently. Never trust the candidate URL without evidence.",
     }
 
