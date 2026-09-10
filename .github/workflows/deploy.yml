@@ -202,17 +202,6 @@ jobs:
             "${SERVICE_URL}/autonomy/start"
           echo
 
-      - name: Bootstrap first autonomous tick
-        run: |
-          for PATH_NAME in /meta/tick /dispatch/growth /dispatch/mittelstand /promotion/tick; do
-            echo "POST ${PATH_NAME}"
-            curl --fail-with-body --retry 3 --retry-all-errors --retry-delay 2 \
-              -X POST \
-              -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
-              -H "Content-Type: application/json" \
-              "${SERVICE_URL}${PATH_NAME}"
-          done
-
       - name: Execute isolated ten-company sacrifice batch
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true }}
         run: |
@@ -231,6 +220,17 @@ jobs:
           assert summary["production_ssot_touched"] is False
           assert summary["attempted"] == 10
           PY
+
+      - name: Bootstrap first autonomous tick
+        run: |
+          for PATH_NAME in /meta/tick /dispatch/growth /dispatch/mittelstand /promotion/tick; do
+            echo "POST ${PATH_NAME}"
+            timeout 120 curl --fail-with-body --retry 3 --retry-all-errors --retry-delay 2 \
+              -X POST \
+              -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "${SERVICE_URL}${PATH_NAME}"
+          done
 
       - name: Verify autonomous infrastructure
         run: |
