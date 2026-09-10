@@ -125,7 +125,7 @@ jobs:
 
 
       - name: Deploy isolated sacrifice runtime
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
         run: |
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
           gcloud run deploy "$SACRIFICE_SERVICE" \
@@ -227,7 +227,7 @@ jobs:
           upsert_job lead-factory-prep "3-59/5 * * * *" "${URL}/prep/tick"
           upsert_job lead-factory-control "4-59/10 * * * *" "${URL}/control/tick"
           upsert_job lead-factory-maktek-full "0 4 1 1 *" "${URL}/maktek/ingest"
-          if [ "${{ github.event_name }}" = "push" ] || ( [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.execute_sacrifice }}" = "true" ] && [ "${{ vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL }}" = "TRUE" ] ); then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.execute_sacrifice }}" = "true" ] && [ "${{ vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL }}" = "TRUE" ]; then
             upsert_job lead-factory-sacrifice "*/15 * * * *" "${SACRIFICE_URL}/outreach/sales-leads-sacrifice-tick"
           fi
 
@@ -254,7 +254,7 @@ jobs:
 
 
       - name: Execute isolated ten-company sacrifice batch
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
         continue-on-error: true
         run: |
           set +e
@@ -425,7 +425,7 @@ jobs:
             "${SERVICE_URL}/promotion/tick"
 
       - name: Verify isolated sacrifice scheduler target
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
         run: |
           gcloud scheduler jobs describe lead-factory-sacrifice \
             --location="$REGION" --project="$PROJECT" \
