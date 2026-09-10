@@ -268,10 +268,10 @@ def _select_custom_option(el, key: str) -> tuple[bool, str]:
     }.get(key, ())
     if key == "revenue":
         configured = str(os.getenv("OUTREACH_FORM_ANNUAL_REVENUE") or "").strip().lower()
-        wanted = (configured,) if configured else ()
+        wanted = tuple(part.strip() for part in configured.split("|") if part.strip()) if configured else ()
     if key == "monthly_traffic":
         configured = str(os.getenv("OUTREACH_FORM_MONTHLY_TRAFFIC") or "").strip().lower()
-        wanted = (configured,) if configured else ()
+        wanted = tuple(part.strip() for part in configured.split("|") if part.strip()) if configured else ()
     configured_by_key = {
         "reason": "OUTREACH_FORM_REASON",
         "discovery_source": "OUTREACH_FORM_DISCOVERY_SOURCE",
@@ -305,7 +305,7 @@ def _select_custom_option(el, key: str) -> tuple[bool, str]:
     return False, ""
 
 
-def _select_phone_country(el) -> tuple[bool, bool]:
+def _select_phone_country(el, context=None) -> tuple[bool, bool]:
     """Set Japan in a phone widget when the site exposes a country picker."""
     try:
         root = el.locator(
@@ -316,20 +316,22 @@ def _select_phone_country(el) -> tuple[bool, bool]:
         if not present:
             return False, True
         picker.click(timeout=5000)
-        options = root.locator("[role=option], li")
-        for index in range(min(options.count(), 240)):
-            option = options.nth(index)
-            if not option.is_visible() or not option.is_enabled():
-                continue
-            text = str(option.inner_text() or "").strip()
-            if re.search(r"\bJapan\b|日本", text, re.I):
-                option.click(timeout=5000)
-                return True, True
+        roots = [root, el.locator("xpath=ancestor::form[1]")]
+        if context is not None:
+            roots.append(context)
+        for option_root in roots:
+            options = option_root.locator("[role=option], li")
+            for index in range(min(options.count(), 240)):
+                option = options.nth(index)
+                if not option.is_visible():
+                    continue
+                text = str(option.inner_text() or "").strip()
+                if re.search(r"\\bJapan\\b|日本", text, re.I):
+                    option.click(timeout=5000)
+                    return True, True
         return True, False
     except Exception:
         return True, False
-
-
 def _current_value(el) -> str:
     try:
         if (el.get_attribute("type") or "").lower() == "checkbox":
@@ -834,7 +836,7 @@ class PublicContactFormExecutor:
                                     item["final_value"] = selected_text or _current_value(el)
                             else:
                                 if key == "phone":
-                                    picker_present, phone_country_ok = _select_phone_country(el)
+                                    picker_present, phone_country_ok = _select_phone_country(el, page)
                                     item["phone_country"] = (
                                         "Japan" if phone_country_ok else
                                         "UNSET" if picker_present else "NOT_AVAILABLE"
