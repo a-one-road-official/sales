@@ -18,7 +18,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: lead-factory-production-deploy
+  group: lead-factory-qualified-ssot-deploy
   cancel-in-progress: false
 
 jobs:
