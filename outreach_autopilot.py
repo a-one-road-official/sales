@@ -632,6 +632,7 @@ class BPOAutopilot:
                             "OUTREACH_STABLE_BATCH_MIN_SUCCESS": str(state["minimum_successes"]),
                         },
                         batch_id=batch_id,
+                        job_id=state["job_id"],
                     )
                 except Exception as exc:
                     self._finish(
