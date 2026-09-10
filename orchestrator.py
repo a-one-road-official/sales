@@ -23,6 +23,7 @@ from sheets_repo import SheetsRepo
 from tester import run_s1_to_s7
 from notifier import InternalNotifier
 from outreach_execution import is_sacrificial_lane
+from observability import failure_code, record_event
 
 
 JS_ADAPTER_TYPES = {"RENDERED_HTML", "JSON_API", "GRAPHQL"}
@@ -717,6 +718,19 @@ class LeadFactory:
                         "Customer-facing sending was not executed."
                     ),
                 )
+            record_event(
+                self.sheets,
+                event_type="PIPELINE_FAILURE" if source_outcome == "SYSTEM_ERROR" else "PIPELINE_STAGE",
+                reason_code=(failure_code(source_reason) if source_outcome == "SYSTEM_ERROR" else source_outcome),
+                reason_note=(
+                    f"source_status={status or 'EMPTY'};outcome={source_outcome};"
+                    f"next_action={source_next_action};records={records};{source_reason}"
+                ),
+                company_name=source.source_name,
+                source_id=source.source_id,
+                raw_ref=source.crawl_url,
+                status=source_outcome,
+            )
             results.append({
                 "source_id": source.source_id,
                 "source_name": source.source_name,
@@ -774,57 +788,79 @@ class LeadFactory:
         results = []
         for company in candidates:
             company_key = str(company.get("lead_id") or "").strip()
-            self.meta.check(
-                run_id=f"ready-{uuid.uuid4()}", stage="OUTREACH_READY", action="PREPARE_CONTACT_AND_DRAFT",
-                target=str(company.get("company_name") or company_key), requested_scope_ok=True,
-                target_exists_checked=True, destructive=False, external_effect=False, test_passed=True,
-                simpler_option_checked=True, concept_boundary_ok=True, fact_or_inference="INFERENCE",
-                reason="A-one-ben: internal research/drafting only; final customer-facing execution remains human-gated.",
-            )
-            contact = self.sheets.latest_contact(company_key)
-            if not contact:
-                researched = self.llm.research_outreach_contact(company)
-                contact_id = f"contact-{uuid.uuid4().hex}"
-                evidence = researched.get("evidence_urls", [])
-                evidence_text = " | ".join(str(x) for x in evidence) if isinstance(evidence, list) else str(evidence or "")
-                contact = {
-                    "contact_id": contact_id, "company_key": company_key,
-                    "company_name": company.get("company_name", ""), "domain": company.get("domain", ""),
-                    "website": company.get("website", ""), "contact_name": researched.get("contact_name", ""),
-                    "title": researched.get("title", ""), "email": researched.get("email", ""),
-                    "linkedin_url": researched.get("linkedin_url", ""), "contact_fit": researched.get("contact_fit", ""),
-                    "confidence": researched.get("confidence", ""), "research_summary": researched.get("research_summary", ""),
-                    "evidence_urls": evidence_text, "researched_at": datetime.now(timezone.utc).isoformat(),
-                    "status": researched.get("status", ""),
-                }
-                self.sheets.append_contact_research(contact)
-            draft = self.llm.draft_outreach_email(production_prompt, company, contact)
-            recipient = str(contact.get("email") or "").strip()
-            lane = str(company.get("lane") or company.get("source_lane") or "").strip().upper()
-            if not lane:
-                source_type = str(company.get("source_type") or "").upper()
-                lane = "EC" if any(x in source_type for x in ("EC", "RETAIL", "SACRIFICE")) else source_type
-            execution_row = {**company, **contact, "recipient": recipient, "subject": draft["subject"], "body": draft["body"], "lane": lane}
-            sacrificial = bool(recipient and is_sacrificial_lane(execution_row, cfg))
-            state = ("READY_SACRIFICIAL_EXECUTION" if sacrificial else "READY_HUMAN_APPROVAL" if recipient else "BLOCKED_NEEDS_RECIPIENT")
-            now = datetime.now(timezone.utc).isoformat()
-            draft_id = f"draft-{uuid.uuid4().hex}"
-            self.sheets.append_message_draft({
-                "draft_id": draft_id, "company_key": company_key, "contact_id": contact.get("contact_id", ""),
-                "company_name": company.get("company_name", ""), "recipient": recipient, "lane": lane,
-                "recipient_name": contact.get("contact_name", ""), "subject": draft["subject"], "body": draft["body"],
-                "research_basis": str(company.get("research_sources") or company.get("G1_evidence") or company.get("M1_evidence") or ""),
-                "prompt_version": f"gdoc:{prompt_meta.get('modifiedTime','')}", "generated_at": now,
-                "state": state, "customer_facing": "TRUE", "execution_allowed": "TRUE" if sacrificial and cfg.get("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE").upper() == "TRUE" else "FALSE",
-            })
-            queue_id = f"queue-{uuid.uuid4().hex}"
-            self.sheets.append_approval_queue({
-                "queue_id": queue_id, "created_at": now, "company_key": company_key, "action_type": "EMAIL_SEND",
-                "recipient": recipient, "subject": draft["subject"], "draft_id": draft_id, "state": state,
-                "requires_human_approval": "FALSE" if sacrificial else "TRUE", "approved_at": now if sacrificial else "", "approved_by": "SYSTEM_SACRIFICE" if sacrificial else "",
-                "executed_at": "", "execution_result": "", "guardrail": "A_ONE_BEN_HITL",
-            })
-            results.append({"company_key": company_key, "company_name": company.get("company_name", ""), "state": state})
+            company_name = str(company.get("company_name") or company_key)
+            company_lane = str(company.get("lane") or company.get("source_lane") or "").strip().upper()
+            try:
+                self.meta.check(
+                    run_id=f"ready-{uuid.uuid4()}", stage="OUTREACH_READY", action="PREPARE_CONTACT_AND_DRAFT",
+                    target=company_name, requested_scope_ok=True,
+                    target_exists_checked=True, destructive=False, external_effect=False, test_passed=True,
+                    simpler_option_checked=True, concept_boundary_ok=True, fact_or_inference="INFERENCE",
+                    reason="A-one-ben: internal research/drafting only; final customer-facing execution remains human-gated.",
+                )
+                contact = self.sheets.latest_contact(company_key)
+                if not contact:
+                    researched = self.llm.research_outreach_contact(company)
+                    contact_id = f"contact-{uuid.uuid4().hex}"
+                    evidence = researched.get("evidence_urls", [])
+                    evidence_text = " | ".join(str(x) for x in evidence) if isinstance(evidence, list) else str(evidence or "")
+                    contact = {
+                        "contact_id": contact_id, "company_key": company_key,
+                        "company_name": company_name, "domain": company.get("domain", ""),
+                        "website": company.get("website", ""), "contact_name": researched.get("contact_name", ""),
+                        "title": researched.get("title", ""), "email": researched.get("email", ""),
+                        "linkedin_url": researched.get("linkedin_url", ""), "contact_fit": researched.get("contact_fit", ""),
+                        "confidence": researched.get("confidence", ""), "research_summary": researched.get("research_summary", ""),
+                        "evidence_urls": evidence_text, "researched_at": datetime.now(timezone.utc).isoformat(),
+                        "status": researched.get("status", ""),
+                    }
+                    self.sheets.append_contact_research(contact)
+                draft = self.llm.draft_outreach_email(production_prompt, company, contact)
+                recipient = str(contact.get("email") or "").strip()
+                if not company_lane:
+                    source_type = str(company.get("source_type") or "").upper()
+                    company_lane = "EC" if any(x in source_type for x in ("EC", "RETAIL", "SACRIFICE")) else source_type
+                execution_row = {**company, **contact, "recipient": recipient, "subject": draft["subject"], "body": draft["body"], "lane": company_lane}
+                sacrificial = bool(recipient and is_sacrificial_lane(execution_row, cfg))
+                state = ("READY_SACRIFICIAL_EXECUTION" if sacrificial else "READY_HUMAN_APPROVAL" if recipient else "BLOCKED_NEEDS_RECIPIENT")
+                now = datetime.now(timezone.utc).isoformat()
+                draft_id = f"draft-{uuid.uuid4().hex}"
+                self.sheets.append_message_draft({
+                    "draft_id": draft_id, "company_key": company_key, "contact_id": contact.get("contact_id", ""),
+                    "company_name": company_name, "recipient": recipient, "lane": company_lane,
+                    "recipient_name": contact.get("contact_name", ""), "subject": draft["subject"], "body": draft["body"],
+                    "research_basis": str(company.get("research_sources") or company.get("G1_evidence") or company.get("M1_evidence") or ""),
+                    "prompt_version": f"gdoc:{prompt_meta.get('modifiedTime','')}", "generated_at": now,
+                    "state": state, "customer_facing": "TRUE", "execution_allowed": "TRUE" if sacrificial and cfg.get("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE").upper() == "TRUE" else "FALSE",
+                })
+                queue_id = f"queue-{uuid.uuid4().hex}"
+                self.sheets.append_approval_queue({
+                    "queue_id": queue_id, "created_at": now, "company_key": company_key, "action_type": "EMAIL_SEND",
+                    "recipient": recipient, "subject": draft["subject"], "draft_id": draft_id, "state": state,
+                    "requires_human_approval": "FALSE" if sacrificial else "TRUE", "approved_at": now if sacrificial else "", "approved_by": "SYSTEM_SACRIFICE" if sacrificial else "",
+                    "executed_at": "", "execution_result": "", "guardrail": "A_ONE_BEN_HITL",
+                })
+                result = {"company_key": company_key, "company_name": company_name, "state": state}
+                record_event(
+                    self.sheets, event_type="PIPELINE_STAGE", reason_code="OUTREACH_READY",
+                    reason_note=f"recipient_found={bool(recipient)};draft_id={draft_id};lane={company_lane}",
+                    company_name=company_name, domain=str(company.get("domain") or contact.get("domain") or ""),
+                    email=recipient, source_id=company_key, status=state,
+                )
+                results.append(result)
+            except Exception as exc:
+                reason = f"{type(exc).__name__}:{exc}"
+                code = failure_code(reason)
+                record_event(
+                    self.sheets, event_type="OUTREACH_PREP_FAILURE", reason_code=code,
+                    reason_note=f"stage=research_or_draft;company_key={company_key};error={reason}",
+                    company_name=company_name, domain=str(company.get("domain") or ""),
+                    source_id=company_key, status="FAILED",
+                )
+                results.append({
+                    "company_key": company_key, "company_name": company_name,
+                    "state": "FAILED", "reason_code": code, "error": reason[:5000],
+                })
         return {"status": "COMPLETE", "processed": len(results), "results": results}
 
 
@@ -1063,8 +1099,28 @@ class LeadFactory:
                         duplicate += 1
                 else:
                     unresolved += 1
+                record_event(
+                    self.sheets,
+                    event_type="PIPELINE_STAGE" if result.get("status") == "RESOLVED" else "PIPELINE_FAILURE",
+                    reason_code=("DOMAIN_RESOLVED" if result.get("status") == "RESOLVED" else failure_code(research.get("reason"), confidence)),
+                    reason_note=(
+                        f"official_site_policy=COMPANY_NAME_SEARCH_AND_FIRST_PARTY_VERIFY;"
+                        f"confidence={confidence};{str(research.get('reason') or '')[:4500]}"
+                    ),
+                    company_name=str(company.get("company_name") or ""),
+                    domain=domain, source_id=str(company.get("lead_id") or ""),
+                    raw_ref=str(company.get("source_record_url") or ""),
+                    status=str(result.get("status") or ""),
+                )
             except Exception as exc:
                 errors += 1
+                record_event(
+                    self.sheets, event_type="PIPELINE_FAILURE", reason_code=failure_code(exc),
+                    reason_note=f"stage=DOMAIN_RESOLUTION;error={type(exc).__name__}:{exc}",
+                    company_name=str(company.get("company_name") or ""),
+                    domain=str(company.get("domain") or ""), source_id=str(company.get("lead_id") or ""),
+                    raw_ref=str(company.get("source_record_url") or ""), status="ERROR",
+                )
                 results.append({
                     "lead_id": company.get("lead_id", ""),
                     "company_name": company.get("company_name", ""),
@@ -1214,4 +1270,3 @@ class LeadFactory:
             return results
         finally:
             self.meta.stop_heartbeat()
-
