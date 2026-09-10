@@ -374,6 +374,47 @@ def dispatch_mittelstand():
     except Exception as exc:
         _fail(exc)
 
+@app.post("/qualification/pump")
+def qualification_pump():
+    """Run one serialized qualification-to-SSOT pass.
+
+    This is the production fallback when Cloud Tasks administration is unavailable.
+    It deliberately keeps domain resolution, Gate evaluation, and append-only SSOT
+    promotion in one bounded critical section so parallel scheduler jobs cannot
+    exhaust Sheets quota or race the promotion ledger.
+    """
+    lf = get_factory()
+    try:
+        domain_limit = max(1, min(25, int(os.getenv("LEAD_FACTORY_PUMP_DOMAIN_BATCH", "8") or 8)))
+    except ValueError:
+        domain_limit = 8
+    try:
+        gate_limit = max(1, min(50, int(os.getenv("LEAD_FACTORY_PUMP_GATE_BATCH", "20") or 20)))
+    except ValueError:
+        gate_limit = 20
+    try:
+        mittelstand_limit = max(1, min(50, int(os.getenv("LEAD_FACTORY_PUMP_MITTELSTAND_GATE_BATCH", "10") or 10)))
+    except ValueError:
+        mittelstand_limit = 10
+
+    result = {"status": "QUALIFICATION_PUMP_COMPLETE", "execution_path": "SERIALIZED_IN_PROCESS"}
+    with _recovery_lock:
+        for key, action in (
+            ("domain", lambda: lf.domain_tick(limit=domain_limit)),
+            ("growth_gate", lambda: lf.gate_worker.process_pending(limit=gate_limit, lane="GROWTH")),
+            ("mittelstand_gate", lambda: lf.mittelstand_worker.process_pending(limit=mittelstand_limit)),
+        ):
+            try:
+                result[key] = action()
+            except Exception as exc:
+                result[key] = {"status": "ERROR", "error": f"{type(exc).__name__}:{exc}"}
+        with _promotion_lock:
+            try:
+                result["promotion"] = lf.promotion_tick()
+            except Exception as exc:
+                result["promotion"] = {"status": "ERROR", "error": f"{type(exc).__name__}:{exc}"}
+    return result
+
 
 @app.post("/worker/source")
 def worker_source(payload: dict):
