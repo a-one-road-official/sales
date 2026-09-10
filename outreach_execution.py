@@ -212,6 +212,70 @@ def semantic_email_preflight(row: dict, cfg: dict[str, str]) -> dict:
     }
 
 
+def record_outbound_attempt(sheets, draft: dict, result: dict) -> dict:
+    """Persist every non-successful outbound decision in the shared execution log."""
+    if sheets is None:
+        return {"written": False, "reason": "sheets_unavailable"}
+    status = str(result.get("status") or "FAILED").strip() or "FAILED"
+    if status == "SENT":
+        return {"written": False, "reason": "success_is_logged_by_executor"}
+    lane = lane_from(draft) or "UNKNOWN"
+    preflight = result.get("preflight") or {}
+    prompt_preflight = result.get("prompt_preflight") or result.get("prompt_check") or {}
+    message_key = str(preflight.get("message_hash") or message_hash(draft)).strip()
+    key = str(result.get("idempotency_key") or "").strip()
+    if not key:
+        key = f"outbound-attempt:{lane.lower()}:{draft.get('draft_id', '')}:{message_key}"
+    recipient = str(result.get("recipient") or draft.get("recipient") or "").strip()
+    critical = [str(value) for value in preflight.get("critical_errors", []) if value]
+    reason = str(
+        result.get("reason")
+        or result.get("error_message")
+        or prompt_preflight.get("reason")
+        or ",".join(critical)
+        or ",".join(str(value) for value in preflight.get("missing", []) if value)
+        or status
+    ).strip()
+    record = {
+        "idempotency_key": key,
+        "draft_id": draft.get("draft_id", ""),
+        "source_row": draft.get("source_row", ""),
+        "company_name": draft.get("company_name", ""),
+        "lane": lane,
+        "channel": str(draft.get("channel") or "EMAIL").upper(),
+        "status": status,
+        "semantic_success": False,
+        "message_id": result.get("message_id", ""),
+        "subject": draft.get("subject", ""),
+        "body": draft.get("body", ""),
+        "form_url": draft.get("form_url", ""),
+        "confirmation": reason,
+        "recipient": recipient,
+        "executed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        existing = _sheet_rows_with_retry(sheets)
+        if any(str(row.get("idempotency_key") or "") == key for row in existing):
+            return {"written": False, "reason": "already_recorded", "idempotency_key": key}
+    except Exception:
+        # The write retry below still gives the control plane a durable record.
+        pass
+    last_error = None
+    for attempt in range(4):
+        try:
+            sheets.append_dict("LeadFactory_ExecutionLog", record)
+            return {"written": True, "idempotency_key": key}
+        except Exception as exc:
+            last_error = exc
+            if attempt < 3:
+                time.sleep(2 * (attempt + 1))
+    return {
+        "written": False,
+        "idempotency_key": key,
+        "error": f"{type(last_error).__name__}:{last_error}" if last_error else "append_failed",
+    }
+
+
 class OutboundEmailExecutor:
     """Shared email executor used by EC sacrifice and future SSOT lanes."""
 
