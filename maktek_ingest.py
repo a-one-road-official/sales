@@ -256,12 +256,18 @@ class MaktekIngestor:
                 raise RuntimeError("raw_schema_mapping_guard_failed")
             new_rows.append(ordered)
         if new_rows:
-            operation = lambda: self.sheets.svc.spreadsheets().values().append(
+            # Write the operational A:R contract at an explicit row. Using a
+            # wide A:ZZ append on this legacy sheet can extend grid rowCount
+            # without making the first 18 business columns readable to the
+            # domain/gate workers.
+            visible_rows = [row[:18] for row in new_rows]
+            start_row = len(existing) + 2
+            end_row = start_row + len(visible_rows) - 1
+            operation = lambda: self.sheets.svc.spreadsheets().values().update(
                 spreadsheetId=self.sheets.spreadsheet_id,
-                range="LeadFactory_Raw!A:ZZ",
+                range=f"LeadFactory_Raw!A{start_row}:R{end_row}",
                 valueInputOption="RAW",
-                insertDataOption="INSERT_ROWS",
-                body={"values": new_rows},
+                body={"values": visible_rows},
             ).execute()
             executor = getattr(self.sheets, "_execute_write", None)
             if callable(executor):
