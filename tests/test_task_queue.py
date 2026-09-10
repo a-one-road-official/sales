@@ -138,3 +138,35 @@ def test_name_domain_probe_requires_first_party_identity(monkeypatch):
         "retail-solution-and-technologies.co.in",
         "retail-solution-and-technologies.com",
     }
+
+
+def test_company_name_search_fallback_survives_transient_http_fetch_failure(monkeypatch):
+    llm = _FakeLLM({
+        "official_domain": "example-industrial.com",
+        "official_website": "https://example-industrial.com/",
+        "confidence": "HIGH",
+        "evidence": ["https://search.example/evidence/example-industrial"],
+    })
+    resolver = OfficialSiteResolver(_FakeSheets(), llm)
+
+    def fetch(url, max_requests=2):
+        raise RuntimeError("temporary egress failure")
+
+    monkeypatch.setattr(resolver, "_fetch", fetch)
+    result = resolver.resolve({
+        "company_name": "Example Industrial GmbH",
+        "hq_country": "Germany",
+        "source_type": "EXHIBITION",
+        "source_name": "Example Expo",
+    })
+
+    assert result["official_domain"] == "example-industrial.com"
+    assert result["verification"] == "VERIFIED_BY_COMPANY_NAME_SEARCH"
+
+
+def test_failure_codes_are_stable_for_operational_reporting():
+    from observability import failure_code
+
+    assert failure_code("HTTP 429 quota exceeded") == "SHEETS_QUOTA"
+    assert failure_code("reCAPTCHA blocked contact form") == "RECAPTCHA_OR_BOT_DEFENSE"
+    assert failure_code("no_channel_found") == "EMAIL_NOT_FOUND"
