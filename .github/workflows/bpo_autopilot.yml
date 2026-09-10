@@ -4,6 +4,28 @@ on:
   push:
     branches:
       - main
+    # Start/restart only when the shared outbound runtime changes.
+    # EC/form-audit pushes must not reset a live Sales/GTM batch.
+    paths:
+      - '.github/workflows/bpo_autopilot.yml'
+      - 'main.py'
+      - 'outreach_autopilot.py'
+      - 'outreach_execution.py'
+      - 'outreach_stability.py'
+      - 'sacrifice_failure_loop.py'
+      - 'sacrifice_web_research.py'
+      - 'sales_leads_*.py'
+      - 'safe_fetch.py'
+      - 'sheets_repo.py'
+      - 'drive_repo.py'
+      - 'llm.py'
+      - 'models.py'
+      - 'settings.py'
+      - 'runtime.py'
+      - 'gate_*.py'
+      - 'notifier.py'
+      - 'observability.py'
+      - 'requirements.txt'
   workflow_dispatch:
     inputs:
       execute_sales_gtm:
@@ -32,11 +54,11 @@ permissions:
 
 concurrency:
   group: lead-factory-sales-gtm-autopilot
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   sales-gtm-autopilot:
-    # Explicit approval remains enforced inside the runtime send gate; startup is automatic on approved workflow pushes.
+    # Startup is automatic for the approved Sales/GTM lane; Factory and SSOT sends remain disabled by runtime gates.
     if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sales_gtm == true) }}
     runs-on: ubuntu-latest
       # Actions deploys and observes the worker. Cloud Run continues the job.
