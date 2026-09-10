@@ -177,7 +177,7 @@ def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
         # Failed and unconfirmed attempts are retryable. Only a confirmed send,
         # confirmed form submission, or an explicit duplicate block consumes a row.
         status = str(row.get("status") or "").strip().upper()
-        if status not in {"SENT", "FORM_SENT", "DUPLICATE_BLOCKED"}:
+        if status not in {"SENT", "FORM_SENT", "SENT_UNVERIFIED", "DUPLICATE_BLOCKED"}:
             continue
         source_row = str(row.get("source_row") or "").strip()
         if source_row:
@@ -746,6 +746,11 @@ def run_ten_sacrifice_batch(
         if execute_external and result.get("status") != "SENT":
             _record_attempt(sheets, run_id=run_id, candidate=candidate, result=result)
 
+    source_consumed_count = len(consumed)
+    source_remaining_count = max(
+        0,
+        len(pool) - len(consumed) - len(candidates),
+    )
     email_message_ids = [
         str((item.get("execution") or {}).get("message_id") or "").strip()
         for item in results
@@ -772,6 +777,10 @@ def run_ten_sacrifice_batch(
         "source": "sales_leads",
         "lane": normalized_lane,
         "attempted": attempted,
+        "source_pool_count": len(pool),
+        "source_consumed_count": source_consumed_count,
+        "source_candidates_count": len(candidates),
+        "source_remaining_count": source_remaining_count,
         "success_count": success_count,
         "email_success_count": len(email_message_ids),
         "form_success_count": len(form_confirmations),
