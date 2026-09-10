@@ -461,7 +461,7 @@ class PublicContactFormExecutor:
                     key for key in CORE_FIELDS
                     if key in core_present and field_status.get(key) != "FILLED"
                 )
-                if field_status.get("message") != "FILLED":
+                if "message" in present_keys and field_status.get("message") != "FILLED":
                     core_unfilled.append("message")
                 if not any(field_status.get(key) == "FILLED" for key in ("name", "company", "email")):
                     core_unfilled.append("identity")
@@ -504,7 +504,7 @@ class PublicContactFormExecutor:
                         visible_parts.append(frame.locator("body").inner_text(timeout=5000))
                     except Exception:
                         continue
-                visible_text = "\n".join(dict.fromKeys(part for part in visible_parts if part))
+                visible_text = "\n".join(dict.fromkeys(part for part in visible_parts if part))
                 success_match = SUCCESS_RE.search(visible_text or "")
                 url_changed = (
                     final_url != form_url
