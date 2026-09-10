@@ -1566,73 +1566,94 @@ class SheetsRepo:
         hq_country: str = "",
         confidence: str = "HIGH",
         evidence: str = "",
+        *,
+        row_number: int | None = None,
+        source_type: str = "",
+        preserve_formulas: bool = True,
+        check_duplicates: bool = True,
     ) -> dict:
-        """Resolve one NEEDS_DOMAIN row using narrow writes only.
+        """Advance one Raw row with one bounded Sheets write.
 
-
-        HIGH confidence is required to advance. Existing P/Q/R formulas are preserved;
-        literal intake rows receive explicit P/Q/R values.
+        Worker calls may provide the row number and literal intake route captured
+        by the same Raw snapshot. That avoids a second full-sheet read and keeps
+        the duplicate decision at promotion, where the human SSOT is checked
+        authoritatively.
         """
         domain = self._normalize_domain(domain or website)
-        if str(confidence).upper() != "HIGH" or not domain:
-            return {"status": "UNRESOLVED", "lead_id": lead_id, "confidence": str(confidence).upper()}
-        rows = self.read("LeadFactory_Raw!A2:R")
-        for row_number, r in enumerate(rows, start=2):
-            padded = r + [""] * (18 - len(r))
-            if str(padded[0]) != str(lead_id):
-                continue
-            company_name = str(padded[1])
-            source_type = str(padded[5]).upper()
-            canonical_website = str(website or f"https://{domain}").strip()
+        confidence_key = str(confidence).upper()
+        if confidence_key != "HIGH" or not domain:
+            return {"status": "UNRESOLVED", "lead_id": lead_id, "confidence": confidence_key}
+
+        company_name = ""
+        if row_number is None:
+            rows = self.read("LeadFactory_Raw!A2:R")
+            for candidate_row_number, r in enumerate(rows, start=2):
+                padded = r + [""] * (18 - len(r))
+                if str(padded[0]) != str(lead_id):
+                    continue
+                row_number = candidate_row_number
+                company_name = str(padded[1])
+                source_type = str(source_type or padded[5]).upper()
+                if not hq_country:
+                    hq_country = str(padded[4] or "")
+                break
+        if row_number is None:
+            raise KeyError(f"lead_not_found:{lead_id}")
+        row_number = int(row_number)
+        source_type = str(source_type or "").upper()
+        if check_duplicates:
+            if not company_name:
+                row = self.read(f"LeadFactory_Raw!A{row_number}:R{row_number}")
+                padded = (row[0] if row else []) + [""] * 18
+                company_name = str(padded[1])
+                source_type = source_type or str(padded[5]).upper()
+                if not hq_country:
+                    hq_country = str(padded[4] or "")
             duplicate_state = self._raw_domain_duplicate_state(lead_id, company_name, domain)
-            if duplicate_state == "NEW":
-                intake_status = "READY_FOR_MITTELSTAND_GATE" if source_type.startswith("MITTELSTAND_") else "READY_FOR_GATE"
-            else:
-                intake_status = "SKIP"
+        else:
+            duplicate_state = "NEW"
+        intake_status = (
+            "READY_FOR_MITTELSTAND_GATE" if source_type.startswith("MITTELSTAND_")
+            else "READY_FOR_GATE"
+        ) if duplicate_state == "NEW" else "SKIP"
+        canonical_website = str(website or f"https://{domain}").strip()
 
-
-            # C:E only: never rewrite the row.
-            self.update_range(
-                f"LeadFactory_Raw!C{row_number}:E{row_number}",
-                [[domain, canonical_website, hq_country or padded[4]]],
-            )
+        p_formula = q_formula = r_formula = False
+        if preserve_formulas:
             formulas = self.read_formulas(f"LeadFactory_Raw!P{row_number}:R{row_number}")
             frow = ((formulas[0] if formulas else []) + ["", "", ""])[:3]
             p_formula = str(frow[0]).startswith("=")
             q_formula = str(frow[1]).startswith("=")
             r_formula = str(frow[2]).startswith("=")
 
+        updates = [
+            {"range": f"LeadFactory_Raw!C{row_number}:E{row_number}", "values": [[domain, canonical_website, hq_country]]},
+        ]
+        if not p_formula:
+            updates.append({"range": f"LeadFactory_Raw!P{row_number}", "values": [[domain]]})
+        if not q_formula:
+            updates.append({"range": f"LeadFactory_Raw!Q{row_number}", "values": [[duplicate_state]]})
+        if source_type.startswith("MITTELSTAND_") or not r_formula:
+            updates.append({"range": f"LeadFactory_Raw!R{row_number}", "values": [[intake_status]]})
+        self._execute_write(lambda: self.svc.spreadsheets().values().batchUpdate(
+            spreadsheetId=self.spreadsheet_id,
+            body={"valueInputOption": "RAW", "data": updates},
+        ).execute())
 
-            # Preserve formula-controlled cells individually. Some legacy Raw rows
-            # have formulas only in Q/R while P is blank; treating the block as
-            # all-or-nothing leaves normalized_domain empty forever.
-            if not p_formula:
-                self.update_range(f"LeadFactory_Raw!P{row_number}", [[domain]])
-            if not q_formula:
-                self.update_range(f"LeadFactory_Raw!Q{row_number}", [[duplicate_state]])
-
-
-            # Legacy R formulas route every NEW row to READY_FOR_GATE. Mature
-            # industrial rows require the dedicated Mittelstand lane, so write
-            # the explicit route even when an old generic R formula exists.
-            if source_type.startswith("MITTELSTAND_") or not r_formula:
-                self.update_range(f"LeadFactory_Raw!R{row_number}", [[intake_status]])
-
-
-            return {
-                "status": "RESOLVED",
-                "lead_id": lead_id,
-                "domain": domain,
-                "website": canonical_website,
-                "duplicate_state": duplicate_state,
-                "intake_status": intake_status,
-                "formula_control_preserved": {
-                    "P": p_formula, "Q": q_formula,
-                    "R": r_formula and not source_type.startswith("MITTELSTAND_"),
-                },
-                "evidence": evidence,
-            }
-        raise KeyError(f"lead_not_found:{lead_id}")
+        return {
+            "status": "RESOLVED",
+            "lead_id": lead_id,
+            "domain": domain,
+            "website": canonical_website,
+            "duplicate_state": duplicate_state,
+            "intake_status": intake_status,
+            "formula_control_preserved": {
+                "P": p_formula,
+                "Q": q_formula,
+                "R": r_formula and not source_type.startswith("MITTELSTAND_"),
+            },
+            "evidence": evidence,
+        }
 
 
     def add_access_request(self, source: Source, reason: str, required_action: str) -> str:
@@ -1904,18 +1925,32 @@ class SheetsRepo:
                 normal.append(candidate)
         return (priority + normal)[:max(0, int(limit))]
 
-    def update_raw_screening(self, lead_id: str, screening_status: str, gate_version: str, error: str = "") -> None:
-        rows = self.read("LeadFactory_Raw!A2:R")
-        for row_number, r in enumerate(rows, start=2):
-            padded = r + [""] * (18 - len(r))
-            if str(padded[0]) != str(lead_id):
-                continue
-            self.update_range(
-                f"LeadFactory_Raw!L{row_number}:O{row_number}",
-                [[screening_status, datetime.now(timezone.utc).isoformat(), gate_version, error]],
-            )
-            return
-        raise KeyError(f"lead_not_found:{lead_id}")
+    def update_raw_screening(
+        self,
+        lead_id: str,
+        screening_status: str,
+        gate_version: str,
+        error: str = "",
+        *,
+        row_number: int | None = None,
+    ) -> None:
+        if row_number is None:
+            rows = self.read("LeadFactory_Raw!A2:R")
+            target_row = None
+            for candidate_row_number, r in enumerate(rows, start=2):
+                padded = r + [""] * (18 - len(r))
+                if str(padded[0]) == str(lead_id):
+                    target_row = candidate_row_number
+                    break
+            if target_row is None:
+                raise KeyError(f"lead_not_found:{lead_id}")
+        else:
+            target_row = int(row_number)
+        self.update_range(
+            f"LeadFactory_Raw!L{target_row}:O{target_row}",
+            [[screening_status, datetime.now(timezone.utc).isoformat(), gate_version, error]],
+        )
+
 
     def count_valid_qualified_ssot(self) -> int:
         from promotion_accounting import count_valid_qualified_ssot
