@@ -309,6 +309,14 @@ jobs:
             -H "Content-Type: application/json" \
             "${SERVICE_URL}/promotion/tick"
 
+      - name: Dispatch qualification work after deploy
+        continue-on-error: true
+        run: |
+          echo "Dispatching qualification work to Cloud Tasks; outbound sending remains disabled."
+          for LANE in growth mittelstand; do
+            timeout 180 curl --silent --show-error --fail-with-body               -X POST               -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}"               -H "Content-Type: application/json"               "${SERVICE_URL}/dispatch/${LANE}" | tee "/tmp/dispatch-${LANE}.json" ||               echo "::warning::dispatch ${LANE} deferred; scheduler retry remains active"
+          done
+
       - name: Activate and verify execution after deploy
         continue-on-error: true
         run: |
