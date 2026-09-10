@@ -33,7 +33,17 @@ class _GeminiCompatClient:
         location = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
         if not project:
             raise RuntimeError("missing_google_cloud_project")
-        self._client = genai.Client(vertexai=True, project=project, location=location)
+        try:
+            timeout_ms = int(os.getenv("OUTREACH_LLM_TIMEOUT_MS", "120000") or 120000)
+        except (TypeError, ValueError):
+            timeout_ms = 120000
+        timeout_ms = max(30000, min(300000, timeout_ms))
+        self._client = genai.Client(
+            vertexai=True,
+            project=project,
+            location=location,
+            http_options=types.HttpOptions(timeout=timeout_ms),
+        )
         self.responses = _GeminiResponses(self._client)
 
 

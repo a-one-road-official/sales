@@ -100,7 +100,7 @@ def _live_bpo_rows(sheets) -> list[dict]:
     if _BPO_LIVE_CACHE is not None and now - _BPO_LIVE_CACHE_AT < ttl:
         return [dict(row) for row in _BPO_LIVE_CACHE]
     try:
-        source_rows = sheets._rows_as_dicts("営業リスト＿Factory/BPO", "ZZ")
+        source_rows = sheets._rows_as_dicts("営業リスト＿Factory/BPO", "G")
     except Exception:
         return []
     normalized = []
@@ -156,7 +156,7 @@ def _live_sales_gtm_rows(sheets) -> list[dict]:
     if _SALES_GTM_LIVE_CACHE is not None and now - _SALES_GTM_LIVE_CACHE_AT < ttl:
         return [dict(row) for row in _SALES_GTM_LIVE_CACHE]
     try:
-        source_rows = sheets._rows_as_dicts("営業リスト＿Factory/BPO", "ZZ")
+        source_rows = sheets._rows_as_dicts("営業リスト＿Factory/BPO", "G")
     except Exception:
         return []
     normalized = []

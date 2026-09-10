@@ -1,6 +1,7 @@
 """Website-first contact discovery for the isolated EC sacrifice lane."""
 from __future__ import annotations
 
+import os
 import re
 from urllib.parse import urljoin, urlparse
 
@@ -17,6 +18,13 @@ def inspect_official_site(url: str, *, max_pages: int = 5, expected_company: str
     if not url or not _host(url):
         return {"status": "NO_SITE", "official_website": "", "pages": [], "emails": [], "forms": []}
     root = url if "://" in url else f"https://{url}"
+    try:
+        request_timeout = float(
+            os.getenv("OUTREACH_SITE_REQUEST_TIMEOUT_SECONDS", "12") or 12
+        )
+    except (TypeError, ValueError):
+        request_timeout = 12.0
+    request_timeout = max(3.0, min(60.0, request_timeout))
     queue, seen, pages, emails, forms, contact_links = [root], set(), [], set(), [], []
     headers = {"User-Agent": "A-one-road/1.0 contact-research"}
     while queue and len(pages) < max_pages:
@@ -25,7 +33,7 @@ def inspect_official_site(url: str, *, max_pages: int = 5, expected_company: str
             continue
         seen.add(current)
         try:
-            response = requests.get(current, headers=headers, timeout=20, allow_redirects=True)
+            response = requests.get(current, headers=headers, timeout=request_timeout, allow_redirects=True)
             text = response.text[:800_000]
             soup = BeautifulSoup(text, "html.parser")
             found = set(EMAIL_RE.findall(text))

@@ -242,7 +242,7 @@ class BPOAutopilot:
         self._schema_ready_for.add(marker)
 
     def _rows(self, sheets) -> list[dict]:
-        rows = sheets._rows_as_dicts(AUTOPILOT_SHEET, "ZZ")
+        rows = sheets._rows_as_dicts(AUTOPILOT_SHEET, "AH")
         return [dict(row) for row in rows if isinstance(row, dict)]
 
     def _row_matches(self, row: dict, job_id: str) -> bool:
