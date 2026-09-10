@@ -34,6 +34,27 @@ def _same_host_or_subdomain(url: str, root: str) -> bool:
     return bool(host and root_host and (host == root_host or host.endswith("." + root_host)))
 
 
+APPROVED_FORM_ACTION_HOSTS = {
+    "forms.hsforms.com",
+    "forms-eu1.hsforms.com",
+}
+APPROVED_FORM_ACTION_PATH_PREFIXES = (
+    "/submissions/v3/public/submit/formsnext/",
+)
+
+
+def _form_action_allowed(action: str, website: str) -> bool:
+    """Allow the official site or a known public HubSpot processor only."""
+    if _same_host_or_subdomain(action, website):
+        return True
+    parsed = urlparse(str(action or ""))
+    return (
+        parsed.scheme == "https"
+        and _host(action) in APPROVED_FORM_ACTION_HOSTS
+        and any(parsed.path.startswith(prefix) for prefix in APPROVED_FORM_ACTION_PATH_PREFIXES)
+    )
+
+
 def _label_for(el) -> str:
     try:
         return str(
@@ -394,7 +415,7 @@ class PublicContactFormExecutor:
                 form_context, form = chosen
                 base_url = getattr(form_context, "url", "") or page.url
                 action = urljoin(base_url, str(form.get_attribute("action") or base_url))
-                if not _same_host_or_subdomain(action, website):
+                if not _form_action_allowed(action, website):
                     return result_payload(
                         "FORM_FAILED",
                         reason="FORM_ACTION_HOST_UNVERIFIED",
