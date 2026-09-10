@@ -561,8 +561,9 @@ def _sacrifice_limit(payload: dict | None) -> int:
 
 
 def _sacrifice_send_enabled() -> bool:
-    # List-only production mode: customer-facing sending is hard-disabled.
-    return False
+    """Enable only the explicitly configured EC/retail sacrifice lane."""
+    value = str(os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE")).strip().upper()
+    return value in {"1", "TRUE", "YES", "ON"}
 
 
 def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict:
