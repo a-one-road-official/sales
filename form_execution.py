@@ -779,14 +779,18 @@ class PublicContactFormExecutor:
             return None
         rows = None
         last_error = None
-        for attempt in range(5):
-            try:
-                rows = self.sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
-                break
-            except Exception as exc:
-                last_error = exc
-                if attempt < 4:
-                    time.sleep(2 * (attempt + 1))
+        reader = getattr(self.sheets, "rows_as_dicts_once", None)
+        if callable(reader):
+            rows = reader("LeadFactory_ExecutionLog", "ZZ")
+        else:
+            for attempt in range(5):
+                try:
+                    rows = self.sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    if attempt < 4:
+                        time.sleep(2 * (attempt + 1))
         if rows is None:
             raise RuntimeError("form_idempotency_lookup_unavailable") from last_error
         for row in rows:

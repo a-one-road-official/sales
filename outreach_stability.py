@@ -29,7 +29,13 @@ class SacrificeStability:
         self.sheets = sheets
 
     def _batches(self):
-        return self.sheets._rows_as_dicts("LeadFactory_ExecutionBatches", "O")
+        try:
+            reader = getattr(self.sheets, "rows_as_dicts_once", None)
+            if callable(reader):
+                return reader("LeadFactory_ExecutionBatches", "O")
+            return self.sheets._rows_as_dicts("LeadFactory_ExecutionBatches", "O")
+        except Exception:
+            return []
 
     def record(self, *, lane: str, attempted: int, successes: int,
                critical_errors: list[str], cfg: dict[str, str], batch_id: str | None = None,

@@ -1,0 +1,116 @@
+name: Sales/GTM autopilot control
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Start or stop the durable Sales/GTM autopilot"
+        required: true
+        default: start
+        type: choice
+        options:
+          - start
+          - stop
+      target_successes:
+        description: "Successful Sales/GTM sends required before completion (start only)"
+        required: false
+        default: "2500"
+        type: string
+      max_attempts:
+        description: "Maximum send attempts before source-capacity stop (start only)"
+        required: false
+        default: "4000"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: lead-factory-sales-gtm-control
+  cancel-in-progress: false
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: asia-northeast1
+      SERVICE: aone-bpo-autopilot
+      TARGET_SUCCESS_INPUT: ${{ inputs.target_successes || '2500' }}
+      MAX_ATTEMPTS_INPUT: ${{ inputs.max_attempts || '4000' }}
+
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Resolve deployed runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format='value(status.url)')"
+          gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format=json > /tmp/aone-service.json
+          TOKEN="$(python - /tmp/aone-service.json <<'PY'
+          import json
+          import sys
+
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          stack = [data]
+          token = ""
+          while stack:
+              value = stack.pop()
+              if isinstance(value, dict):
+                  if value.get("name") == "LEAD_FACTORY_INTERNAL_TOKEN" and value.get("value"):
+                      token = str(value["value"])
+                      break
+                  stack.extend(value.values())
+              elif isinstance(value, list):
+                  stack.extend(value)
+          print(token)
+          PY
+          )"
+          test -n "$URL"
+          test -n "$TOKEN"
+          echo "::add-mask::$TOKEN"
+          echo "SERVICE_URL=$URL" >> "$GITHUB_ENV"
+          echo "INTERNAL_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Stop Sales/GTM autopilot
+        if: ${{ inputs.action == 'stop' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --max-time 60 \
+            -X POST \
+            -H "X-Aone-Internal-Token: $INTERNAL_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"job_id":""}' \
+            "$SERVICE_URL/outreach/sales-gtm-autopilot/stop"
+
+      - name: Start Sales/GTM autopilot
+        if: ${{ inputs.action == 'start' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAYLOAD="$(python - <<'PY'
+          import json
+          import os
+          print(json.dumps({
+              "lane": "SALES_GTM",
+              "job_id": f"sales-gtm-manual-{os.environ['GITHUB_RUN_ID']}",
+              "target_successes": os.environ["TARGET_SUCCESS_INPUT"],
+              "max_attempts": os.environ["MAX_ATTEMPTS_INPUT"],
+          }))
+          PY
+          )"
+          curl --fail-with-body --silent --show-error --max-time 60 \
+            -X POST \
+            -H "X-Aone-Internal-Token: $INTERNAL_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data "$PAYLOAD" \
+            "$SERVICE_URL/outreach/sales-gtm-autopilot/start"

@@ -242,7 +242,8 @@ class BPOAutopilot:
         self._schema_ready_for.add(marker)
 
     def _rows(self, sheets) -> list[dict]:
-        rows = sheets._rows_as_dicts(AUTOPILOT_SHEET, "AH")
+        reader = getattr(sheets, "rows_as_dicts_once", None)
+        rows = reader(AUTOPILOT_SHEET, "AH") if callable(reader) else sheets._rows_as_dicts(AUTOPILOT_SHEET, "AH")
         return [dict(row) for row in rows if isinstance(row, dict)]
 
     def _row_matches(self, row: dict, job_id: str) -> bool:
@@ -646,20 +647,51 @@ class BPOAutopilot:
                 state["status"] = "RUNNING_STABLE" if state.get("stable") else "RUNNING"
                 state["batch_sequence"] = sequence
                 state["next_action"] = f"RUN_BATCH_{sequence}"
-                try:
-                    result = self._batch_runner({
-                        "limit": BATCH_SIZE,
-                        "batch_id": batch_id,
-                        "lane": self._lane,
-                        "dry_run": False,
-                        "_autopilot_managed": True,
-                        "autopilot_policy": dict(state.get("strategy") or {}),
-                    })
-                except Exception as exc:
+                batch_payload = {
+                    "limit": BATCH_SIZE,
+                    "batch_id": batch_id,
+                    "lane": self._lane,
+                    "dry_run": False,
+                    "_autopilot_managed": True,
+                    "autopilot_policy": dict(state.get("strategy") or {}),
+                }
+                result = None
+                batch_error = None
+                max_batch_retries = _int_value(
+                    os.getenv("OUTREACH_AUTOPILOT_BATCH_RETRIES", "8"),
+                    8,
+                    0,
+                    12,
+                )
+                for retry_number in range(max_batch_retries + 1):
+                    if self._stop_event.is_set():
+                        self._finish(state, "STOPPED", next_action="MANUAL_RESTART_REQUIRED")
+                        return
+                    try:
+                        result = self._batch_runner(batch_payload)
+                        batch_error = None
+                        break
+                    except Exception as exc:
+                        batch_error = exc
+                        state["last_error"] = f"{type(exc).__name__}:{exc}"[:5000]
+                        if retry_number >= max_batch_retries:
+                            break
+                        state["status"] = "RUNNING_STABLE" if state.get("stable") else "RUNNING"
+                        state["next_action"] = f"RETRY_BATCH_{sequence}_{retry_number + 1}"
+                        try:
+                            self._persist_state(state)
+                        except Exception:
+                            pass
+                        delay = min(60, max(2, 2 ** min(retry_number, 5)))
+                        if self._stop_event.wait(delay):
+                            self._finish(state, "STOPPED", next_action="MANUAL_RESTART_REQUIRED")
+                            return
+                if batch_error is not None:
                     self._finish(
-                        state, "FAILED",
+                        state,
+                        "FAILED",
                         next_action="REPAIR_RUNTIME_AND_RESUME",
-                        error=f"{type(exc).__name__}:{exc}",
+                        error=f"{type(batch_error).__name__}:{batch_error}",
                     )
                     return
 

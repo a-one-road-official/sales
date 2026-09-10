@@ -103,6 +103,25 @@ class SheetsRepo:
             return []
 
 
+    def read_once(self, range_: str) -> list[list[str]]:
+        """Read one bounded range once; callers own retry policy."""
+        with self._read_lock:
+            now = time.monotonic()
+            cached = self._read_cache.get(range_)
+            if cached and self._read_cache_ttl and now - cached[0] < self._read_cache_ttl:
+                return [list(row) for row in cached[1]]
+            elapsed = time.monotonic() - self._last_read_at
+            if elapsed < self._read_min_interval:
+                time.sleep(self._read_min_interval - elapsed)
+            res = self.svc.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id, range=range_
+            ).execute()
+            self._last_read_at = time.monotonic()
+            values = res.get("values", [])
+            self._read_cache[range_] = (self._last_read_at, [list(row) for row in values])
+            return [list(row) for row in values]
+
+
     def _execute_write(self, operation):
         """Serialize writes and retry transient Sheets quota/server responses."""
         with self._write_lock:
@@ -1699,6 +1718,32 @@ class SheetsRepo:
 
     def append_test(self, row: dict) -> None:
         self.append_dict("LeadFactory_ScraperTests", row)
+
+
+    def rows_as_dicts_once(
+        self,
+        sheet: str,
+        end_col: str = "ZZ",
+        *,
+        max_row: int | None = None,
+    ) -> list[dict]:
+        """Read a bounded sheet range in one request and preserve row numbers."""
+        range_ref = (
+            f"'{sheet}'!A1:{end_col}"
+            if max_row is None
+            else f"'{sheet}'!A1:{end_col}{max(1, int(max_row))}"
+        )
+        values = self.read_once(range_ref)
+        if not values:
+            return []
+        headers = values[0]
+        out = []
+        for row_number, row in enumerate(values[1:], start=2):
+            padded = list(row) + [""] * max(0, len(headers) - len(row))
+            item = dict(zip(headers, padded))
+            item["row_number"] = row_number
+            out.append(item)
+        return out
 
 
     def _rows_as_dicts(self, sheet: str, end_col: str = "ZZ") -> list[dict]:

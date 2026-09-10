@@ -29,6 +29,9 @@ def _truthy(value: object) -> bool:
 def _sheet_rows_with_retry(sheets):
     if sheets is None:
         return []
+    reader = getattr(sheets, "rows_as_dicts_once", None)
+    if callable(reader):
+        return reader("LeadFactory_ExecutionLog", "O")
     last_error = None
     for attempt in range(5):
         try:

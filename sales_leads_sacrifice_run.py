@@ -15,6 +15,8 @@ from outreach_execution import prompt_freshness_preflight, semantic_email_prefli
 from sacrifice_web_research import inspect_official_site
 from sales_leads_sacrifice import (
     _host,
+    _read_sheet_dicts_once,
+    _source_identity,
     load_rows_for_lane,
     make_research_context,
     sacrifice_candidates,
@@ -151,32 +153,51 @@ def _unique(values) -> list[str]:
     return out
 
 
+def _execution_log_max_row() -> int:
+    try:
+        value = int(os.getenv("OUTREACH_EXECUTION_LOG_MAX_ROW", "6000") or 6000)
+    except (TypeError, ValueError):
+        value = 6000
+    return max(100, min(50000, value))
+
+
 def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
     if sheets is None:
         raise RuntimeError("sacrifice_attempt_history_unavailable")
-    last_error = None
-    rows = None
-    for attempt in range(5):
+    normalized_lane = str(lane or "EC_SACRIFICE").strip().upper()
+    if normalized_lane in {"BPO", "SALES_GTM"}:
         try:
-            rows = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "O")
-            break
+            rows = _read_sheet_dicts_once(
+                sheets,
+                "LeadFactory_ExecutionLog",
+                "O",
+                max_row=_execution_log_max_row(),
+            )
         except Exception as exc:
-            last_error = exc
-            if attempt < 4:
-                time.sleep(2 * (attempt + 1))
-    if rows is None:
-        raise RuntimeError("sacrifice_attempt_history_unavailable") from last_error
+            raise RuntimeError(
+                f"{normalized_lane.lower()}_attempt_history_unavailable:{type(exc).__name__}:{exc}"
+            ) from exc
+    else:
+        last_error = None
+        rows = None
+        for attempt in range(5):
+            try:
+                rows = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "O")
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt < 4:
+                    time.sleep(2 * (attempt + 1))
+        if rows is None:
+            raise RuntimeError("sacrifice_attempt_history_unavailable") from last_error
     consumed = set()
-    for row in rows:
+    for row in rows or []:
         row_lane = str(row.get("lane") or "").strip().upper()
-        if lane in {"BPO", "SALES_GTM"}:
-            if row_lane != lane:
+        if normalized_lane in {"BPO", "SALES_GTM"}:
+            if row_lane != normalized_lane:
                 continue
         elif "SACRIFICE" not in row_lane:
             continue
-        # Failed and unconfirmed attempts are retryable. A final first-party
-        # thank-you URL is also confirmation even if an older worker wrote a
-        # stale FORM_FAILED status after the browser had already navigated.
         status = str(row.get("status") or "").strip().upper()
         form_url = str(row.get("form_url") or "").strip()
         confirmation = str(row.get("confirmation") or "").strip()
@@ -203,13 +224,13 @@ def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
                 source_row = draft_id.rsplit(":", 1)[-1]
         if not source_row:
             continue
-        # BPO and Sales/GTM are continuous operational lanes: every durable
-        # attempt, including a failed or unconfirmed one, consumes its source
-        # row so the loop advances to the next ten and leaves human follow-up
-        # in the execution log. Keep the legacy EC audit retry behavior intact.
-        if lane in {"BPO", "SALES_GTM"}:
+        source_identity = str(
+            row.get("source_key")
+            or _source_identity(source_row, row.get("company_name"))
+        ).strip()
+        if normalized_lane in {"BPO", "SALES_GTM"}:
             if status:
-                consumed.add(source_row)
+                consumed.add(source_identity or source_row)
             continue
         if status not in {"SENT", "FORM_SENT", "SENT_UNVERIFIED", "DUPLICATE_BLOCKED", "FORM_UNCONFIRMED"}:
             continue
@@ -260,8 +281,17 @@ def _batch_candidates(
 ) -> list[dict]:
     """Keep each numbered request on a distinct source row for one batch."""
     available = [
-        item for item in pool
-        if str(item.get("source_row") or "").strip() not in consumed
+        item
+        for item in pool
+        if (
+            str(item.get("source_row") or "").strip() not in consumed
+            and str(
+                item.get("source_key")
+                or _source_identity(item.get("source_row"), item.get("company_name"))
+                or item.get("source_row")
+                or ""
+            ).strip() not in consumed
+        )
     ]
     if batch_slot is None:
         return available[:limit]
@@ -332,7 +362,12 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
         "executed_at": datetime.now(timezone.utc).isoformat(),
     }
     try:
-        existing = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "O")
+        existing = _read_sheet_dicts_once(
+            sheets,
+            "LeadFactory_ExecutionLog",
+            "O",
+            max_row=_execution_log_max_row(),
+        )
         if any(str(row.get("idempotency_key") or "") == key for row in existing):
             return
     except Exception:
@@ -560,6 +595,8 @@ def run_ten_sacrifice_batch(
                 max_pages = max(1, min(8, int(cfg.get("OUTREACH_SITE_MAX_PAGES", "3") or 3)))
             except (TypeError, ValueError):
                 max_pages = 3
+            if fast_sales_gtm_mode:
+                max_pages = min(max_pages, 2)
             site = inspect_official_site(
                 site_url,
                 max_pages=max_pages,
@@ -868,7 +905,12 @@ def run_ten_sacrifice_batch(
     consumed_after = set(consumed)
     if normalized_lane in {"BPO", "SALES_GTM"}:
         consumed_after.update(
-            str(item.get("source_row") or "").strip()
+            str(
+                item.get("source_key")
+                or _source_identity(item.get("source_row"), item.get("company_name"))
+                or item.get("source_row")
+                or ""
+            ).strip()
             for item in candidates
             if str(item.get("source_row") or "").strip()
         )
@@ -876,7 +918,15 @@ def run_ten_sacrifice_batch(
     source_remaining_count = sum(
         1
         for item in pool
-        if str(item.get("source_row") or "").strip() not in consumed_after
+        if (
+            str(item.get("source_row") or "").strip() not in consumed_after
+            and str(
+                item.get("source_key")
+                or _source_identity(item.get("source_row"), item.get("company_name"))
+                or item.get("source_row")
+                or ""
+            ).strip() not in consumed_after
+        )
     )
     email_message_ids = [
         str((item.get("execution") or {}).get("message_id") or "").strip()

@@ -87,6 +87,56 @@ _SALES_GTM_LIVE_CACHE: list[dict] | None = None
 _SALES_GTM_LIVE_CACHE_AT = 0.0
 
 
+def _source_identity(source_row: object, company_name: object) -> str:
+    row = str(source_row or "").strip()
+    company = re.sub(r"[^a-z0-9]+", "", str(company_name or "").lower())
+    if row and company:
+        return f"{row}:{company}"
+    return row or company
+
+
+def _live_source_max_row() -> int:
+    try:
+        value = int(os.getenv("OUTREACH_LIVE_SOURCE_MAX_ROW", "6401") or 6401)
+    except (TypeError, ValueError):
+        value = 6401
+    return max(100, min(20000, value))
+
+
+def _read_sheet_dicts_once(
+    sheets,
+    sheet: str,
+    end_col: str,
+    *,
+    max_row: int | None = None,
+) -> list[dict]:
+    reader = getattr(sheets, "rows_as_dicts_once", None)
+    if callable(reader):
+        try:
+            return reader(sheet, end_col, max_row=max_row)
+        except TypeError:
+            return reader(sheet, end_col)
+    read_once = getattr(sheets, "read_once", None)
+    if callable(read_once):
+        range_ref = (
+            f"'{sheet}'!A1:{end_col}"
+            if max_row is None
+            else f"'{sheet}'!A1:{end_col}{max(1, int(max_row))}"
+        )
+        values = read_once(range_ref)
+        if not values:
+            return []
+        headers = values[0]
+        out = []
+        for row_number, row in enumerate(values[1:], start=2):
+            padded = list(row) + [""] * max(0, len(headers) - len(row))
+            item = dict(zip(headers, padded))
+            item["row_number"] = row_number
+            out.append(item)
+        return out
+    return sheets._rows_as_dicts(sheet, end_col)
+
+
 def _live_bpo_rows(sheets) -> list[dict]:
     """Read explicit BPO rows from the existing SSOT when available."""
     global _BPO_LIVE_CACHE, _BPO_LIVE_CACHE_AT
@@ -100,9 +150,18 @@ def _live_bpo_rows(sheets) -> list[dict]:
     if _BPO_LIVE_CACHE is not None and now - _BPO_LIVE_CACHE_AT < ttl:
         return [dict(row) for row in _BPO_LIVE_CACHE]
     try:
-        source_rows = sheets._rows_as_dicts("営業リスト＿Factory/BPO", "G")
-    except Exception:
-        return []
+        source_rows = _read_sheet_dicts_once(
+            sheets,
+            "営業リスト＿Factory/BPO",
+            "G",
+            max_row=_live_source_max_row(),
+        )
+    except Exception as exc:
+        if _BPO_LIVE_CACHE is not None:
+            return [dict(row) for row in _BPO_LIVE_CACHE]
+        raise RuntimeError(
+            f"bpo_live_source_read_failed:{type(exc).__name__}:{exc}"
+        ) from exc
     normalized = []
     for row in source_rows:
         category = str(
@@ -127,6 +186,7 @@ def _live_bpo_rows(sheets) -> list[dict]:
             "source_sheet": "営業リスト＿Factory/BPO",
             "source_sheet_actual": "営業リスト＿Factory/BPO",
             "source_row": str(row.get("row_number") or row.get("source_row") or "").strip(),
+            "source_key": _source_identity(row.get("row_number") or row.get("source_row"), company_name),
             "company_name": company_name,
             "website": website,
             "email": str(row.get("email") or row.get("Email") or "").strip(),
@@ -142,7 +202,8 @@ def _live_bpo_rows(sheets) -> list[dict]:
     _BPO_LIVE_CACHE = normalized
     _BPO_LIVE_CACHE_AT = now
     return [dict(row) for row in normalized]
-    
+
+
 def _live_sales_gtm_rows(sheets) -> list[dict]:
     """Read explicit 営業/GTM rows from the shared source sheet."""
     global _SALES_GTM_LIVE_CACHE, _SALES_GTM_LIVE_CACHE_AT
@@ -156,9 +217,18 @@ def _live_sales_gtm_rows(sheets) -> list[dict]:
     if _SALES_GTM_LIVE_CACHE is not None and now - _SALES_GTM_LIVE_CACHE_AT < ttl:
         return [dict(row) for row in _SALES_GTM_LIVE_CACHE]
     try:
-        source_rows = sheets._rows_as_dicts("営業リスト＿Factory/BPO", "G")
-    except Exception:
-        return []
+        source_rows = _read_sheet_dicts_once(
+            sheets,
+            "営業リスト＿Factory/BPO",
+            "G",
+            max_row=_live_source_max_row(),
+        )
+    except Exception as exc:
+        if _SALES_GTM_LIVE_CACHE is not None:
+            return [dict(row) for row in _SALES_GTM_LIVE_CACHE]
+        raise RuntimeError(
+            f"sales_gtm_live_source_read_failed:{type(exc).__name__}:{exc}"
+        ) from exc
     normalized = []
     for row in source_rows:
         category = str(
@@ -183,6 +253,7 @@ def _live_sales_gtm_rows(sheets) -> list[dict]:
             "source_sheet": "営業リスト＿Factory/BPO",
             "source_sheet_actual": "営業リスト＿Factory/BPO",
             "source_row": str(row.get("row_number") or row.get("source_row") or "").strip(),
+            "source_key": _source_identity(row.get("row_number") or row.get("source_row"), company_name),
             "company_name": company_name,
             "website": website,
             "email": str(row.get("email") or row.get("Email") or "").strip(),
@@ -315,6 +386,10 @@ def sacrifice_candidates(
             "source_sheet": row.get("source_sheet", "営業リスト_Vendor"),
             "source_sheet_actual": row.get("source_sheet_actual", ""),
             "source_row": row.get("source_row", ""),
+            "source_key": str(
+                row.get("source_key")
+                or _source_identity(row.get("source_row"), company_name)
+            ),
             "domain": row_domain,
             "company_name": company_name,
             "country": str(row.get("hq_country") or "").strip(),
