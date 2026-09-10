@@ -83,6 +83,7 @@ def test_ssot_requires_its_own_flag_and_explicit_approval():
 
 def test_shared_executor_blocks_protected_ssot_without_approval():
     cfg = {
+        "LEAD_FACTORY_LIST_ONLY_LOCK": "FALSE",
         "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE": "TRUE",
         "LEAD_FACTORY_SEND_MODE": "ENABLED",
         "OUTREACH_ALLOWED_LANES": "SSOT",
