@@ -106,6 +106,61 @@ class OfficialSiteResolver:
         sources.discard("")
         return bool(h and h in sources)
 
+    @staticmethod
+    def _is_exhibition(company: dict) -> bool:
+        """Exhibitor pages are identity evidence, never website directories.
+
+        Most exhibition indexes expose only a company name and booth number. Trying
+        to harvest outbound links from those pages creates a false sense of URL
+        coverage and makes the resolver depend on a link that usually does not
+        exist. Company-name web search is the authoritative candidate generator for
+        this source class.
+        """
+        source_type = str(company.get("source_type") or "").upper()
+        source_name = str(company.get("source_name") or "").lower()
+        return "EXHIBITION" in source_type or any(
+            token in source_name for token in ("expo", "exhibitor", "messe", "trade fair", "tradefair")
+        )
+
+    @staticmethod
+    def _name_domain_candidates(company: dict) -> list[str]:
+        """Build low-risk domain-shaped hints for a second-pass HTTP check.
+
+        These are only probes. `_verify` must establish first-party identity before
+        any candidate is accepted, so a guessed domain can never become SSOT data
+        by itself.
+        """
+        tokens = _tokens(company.get("company_name", ""))
+        if len(tokens) < 2:
+            return []
+        slug = "".join(tokens)
+        dashed = "-".join(tokens)
+        country = str(company.get("hq_country") or "").strip().lower()
+        suffixes = [".com"]
+        country_suffixes = {
+            "india": [".in", ".co.in"],
+            "germany": [".de"],
+            "austria": [".at"],
+            "italy": [".it"],
+            "netherlands": [".nl"],
+            "switzerland": [".ch"],
+            "france": [".fr"],
+            "united kingdom": [".co.uk"],
+            "uk": [".co.uk"],
+            "japan": [".co.jp"],
+            "taiwan": [".tw"],
+        }
+        suffixes[0:0] = country_suffixes.get(country, [])
+        out = []
+        for base in (slug, dashed):
+            if not base:
+                continue
+            for suffix in suffixes:
+                candidate = f"https://{base}{suffix}"
+                if candidate not in out:
+                    out.append(candidate)
+        return out[:8]
+
     def _verify(self, company: dict, url: str, source_direct: bool = False) -> dict:
         h = _host(url)
         if not h:
@@ -147,20 +202,14 @@ class OfficialSiteResolver:
     def resolve(self, company: dict) -> dict:
         candidates: list[tuple[str, bool, str]] = []
         existing = str(company.get("website") or company.get("domain") or "").strip()
-        if existing:
+        exhibition = self._is_exhibition(company)
+        if existing and not exhibition:
             if not existing.startswith(("http://", "https://")):
                 existing = "https://" + existing
             candidates.append((existing, False, "raw_candidate"))
 
-        record_url = str(company.get("source_record_url") or company.get("source_url") or "").strip()
-        if record_url.startswith(("http://", "https://")):
-            try:
-                snap = self._fetch(record_url, 1)
-                for url in list(getattr(snap, "external_links", []) or []):
-                    candidates.append((str(url), True, "source_external_link"))
-            except Exception:
-                pass
-
+        # For exhibitor sources, the source page is intentionally not crawled for
+        # company URLs. It remains in the candidate context as provenance only.
         if self.llm is not None:
             try:
                 research = self.llm.resolve_company_domain(company)
@@ -169,13 +218,25 @@ class OfficialSiteResolver:
                     if value:
                         if not value.startswith(("http://", "https://")):
                             value = "https://" + value
-                        candidates.append((value, False, "research_candidate"))
+                        candidates.append((value, False, "company_name_web_search"))
             except Exception:
                 pass
 
+        # A name-shaped domain is only a bounded second pass after web search. It
+        # is never accepted without a first-party content check in `_verify`.
+        for value in self._name_domain_candidates(company):
+            candidates.append((value, False, "name_domain_probe"))
+
+        if existing and exhibition:
+            # An exhibition row may carry a prefilled domain from a separate
+            # authoritative signal. Verify it, but do not treat the exhibitor page
+            # as the reason it is trusted.
+            if not existing.startswith(("http://", "https://")):
+                existing = "https://" + existing
+            candidates.append((existing, False, "raw_candidate"))
+
         seen: set[str] = set()
         rejected: list[str] = []
-        candidates.sort(key=lambda x: (not x[1], 0 if x[2] == "raw_candidate" else 1))
         for url, source_direct, origin in candidates:
             h = _host(url)
             if not h or h in seen:
