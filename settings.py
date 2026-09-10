@@ -12,6 +12,8 @@ class Settings:
     )
     drive_root_folder_id: str = os.getenv("LEAD_FACTORY_DRIVE_ROOT_FOLDER_ID", "14JY0cfJrNM9uteVmPOQ-SDoYKkSrEX3E")
     drive_scrapers_folder_id: str = os.getenv("LEAD_FACTORY_DRIVE_SCRAPERS_FOLDER_ID", "1c5vE9oAGMXn209JKIyGonJ7pZ4-1bplk")
+    # Logical key only; Drive resolves the document ID at runtime on every read.
+    outreach_prompt_doc_title: str = os.getenv("OUTREACH_PROMPT_DOC_TITLE", "outreach_prompt_production_v1").strip()
     openai_model: str = os.getenv("LEAD_FACTORY_GEMINI_MODEL", "gemini-2.5-flash")
     meta_interval_seconds: int = int(os.getenv("LEAD_FACTORY_META_INTERVAL_SECONDS", "120"))
     max_repair_attempts: int = int(os.getenv("LEAD_FACTORY_MAX_REPAIR_ATTEMPTS", "5"))
