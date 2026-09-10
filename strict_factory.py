@@ -15,6 +15,7 @@ from orchestrator import LeadFactory as BaseLeadFactory
 from safe_fetch import TrustedFetcher
 from source_universe import for_lane as bootstrap_sources_for_lane
 from task_queue import TaskDispatcher
+from observability import failure_code, record_event
 
 
 THIRD_PARTY_HOSTS = {
@@ -503,7 +504,17 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
             return {"status": "NOT_FOUND", "lead_id": lead_id}
         if str(company.get("intake_status", "")).upper() != "NEEDS_DOMAIN":
             return {"status": "NOOP_ALREADY_ADVANCED", "lead_id": lead_id, "intake_status": company.get("intake_status", "")}
-        research = self.official_site_resolver.resolve(company)
+        try:
+            research = self.official_site_resolver.resolve(company)
+        except Exception as exc:
+            record_event(
+                self.sheets, event_type="PIPELINE_FAILURE",
+                reason_code=failure_code(exc), reason_note=f"domain_resolution:{type(exc).__name__}:{exc}",
+                company_name=str(company.get("company_name") or ""),
+                source_id=str(company.get("lead_id") or lead_id),
+                raw_ref=str(company.get("source_record_url") or ""), status="DOMAIN_FAILED",
+            )
+            raise
         evidence = research.get("evidence", [])
         evidence_text = " | ".join(str(x) for x in evidence) if isinstance(evidence, list) else str(evidence or "")
         result = self.sheets.update_raw_domain_resolution(
@@ -513,6 +524,18 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
             hq_country=str(research.get("hq_country", "") or ""),
             confidence=str(research.get("confidence", "LOW") or "LOW"),
             evidence=evidence_text,
+        )
+        resolved = str(research.get("official_domain") or "").strip()
+        record_event(
+            self.sheets,
+            event_type="PIPELINE_STAGE" if resolved else "PIPELINE_FAILURE",
+            reason_code="DOMAIN_RESOLVED" if resolved else "OFFICIAL_SITE_NOT_VERIFIED",
+            reason_note=evidence_text or str(research.get("verification") or ""),
+            company_name=str(company.get("company_name") or ""),
+            domain=resolved,
+            source_id=str(company.get("lead_id") or lead_id),
+            raw_ref=str(company.get("source_record_url") or ""),
+            status="DOMAIN_RESOLVED" if resolved else "DOMAIN_UNRESOLVED",
         )
         return {"lead_id": lead_id, "verification": research.get("verification", ""), **result}
 
