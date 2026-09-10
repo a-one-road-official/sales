@@ -60,7 +60,12 @@ jobs:
             gcloud scheduler jobs pause "$NAME" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
           done
           for SERVICE_NAME in $(gcloud run services list --region="$REGION" --project="$PROJECT" --format='value(metadata.name)' | grep -E '^aone-sacrifice-' || true); do
-            gcloud run services update "$SERVICE_NAME"               --region="$REGION" --project="$PROJECT"               --update-env-vars=LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_FACTORY_SEND_ENABLED=FALSE,OUTREACH_FACTORY_SEND_ENABLED=FALSE,OUTREACH_SACRIFICE_SEND_ENABLED=FALSE               >/dev/null
+            if ! timeout 90s gcloud run services update "$SERVICE_NAME" \
+              --region="$REGION" --project="$PROJECT" \
+              --update-env-vars=LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_FACTORY_SEND_ENABLED=FALSE,OUTREACH_FACTORY_SEND_ENABLED=FALSE,OUTREACH_SACRIFICE_SEND_ENABLED=FALSE \
+              >/dev/null; then
+              echo "Legacy sacrifice service list-only update timed out or was unavailable; current runtime send guard remains FALSE."
+            fi
           done
 
       - name: Enable runtime APIs
