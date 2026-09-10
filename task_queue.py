@@ -22,6 +22,8 @@ class TaskDispatcher:
             f"aone-lead-factory-deployer@{self.project}.iam.gserviceaccount.com" if self.project else "",
         )
         self.internal_token = os.getenv("LEAD_FACTORY_INTERNAL_TOKEN", "")
+        if not self.internal_token:
+            raise RuntimeError("missing_LEAD_FACTORY_INTERNAL_TOKEN")
         if not self.project:
             raise RuntimeError("missing_gcp_project")
         if not self.service_url:
