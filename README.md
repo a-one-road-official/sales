@@ -9,9 +9,9 @@ The human control plane is ChatGPT / ChatGPT Work. GitHub is the code SSOT, Goog
 
 ## Hard invariants
 - `LEAD_FACTORY_ALLOW_DELETE=FALSE`
-- `LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE` and `LEAD_FACTORY_SEND_MODE=DISABLED` by default. Only the dedicated manual EC workflow may enable the isolated EC lane.
-- Factory/BPO/SSOT execution always stops in `LeadFactory_ApprovalQueue` with `requires_human_approval=TRUE` and `execution_allowed=FALSE`.
-- Sacrifice execution is restricted to `OUTREACH_SACRIFICE_LANES` and requires semantic preflight, idempotency, and `OUTREACH_SACRIFICE_SEND_ENABLED=TRUE`.
+- `LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE` and `LEAD_FACTORY_SEND_MODE=DISABLED` by default. Only the dedicated manual BPO workflow may enable the isolated BPO lane.
+- Factory and SSOT execution always stops in `LeadFactory_ApprovalQueue` with `requires_human_approval=TRUE` and `execution_allowed=FALSE`. BPO is the currently approved controlled outbound lane and still requires the explicit dual gate.
+- BPO execution is restricted to `OUTREACH_ALLOWED_LANES=BPO` and `OUTREACH_BPO_SEND_ENABLED=TRUE`; it still requires semantic preflight, idempotency, and the explicit approval flag.
 - Generated scraper code has no network access; trusted fetchers own network I/O.
 - Generated adapters pass S1-S7 and then a deployed Cloud smoke before production activation.
 - A company must have a verified first-party website before Gate evaluation.
@@ -19,11 +19,11 @@ The human control plane is ChatGPT / ChatGPT Work. GitHub is the code SSOT, Goog
 
 ## Outbound execution
 
-EC/retail and future SSOT email sends use the same `OutboundEmailExecutor`: live Prompt read, official-site/contact preflight, semantic preflight, lane interlock, Sheet/Gmail idempotency lookup, Gmail send, and `LeadFactory_ExecutionLog` audit. The lane and policy flags change; the sending mechanism does not.
+BPO, legacy EC/retail, and future SSOT email sends use the same `OutboundEmailExecutor`: live Prompt read, official-site/contact preflight, semantic preflight, lane interlock, Sheet/Gmail idempotency lookup, Gmail send, and `LeadFactory_ExecutionLog` audit. The lane and policy flags change; the sending mechanism does not.
 
-`.github/workflows/deploy.yml` may deploy on push, but its runtime is explicitly send-disabled. Customer-facing EC execution is available only through `.github/workflows/sacrifice_canary.yml`, which requires both a manual `execute_ec=true` input and repository approval variables. It builds the same Docker image and calls the same `/outreach/sales-leads-sacrifice-run` endpoint; the temporary Cloud Run service is only an execution-isolation boundary.
+`.github/workflows/deploy.yml` may deploy on push, but its runtime is explicitly send-disabled. Customer-facing BPO execution is available only through `.github/workflows/sacrifice_canary.yml`, which requires both a manual `execute_bpo=true` input and repository approval variables. It builds the same Docker image and calls `/outreach/bpo-run`; the temporary Cloud Run service is only an execution-isolation boundary.
 
-Every 10-company EC batch must return `attempted=10` and at least five successes. Non-successful decisions are persisted with their reason so a human can work only the `AI送信失敗`/blocked set. Factory, BPO, and SSOT remain blocked until their lane flag and explicit approval are both enabled.
+Every 10-company BPO batch must return `attempted=10` and at least five successes. Non-successful decisions are persisted with their reason so a human can work only the `AI送信失敗`/blocked set. Factory and SSOT remain blocked even while BPO is enabled.
 
 ## Single sources of truth
 - Code/deployment: GitHub `a-one-road-official/sales` / `main`
@@ -82,6 +82,6 @@ Automatic stop requires all of the following:
 Then `LEAD_FACTORY_ENABLED` is set to `FALSE` and an internal stop notification is attempted to `admin@a1-road.com`. Customer-facing execution remains untouched.
 
 ## Deployment
-`.github/workflows/deploy.yml` is the normal production deployment path. It may run on `push` or `workflow_dispatch`, but its runtime send interlocks remain disabled. It compiles/tests, authenticates to Google Cloud via OIDC, builds the image, deploys Cloud Run, configures the Cloud Tasks queue and continuous Scheduler jobs, runs a deep authenticated health check, and immediately kicks discovery/dispatch. Runtime production is driven by the configured Cloud Scheduler jobs; redeploying does not reset an already-running daily SLO goal. Customer-facing EC sends are deliberately separated into the manually gated workflow described above.
+`.github/workflows/deploy.yml` is the normal production deployment path. It may run on `push` or `workflow_dispatch`, but its runtime send interlocks remain disabled. It compiles/tests, authenticates to Google Cloud via OIDC, builds the image, deploys Cloud Run, configures the Cloud Tasks queue and continuous Scheduler jobs, runs a deep authenticated health check, and immediately kicks discovery/dispatch. Runtime production is driven by the configured Cloud Scheduler jobs; redeploying does not reset an already-running daily SLO goal. Customer-facing BPO sends are deliberately separated into the manually gated workflow described above.
 
 `cloudbuild.yaml` is legacy and must not be attached to a production trigger.
