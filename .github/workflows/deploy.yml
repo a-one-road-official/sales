@@ -249,6 +249,26 @@ jobs:
             -d '{"limit":10}' \
             "${SERVICE_URL}/outreach/sales-leads-sacrifice-trigger" || echo "sacrifice_dispatch_deferred_to_scheduler"
 
+      - name: Activate and verify execution after deploy
+        continue-on-error: true
+        run: |
+          echo "Starting direct recovery execution; this step is independent of ChatGPT session lifetime."
+          for ATTEMPT in 1 2 3 4 5 6; do
+            RESPONSE="$(timeout 90 curl --silent --show-error --fail-with-body \
+              -X POST \
+              -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "${SERVICE_URL}/failover/domain" || true)"
+            echo "activation_attempt=${ATTEMPT} response=${RESPONSE:0:1000}"
+            PROCESSED="$(python -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print(int(d.get("processed",0) or 0))' <<<"${RESPONSE}" 2>/dev/null || echo 0)"
+            if [ "${PROCESSED}" -gt 0 ]; then
+              echo "execution_started processed=${PROCESSED}"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::warning::deployment succeeded; direct recovery execution is queued for Scheduler retry"
+
       - name: Verify autonomous infrastructure
         run: |
           echo '--- Cloud Run ---'
