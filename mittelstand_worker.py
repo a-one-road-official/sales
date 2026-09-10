@@ -171,6 +171,7 @@ class MittelstandWorker:
                 screening_status=final_result,
                 gate_version=gate_version,
                 error="",
+                row_number=company_context.get("row_number"),
             )
         record_event(
             self.sheets,
@@ -200,6 +201,7 @@ class MittelstandWorker:
                         screening_status="ERROR",
                         gate_version="",
                         error=reason[:5000],
+                        row_number=company.get("row_number"),
                     )
                 record_event(
                     self.sheets,
