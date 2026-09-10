@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 from google.auth import default
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
@@ -14,6 +15,13 @@ class DriveRepo:
 
     def __init__(self, scrapers_folder_id: str):
         creds, _ = default(scopes=["https://www.googleapis.com/auth/drive"])
+        # Cloud Run's service account needs to read private Drive-owned prompt
+        # documents through the same Workspace principal used by the runtime.
+        # Without delegation, the hard-coded prompt ID is valid but invisible to
+        # the service account, causing every sacrifice row to fail at PROMPT_LOAD.
+        subject = os.getenv("LEAD_FACTORY_DRIVE_IMPERSONATE", "").strip()
+        if subject and hasattr(creds, "with_subject"):
+            creds = creds.with_subject(subject)
         self.svc = build("drive", "v3", credentials=creds, cache_discovery=False)
         self.folder_id = scrapers_folder_id
 
@@ -81,4 +89,3 @@ class DriveRepo:
         while not done:
             _, done = downloader.next_chunk()
         return fh.getvalue().decode("utf-8"), meta
-
