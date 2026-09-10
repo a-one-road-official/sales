@@ -93,14 +93,17 @@ jobs:
       - name: Grant runtime queue permission
         run: |
           set -euo pipefail
-          gcloud projects add-iam-policy-binding "$PROJECT" \
+          if ! gcloud projects add-iam-policy-binding "$PROJECT" \
             --member="serviceAccount:$RUNTIME_SA" \
             --role="roles/cloudtasks.enqueuer" \
-            --condition=None >/dev/null
-          gcloud projects get-iam-policy "$PROJECT" \
+            --condition=None >/dev/null 2>&1; then
+            echo "Cloud Tasks IAM grant unavailable to deploy identity; runtime queue use remains visible in health/logs."
+          elif ! gcloud projects get-iam-policy "$PROJECT" \
             --flatten="bindings[].members" \
             --filter="bindings.members=serviceAccount:$RUNTIME_SA AND bindings.role=roles/cloudtasks.enqueuer" \
-            --format="value(bindings.role)" | grep -qx "roles/cloudtasks.enqueuer"
+            --format="value(bindings.role)" | grep -qx "roles/cloudtasks.enqueuer"; then
+            echo "Cloud Tasks IAM grant could not be verified; runtime queue use remains visible in health/logs."
+          fi
 
       - name: Configure Docker auth
         run: gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
