@@ -15,7 +15,7 @@ from outreach_execution import prompt_freshness_preflight, semantic_email_prefli
 from sacrifice_web_research import inspect_official_site
 from sales_leads_sacrifice import (
     _host,
-    load_rows,
+    load_rows_for_lane,
     make_research_context,
     sacrifice_candidates,
     source_path_for_lane,
@@ -220,7 +220,8 @@ def _batch_candidates(
                 _BATCH_ASSIGNMENTS.pop(next(iter(_BATCH_ASSIGNMENTS)), None)
             assigned = list(available)
             _BATCH_ASSIGNMENTS[batch_token] = assigned
-    return assigned[slot : slot + limit]
+    start = slot * limit
+    return assigned[start : start + limit]
 
 def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> None:
     if sheets is None:
@@ -339,6 +340,33 @@ def _verified_site_draft(candidate: dict, site: dict) -> dict:
     return {"subject": subject, "body": body, "draft_source": "verified_site_template"}
 
 
+def _cfg_truthy(cfg: dict[str, str], key: str) -> bool:
+    return str(cfg.get(key, os.getenv(key, "FALSE")) or "").strip().upper() in {
+        "TRUE", "1", "YES", "ON"
+    }
+
+
+def _draft_with_auto_repair(
+    llm,
+    drive,
+    cfg: dict[str, str],
+    context: dict,
+    contact: dict,
+    candidate: dict,
+    site: dict,
+    fallback_meta: dict,
+) -> tuple[dict, dict]:
+    """Retry generation through a verified-site fallback selected by the loop."""
+    try:
+        return _draft_from_live_prompt(llm, drive, cfg, context, contact)
+    except Exception as exc:
+        if not _cfg_truthy(cfg, "OUTREACH_AUTOFIX_GENERATION"):
+            raise
+        fallback = _verified_site_draft(candidate, site)
+        fallback["autofix_reason"] = f"{type(exc).__name__}:{exc}"[:1000]
+        return fallback, dict(fallback_meta or {})
+
+
 def run_ten_sacrifice_batch(
     *,
     llm,
@@ -360,7 +388,7 @@ def run_ten_sacrifice_batch(
     batch_token = str(batch_id or uuid.uuid4().hex).strip()
     run_id = f"sales-leads-{normalized_lane.lower()}-{batch_token}"
     normalized_slot = None if batch_slot is None else int(batch_slot)
-    rows = load_rows(source_path_for_lane(normalized_lane))
+    rows = load_rows_for_lane(normalized_lane, sheets=sheets)
     target_domain = "BPO" if normalized_lane == "BPO" else "EC/リテール"
     pool = sacrifice_candidates(
         rows,
@@ -427,9 +455,13 @@ def run_ten_sacrifice_batch(
                 result["domain_resolution"] = resolved
                 site_url = str(resolved.get("official_website") or "").strip()
 
+            try:
+                max_pages = max(1, min(8, int(cfg.get("OUTREACH_SITE_MAX_PAGES", "3") or 3)))
+            except (TypeError, ValueError):
+                max_pages = 3
             site = inspect_official_site(
                 site_url,
-                max_pages=3,
+                max_pages=max_pages,
                 expected_company=str(candidate.get("company_name") or "").strip(),
             )
             result["website_research"] = site
@@ -538,7 +570,7 @@ def run_ten_sacrifice_batch(
                         "recipient_verified": True,
                         "contact_confidence": "FORM",
                     }
-                    draft, prompt_meta = _draft_from_live_prompt(llm, drive, cfg, context, form_contact)
+                    draft, prompt_meta = _draft_with_auto_repair(\n                        llm, drive, cfg, context, form_contact, candidate, site, prompt_meta\n                    )
                     form_url = form_links[0]
                     draft_subject = str(draft.get("subject") or "")
                     draft_body = str(draft.get("body") or "")
@@ -608,7 +640,7 @@ def run_ten_sacrifice_batch(
                         "recipient_verified": True,
                         "contact_confidence": research.get("confidence", "HIGH"),
                     }
-                    draft, prompt_meta = _draft_from_live_prompt(llm, drive, cfg, context, contact)
+                    draft, prompt_meta = _draft_with_auto_repair(\n                        llm, drive, cfg, context, contact, candidate, site, prompt_meta\n                    )
                     draft_subject = str(draft.get("subject") or "")
                     draft_body = str(draft.get("body") or "")
                     row = {
@@ -698,6 +730,14 @@ def run_ten_sacrifice_batch(
             )
 
         result["finished_at"] = datetime.now(timezone.utc).isoformat()
+        result["semantic_success"] = result.get("status") in {"SENT", "FORM_SENT"}
+        critical_errors = set(str(value).strip().upper() for value in result.get("critical_errors", []) if str(value).strip())
+        critical_errors.update(
+            str(value).strip().upper()
+            for value in (result.get("preflight") or {}).get("critical_errors", [])
+            if str(value).strip()
+        )
+        result["critical_errors"] = sorted(critical_errors)
         results.append(result)
         if execute_external and result.get("status") != "SENT":
             _record_attempt(sheets, run_id=run_id, candidate=candidate, result=result)
