@@ -29,13 +29,13 @@ class SacrificeStability:
         self.sheets = sheets
 
     def _batches(self):
-        return self.sheets._rows_as_dicts("LeadFactory_ExecutionBatches", "ZZ")
+        return self.sheets._rows_as_dicts("LeadFactory_ExecutionBatches", "O")
 
     def record(self, *, lane: str, attempted: int, successes: int,
                critical_errors: list[str], cfg: dict[str, str], batch_id: str | None = None):
         batch_id = batch_id or f"sacrifice-{uuid4()}"
         required = int(cfg.get("OUTREACH_STABLE_BATCHES_REQUIRED", "3") or 3)
-        minimum = int(cfg.get("OUTREACH_STABLE_BATCH_MIN_SUCCESS", "7") or 7)
+        minimum = int(cfg.get("OUTREACH_STABLE_BATCH_MIN_SUCCESS", "5") or 5)
         reset = bool(critical_errors) and _truthy(cfg.get("OUTREACH_CRITICAL_ERROR_RESETS", "TRUE"))
         status = "BATCH_PASS" if attempted == 10 and successes >= minimum and not reset else "BATCH_FAIL"
         if status == "BATCH_FAIL":
