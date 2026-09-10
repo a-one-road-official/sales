@@ -21,7 +21,7 @@ The human control plane is ChatGPT / ChatGPT Work. GitHub is the code SSOT, Goog
 
 BPO, legacy EC/retail, and future SSOT email sends use the same `OutboundEmailExecutor`: live Prompt read, official-site/contact preflight, semantic preflight, lane interlock, Sheet/Gmail idempotency lookup, Gmail send, and `LeadFactory_ExecutionLog` audit. The lane and policy flags change; the sending mechanism does not.
 
-`.github/workflows/deploy.yml` may deploy on push, but its runtime is explicitly send-disabled. Customer-facing BPO execution is available only through `.github/workflows/sacrifice_canary.yml`, which requires both a manual `execute_bpo=true` input and repository approval variables. It builds the same Docker image and calls `/outreach/bpo-run`; the temporary Cloud Run service is only an execution-isolation boundary.
+`.github/workflows/deploy.yml` may deploy on push, but its runtime is explicitly send-disabled. Customer-facing BPO execution is available only through `.github/workflows/bpo_outbound.yml`, which requires both a manual `execute_bpo=true` input and repository approval variables. It builds the same Docker image and calls `/outreach/bpo-run`; the temporary Cloud Run service is only an execution-isolation boundary.
 
 Every 10-company BPO batch must return `attempted=10` and at least five successes. Non-successful decisions are persisted with their reason so a human can work only the `AI送信失敗`/blocked set. Factory and SSOT remain blocked even while BPO is enabled.
 
