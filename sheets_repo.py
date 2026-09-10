@@ -1457,17 +1457,24 @@ class SheetsRepo:
 
         reconciliation_before = reconcile_promotion_ledger(self)
         candidates = self.list_promotable_candidates(lane=lane)
+        configured_batch = self.get_config().get("LEAD_FACTORY_PROMOTION_BATCH_SIZE", "500")
+        try:
+            batch_size = max(1, min(1500, int(configured_batch or 500)))
+        except (TypeError, ValueError):
+            batch_size = 500
+        outcomes = self.promote_candidates_batch(candidates, max_rows=batch_size)
         promoted = 0
         existing = 0
         skipped = 0
         ledger_errors = 0
         details = []
-        for c in candidates:
-            result = self.promote_to_sales_if_new(c)
+        for item in outcomes:
+            candidate = item.get("candidate") or {}
+            result = dict(item.get("result") or {})
             if result.get("status") == "PROMOTED":
                 promoted += 1
                 try:
-                    ledger_result = record_promotion(self, c, result, reason="new_gate_promotion")
+                    ledger_result = record_promotion(self, candidate, result, reason="new_gate_promotion")
                     result = {**result, "ledger": ledger_result}
                 except Exception as exc:
                     ledger_errors += 1
@@ -1476,7 +1483,7 @@ class SheetsRepo:
                 existing += 1
             else:
                 skipped += 1
-            details.append({"lead_id": c.get("lead_id", ""), **result})
+            details.append({"lead_id": candidate.get("lead_id", ""), **result})
         reconciliation_after = reconcile_promotion_ledger(self)
         cfg = self.get_config()
         try:
