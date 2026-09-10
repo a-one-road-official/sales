@@ -20,6 +20,7 @@ from notifier import InternalNotifier
 from outreach_execution import (
     OutboundEmailExecutor,
     lane_from,
+    outbound_lane_send_enabled,
     record_outbound_attempt,
 )
 from outreach_stability import SacrificeStability
@@ -639,8 +640,8 @@ def _outbound_flag(lane: str) -> str:
 
 
 def _outbound_send_enabled(lane: str, cfg: dict[str, str] | None = None) -> bool:
-    """Global production interlock: this deployment is list-only."""
-    return False
+    """Compatibility wrapper around the shared sender interlock."""
+    return outbound_lane_send_enabled(lane, cfg or {} )
 
 
 def _sacrifice_send_enabled(
@@ -678,7 +679,7 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
 
     # The current approved lane is BPO; EC_SACRIFICE remains explicit-only for
     # historical replay. Both lanes use the same executor and audit path.
-    execute_external = _sacrifice_send_enabled(lane, cfg) and not bool(
+    execute_external = outbound_lane_send_enabled(lane, cfg) and not bool(
         (payload or {}).get("dry_run", False)
     )
     cfg["OUTREACH_ALLOWED_LANES"] = lane
