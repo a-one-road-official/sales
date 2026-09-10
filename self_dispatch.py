@@ -28,6 +28,30 @@ def _post_fallback(factory, path: str, payload: dict) -> dict:
         return {"ok": False, "error": f"{type(exc).__name__}:{exc}"}
 
 
+def _bounded_fallback_jobs(jobs: list[tuple[str, dict, str]], limit: int) -> list[tuple[str, dict, str]]:
+    """Select a small fair slice when Cloud Tasks is unavailable.
+
+    The service cannot hold hundreds of self-HTTP calls in one request. Keep a
+    round-robin slice across Gate, domain, and source work so supply and
+    qualification advance together on every retry.
+    """
+    buckets = {stage: [] for stage in ("gate", "domain", "source")}
+    for job in jobs:
+        buckets.setdefault(job[2], []).append(job)
+    selected = []
+    while len(selected) < max(1, int(limit)) and any(buckets.values()):
+        progressed = False
+        for stage in ("gate", "domain", "source"):
+            if buckets.get(stage):
+                selected.append(buckets[stage].pop(0))
+                progressed = True
+                if len(selected) >= max(1, int(limit)):
+                    break
+        if not progressed:
+            break
+    return selected
+
+
 def dispatch_lane(factory, lane: str) -> dict:
     """Queue independent jobs; fall back to parallel HTTP workers if queue is absent."""
     if not factory._enabled():
@@ -66,7 +90,7 @@ def dispatch_lane(factory, lane: str) -> dict:
     for source in sources:
         jobs.append(("/worker/source", {"source_id": source.source_id}, "source"))
 
-    queued = {"source": 0, "domain": 0, "gate": 0, "already_queued": 0, "errors": 0}
+    queued = {"source": 0, "domain": 0, "gate": 0, "already_queued": 0, "errors": 0, "deferred": 0}
     errors = []
     mode = "CLOUD_TASKS_ASYNC"
     def enqueue_http_fallback(fallback_jobs: list[tuple[str, dict, str]]) -> None:
@@ -78,9 +102,18 @@ def dispatch_lane(factory, lane: str) -> dict:
             fallback_workers = max(1, min(4, int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_WORKERS", "4") or 4)))
         except ValueError:
             fallback_workers = 4
-        with concurrent.futures.ThreadPoolExecutor(max_workers=fallback_workers) as pool:
-            futures = [pool.submit(_post_fallback, factory, path, payload) for path, payload, _ in fallback_jobs]
-            for future, (path, payload, stage) in zip(futures, fallback_jobs):
+        try:
+            fallback_budget = max(1, min(4, int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_JOBS", "4") or 4)))
+        except ValueError:
+            fallback_budget = 4
+        selected_jobs = _bounded_fallback_jobs(fallback_jobs, fallback_budget)
+        deferred = len(fallback_jobs) - len(selected_jobs)
+        if deferred:
+            queued["deferred"] += deferred
+            errors.append({"stage": "dispatcher", "status": "DEFERRED_BOUNDED_FALLBACK", "count": deferred})
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(fallback_workers, len(selected_jobs))) as pool:
+            futures = [pool.submit(_post_fallback, factory, path, payload) for path, payload, _ in selected_jobs]
+            for future, (path, payload, stage) in zip(futures, selected_jobs):
                 result = future.result(timeout=535)
                 if result.get("ok"):
                     queued[stage] += 1
