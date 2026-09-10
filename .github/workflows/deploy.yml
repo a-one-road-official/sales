@@ -56,6 +56,7 @@ jobs:
           TOKEN="$(openssl rand -hex 32)"
           echo "::add-mask::$TOKEN"
           echo "INTERNAL_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          echo "SACRIFICE_INTERNAL_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
       - name: Enforce list-only mode and stop legacy send lane
         run: |
@@ -158,7 +159,7 @@ jobs:
             --update-env-vars=LEAD_FACTORY_SERVICE_URL="$SACRIFICE_URL" >/dev/null
           echo "SACRIFICE_SERVICE_URL=$SACRIFICE_URL" >> "$GITHUB_ENV"
           curl --fail-with-body --retry 10 --retry-all-errors --retry-delay 3 \
-            -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
+            -H "X-Aone-Internal-Token: ${SACRIFICE_INTERNAL_TOKEN}" \
             "$SACRIFICE_URL/healthz/deep"
 
       - name: Bind deployed service URL
@@ -206,19 +207,20 @@ jobs:
             NAME="$1"
             SCHEDULE="$2"
             URI="$3"
+            TOKEN_VALUE="${4:-${INTERNAL_TOKEN}}"
             if gcloud scheduler jobs describe "$NAME" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
               gcloud scheduler jobs update http "$NAME" \
                 --location="$REGION" --project="$PROJECT" \
                 --schedule="$SCHEDULE" --time-zone="Asia/Tokyo" \
                 --uri="$URI" --http-method=POST --attempt-deadline=540s \
                 --clear-auth-token \
-                --update-headers="X-Aone-Internal-Token=${INTERNAL_TOKEN}"
+                --update-headers="X-Aone-Internal-Token=${TOKEN_VALUE}"
             else
               gcloud scheduler jobs create http "$NAME" \
                 --location="$REGION" --project="$PROJECT" \
                 --schedule="$SCHEDULE" --time-zone="Asia/Tokyo" \
                 --uri="$URI" --http-method=POST --attempt-deadline=540s \
-                --headers="X-Aone-Internal-Token=${INTERNAL_TOKEN}"
+                --headers="X-Aone-Internal-Token=${TOKEN_VALUE}"
             fi
             # Updating a paused Scheduler job preserves the paused state.
             # Resume each production lane explicitly after create/update.
@@ -249,7 +251,7 @@ jobs:
           # List-only mode keeps any legacy sacrifice scheduler paused.
           gcloud scheduler jobs pause lead-factory-approved-sacrifice-${{ github.run_id }} --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
           if [ "${{ github.event_name }}" = "push" ] || ( [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.execute_sacrifice }}" = "true" ] && [ "${{ vars.LEAD_FACTORY_SEND_MODE }}" = "ENABLED" ] && [ "${{ vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL }}" = "TRUE" ] ); then
-            upsert_job lead-factory-approved-sacrifice-${{ github.run_id }} "*/15 * * * *" "${SACRIFICE_URL}/outreach/sales-leads-sacrifice-tick"
+            upsert_job lead-factory-approved-sacrifice-${{ github.run_id }} "*/15 * * * *" "${SACRIFICE_URL}/outreach/sales-leads-sacrifice-tick" "${SACRIFICE_INTERNAL_TOKEN}"
             gcloud scheduler jobs resume lead-factory-approved-sacrifice-${{ github.run_id }} --location="$REGION" --project="$PROJECT"
           fi
 
@@ -308,7 +310,7 @@ jobs:
                 --max-time 150 --retry 1 --retry-all-errors --retry-delay 5 --retry-max-time 180 \
                 --write-out '%{http_code}' \
                 -X POST \
-                -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
+                -H "X-Aone-Internal-Token: ${SACRIFICE_INTERNAL_TOKEN}" \
                 -H "Content-Type: application/json" \
                 --data-binary @/tmp/sacrifice-body.json \
                 -o "$OUT" \
