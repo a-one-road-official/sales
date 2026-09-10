@@ -570,7 +570,9 @@ def run_ten_sacrifice_batch(
                         "recipient_verified": True,
                         "contact_confidence": "FORM",
                     }
-                    draft, prompt_meta = _draft_with_auto_repair(\n                        llm, drive, cfg, context, form_contact, candidate, site, prompt_meta\n                    )
+                    draft, prompt_meta = _draft_with_auto_repair(
+                        llm, drive, cfg, context, form_contact, candidate, site, prompt_meta
+                    )
                     form_url = form_links[0]
                     draft_subject = str(draft.get("subject") or "")
                     draft_body = str(draft.get("body") or "")
@@ -640,7 +642,9 @@ def run_ten_sacrifice_batch(
                         "recipient_verified": True,
                         "contact_confidence": research.get("confidence", "HIGH"),
                     }
-                    draft, prompt_meta = _draft_with_auto_repair(\n                        llm, drive, cfg, context, contact, candidate, site, prompt_meta\n                    )
+                    draft, prompt_meta = _draft_with_auto_repair(
+                        llm, drive, cfg, context, contact, candidate, site, prompt_meta
+                    )
                     draft_subject = str(draft.get("subject") or "")
                     draft_body = str(draft.get("body") or "")
                     row = {
