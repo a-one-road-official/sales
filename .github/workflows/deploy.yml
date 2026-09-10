@@ -195,7 +195,7 @@ jobs:
           upsert_job lead-factory-prep "3-59/5 * * * *" "${URL}/prep/tick"
           upsert_job lead-factory-control "4-59/10 * * * *" "${URL}/control/tick"
           upsert_job lead-factory-maktek-full "0 4 1 1 *" "${URL}/maktek/ingest"
-          upsert_job lead-factory-sacrifice "*/15 * * * *" "${URL}/outreach/sales-leads-sacrifice-trigger"
+          upsert_job lead-factory-sacrifice "*/15 * * * *" "${URL}/outreach/sales-leads-sacrifice-tick"
 
       - name: Runtime deep health check
         run: |
@@ -256,7 +256,7 @@ jobs:
             -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
             -H "Content-Type: application/json" \
             -d '{"limit":10}' \
-            "${SERVICE_URL}/outreach/sales-leads-sacrifice-trigger" || echo "sacrifice_dispatch_deferred_to_scheduler"
+            "${SERVICE_URL}/outreach/sales-leads-sacrifice-tick" || echo "sacrifice_dispatch_deferred_to_scheduler"
 
       - name: Activate and verify execution after deploy
         continue-on-error: true
