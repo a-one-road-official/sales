@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+
+from strict_factory import OfficialSiteResolver
 from task_queue import TaskDispatcher
 
 
@@ -55,3 +58,83 @@ def test_dispatcher_fails_closed_without_internal_token(monkeypatch):
         assert str(exc) == "missing_LEAD_FACTORY_INTERNAL_TOKEN"
     else:
         raise AssertionError("dispatcher must not create unauthenticated tasks")
+
+
+@dataclass
+class _Snapshot:
+    status_code: int
+    final_url: str
+    text: str
+    external_links: list[str] | None = None
+
+
+class _FakeSheets:
+    def get_config(self):
+        return {"LEAD_FACTORY_SOURCE_RPS": "1"}
+
+
+class _FakeLLM:
+    def __init__(self, result):
+        self.result = result
+        self.calls = 0
+
+    def resolve_company_domain(self, company):
+        self.calls += 1
+        return dict(self.result)
+
+
+def test_exhibition_domain_resolution_searches_company_name_not_directory(monkeypatch):
+    llm = _FakeLLM({
+        "official_domain": "melodyinnovations.com",
+        "official_website": "https://melodyinnovations.com/",
+        "confidence": "HIGH",
+    })
+    resolver = OfficialSiteResolver(_FakeSheets(), llm)
+    fetched = []
+
+    def fetch(url, max_requests=2):
+        fetched.append(url)
+        assert "factoryautomationexpo.com" not in url
+        return _Snapshot(200, url, "<title>Melody Innovations Pvt Ltd</title><body>Melody Innovations India</body>")
+
+    monkeypatch.setattr(resolver, "_fetch", fetch)
+    result = resolver.resolve({
+        "company_name": "Melody Innovations Pvt Ltd",
+        "hq_country": "India",
+        "source_type": "EXHIBITION",
+        "source_name": "Factory Automation Expo 2026",
+        "source_record_url": "https://www.factoryautomationexpo.com/list-of-exhibitors/",
+    })
+
+    assert llm.calls == 1
+    assert result["official_domain"] == "melodyinnovations.com"
+    assert fetched == ["https://melodyinnovations.com/"]
+
+
+def test_name_domain_probe_requires_first_party_identity(monkeypatch):
+    llm = _FakeLLM({"official_domain": "", "official_website": "", "confidence": "LOW"})
+    resolver = OfficialSiteResolver(_FakeSheets(), llm)
+
+    def fetch(url, max_requests=2):
+        return _Snapshot(
+            200,
+            url,
+            "<title>Retail Solution And Technologies</title><body>Retail Solution And Technologies India</body>",
+        )
+
+    monkeypatch.setattr(resolver, "_fetch", fetch)
+    result = resolver.resolve({
+        "company_name": "Retail Solution And Technologies",
+        "hq_country": "India",
+        "source_type": "EXHIBITION",
+        "source_name": "Factory Automation Expo 2026",
+    })
+
+    assert result["official_domain"] in {
+        "retailsolutionandtechnologies.in",
+        "retailsolutionandtechnologies.co.in",
+        "retailsolutionandtechnologies.com",
+        "retail-solution-and-technologies.in",
+        "retail-solution-and-technologies.co.in",
+        "retail-solution-and-technologies.com",
+    }
