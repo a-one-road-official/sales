@@ -140,7 +140,7 @@ jobs:
 
 
       - name: Deploy isolated sacrifice runtime
-        if: ${{ false }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
         run: |
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
           gcloud run deploy "$SACRIFICE_SERVICE" \
@@ -282,7 +282,7 @@ jobs:
           echo
 
       - name: Reassert approved sacrifice send flag
-        if: ${{ false }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
         run: |
           gcloud run services update "$SACRIFICE_SERVICE" \
             --region="$REGION" --project="$PROJECT" \
@@ -291,7 +291,7 @@ jobs:
           echo "approved_sacrifice_send_flag=TRUE"
 
       - name: Execute isolated ten-company sacrifice batch
-        if: ${{ false }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
         run: |
           set +e
           BATCH_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
