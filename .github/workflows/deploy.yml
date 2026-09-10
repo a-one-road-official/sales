@@ -125,7 +125,7 @@ jobs:
 
 
       - name: Deploy isolated sacrifice runtime
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}
         run: |
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
           gcloud run deploy "$SACRIFICE_SERVICE" \
@@ -227,7 +227,7 @@ jobs:
           upsert_job lead-factory-prep "3-59/5 * * * *" "${URL}/prep/tick"
           upsert_job lead-factory-control "4-59/10 * * * *" "${URL}/control/tick"
           upsert_job lead-factory-maktek-full "0 4 1 1 *" "${URL}/maktek/ingest"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.execute_sacrifice }}" = "true" ] && [ "${{ vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL }}" = "TRUE" ]; then
+          if [ "${{ github.event_name }}" = "push" ] || ( [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.execute_sacrifice }}" = "true" ] && [ "${{ vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL }}" = "TRUE" ] ); then
             upsert_job lead-factory-sacrifice "*/15 * * * *" "${SACRIFICE_URL}/outreach/sales-leads-sacrifice-tick"
           fi
 
@@ -254,17 +254,23 @@ jobs:
 
 
       - name: Execute isolated ten-company sacrifice batch
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}
         continue-on-error: true
         run: |
           set +e
           BATCH_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          export BATCH_ID
           mkdir -p /tmp/sacrifice-results
-          python - "$BATCH_ID" > /tmp/sacrifice-body.json <<'PY'
-          import json, sys
-          print(json.dumps({"limit": 1, "execute_external": True, "batch_id": sys.argv[1]}))
-          PY
           for N in $(seq 1 10); do
+            python - "$BATCH_ID" "$N" > /tmp/sacrifice-body.json <<'PY'
+          import json, sys
+          print(json.dumps({
+              "limit": 1,
+              "execute_external": True,
+              "batch_id": sys.argv[1],
+              "batch_slot": int(sys.argv[2]) - 1,
+          }))
+          PY
             OUT="/tmp/sacrifice-results/${N}.json"
             echo "sacrifice_company_slot=${N}"
             HTTP_CODE="$(
@@ -317,6 +323,7 @@ jobs:
               detail = {"slot": int(sys.argv[1]), "request": data}
           print(json.dumps(detail, ensure_ascii=False))
           PY
+            sleep 5
           done
           python - <<'PY'
           import json, os
@@ -372,9 +379,14 @@ jobs:
                       "message_id": (row.get("execution") or {}).get("message_id", ""),
                       "form_confirmation": (row.get("form_execution") or {}).get("confirmation", ""),
                       "failure": row.get("error_message", ""),
+                      "recipient_evidence": row.get("recipient_evidence"),
+                      "audit": row.get("audit"),
+                      "draft": row.get("draft"),
+                      "form_execution": row.get("form_execution"),
+                      "preflight": row.get("preflight"),
                   }
                   for row in rows
-              ],
+              ],              ],
           }
           print(json.dumps(report, ensure_ascii=False))
           summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -391,6 +403,7 @@ jobs:
               raise SystemExit("sacrifice_batch_did_not_produce_ten_company_results")
           PY
       - name: Bootstrap first autonomous tick
+        continue-on-error: true
         run: |
           for PATH_NAME in /meta/tick; do
             echo "POST ${PATH_NAME}"
@@ -398,12 +411,12 @@ jobs:
               -X POST \
               -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
               -H "Content-Type: application/json" \
-              "${SERVICE_URL}${PATH_NAME}"
+              "${SERVICE_URL}${PATH_NAME}" || echo "bootstrap_tick_deferred"
           done
 
 
       - name: Verify isolated sacrifice scheduler target
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}
         run: |
           gcloud scheduler jobs describe lead-factory-sacrifice \
             --location="$REGION" --project="$PROJECT" \

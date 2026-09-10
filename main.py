@@ -576,6 +576,15 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
         "OUTREACH_SACRIFICE_LANES", "EC,RETAIL,SACRIFICE,EC_SACRIFICE"
     )
     batch_id = str((payload or {}).get("batch_id") or "").strip() or None
+    raw_batch_slot = (payload or {}).get("batch_slot")
+    batch_slot = None
+    if raw_batch_slot is not None:
+        try:
+            batch_slot = int(raw_batch_slot)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="invalid_sacrifice_batch_slot")
+        if batch_slot < 0:
+            raise HTTPException(status_code=400, detail="sacrifice_batch_slot_must_be_nonnegative")
     executor = SacrificialEmailExecutor(lf.sheets) if execute_external else None
     with _sacrifice_lock:
         result = run_ten_sacrifice_batch(
@@ -586,6 +595,7 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
             executor=executor,
             execute_external=execute_external,
             batch_id=batch_id,
+            batch_slot=batch_slot,
         )
     result["trigger"] = "SCHEDULER" if scheduled else "DIRECT"
     result["send_enabled"] = execute_external

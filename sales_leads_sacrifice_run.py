@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 import uuid
 from datetime import datetime, timezone
 
@@ -60,6 +61,39 @@ def _attempted_source_rows(sheets) -> set[str]:
                 consumed.add(draft_id.rsplit(":", 1)[-1])
     return consumed
 
+_BATCH_ASSIGNMENTS: dict[str, list[dict]] = {}
+_BATCH_ASSIGNMENTS_LOCK = threading.Lock()
+
+
+def _batch_candidates(
+    pool: list[dict],
+    consumed: set[str],
+    *,
+    batch_token: str,
+    batch_slot: int | None,
+    limit: int,
+) -> list[dict]:
+    """Keep each numbered request on a distinct source row for one batch."""
+    available = [
+        item for item in pool
+        if str(item.get("source_row") or "").strip() not in consumed
+    ]
+    if batch_slot is None:
+        return available[:limit]
+    try:
+        slot = int(batch_slot)
+    except (TypeError, ValueError):
+        raise ValueError("invalid_sacrifice_batch_slot")
+    if slot < 0:
+        raise ValueError("sacrifice_batch_slot_must_be_nonnegative")
+    with _BATCH_ASSIGNMENTS_LOCK:
+        assigned = _BATCH_ASSIGNMENTS.get(batch_token)
+        if assigned is None:
+            if len(_BATCH_ASSIGNMENTS) >= 64:
+                _BATCH_ASSIGNMENTS.pop(next(iter(_BATCH_ASSIGNMENTS)), None)
+            assigned = list(available)
+            _BATCH_ASSIGNMENTS[batch_token] = assigned
+    return assigned[slot : slot + limit]
 
 def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> None:
     if sheets is None:
@@ -133,16 +167,24 @@ def run_ten_sacrifice_batch(
     execute_external: bool = True,
     limit: int = 10,
     batch_id: str | None = None,
+    batch_slot: int | None = None,
 ):
     limit = _bounded_limit(limit)
     cfg = dict(cfg or {})
     sheets = getattr(executor, "sheets", None)
-    pool = sacrifice_candidates(load_rows(), limit=max(limit, len(load_rows())))
+    batch_token = str(batch_id or uuid.uuid4().hex).strip()
+    run_id = f"sales-leads-sacrifice-{batch_token}"
+    normalized_slot = None if batch_slot is None else int(batch_slot)
+    rows = load_rows()
+    pool = sacrifice_candidates(rows, limit=max(limit, len(rows)))
     consumed = _attempted_source_rows(sheets) if execute_external else set()
-    candidates = [
-        item for item in pool
-        if str(item.get("source_row") or "").strip() not in consumed
-    ][:limit]
+    candidates = _batch_candidates(
+        pool,
+        consumed,
+        batch_token=batch_token,
+        batch_slot=normalized_slot,
+        limit=limit,
+    )
 
     try:
         prompt, prompt_meta = drive.read_plain_text(
@@ -153,8 +195,6 @@ def run_ten_sacrifice_batch(
     except Exception:
         prompt, prompt_meta = PROMPT_FALLBACK, {"source": "fallback"}
 
-    batch_token = str(batch_id or uuid.uuid4().hex).strip()
-    run_id = f"sales-leads-sacrifice-{batch_token}"
     results = []
 
     for candidate in candidates:
@@ -163,6 +203,8 @@ def run_ten_sacrifice_batch(
             "source_row": candidate.get("source_row", ""),
             "source": "sales_leads",
             "lane": "EC_SACRIFICE",
+            "batch_id": batch_token,
+            "batch_slot": normalized_slot,
             "production_ssot_touched": False,
             "started_at": datetime.now(timezone.utc).isoformat(),
             "external_action": "NOT_ATTEMPTED",
