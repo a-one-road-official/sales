@@ -255,6 +255,18 @@ class SheetsRepo:
             self.invalidate_config_cache()
 
 
+    def _ensure_header(self, sheet: str, header: str) -> None:
+        """Add one machine column when a resilient storage field is first used."""
+        headers_rows = self.read(f"{sheet}!1:1")
+        headers = headers_rows[0] if headers_rows else []
+        if header in headers:
+            return
+        self.update_range(
+            f"{sheet}!{self._column_letter(len(headers) + 1)}1",
+            [[header]],
+        )
+
+
     def read_formulas(self, range_: str) -> list[list[str]]:
         res = self.svc.spreadsheets().values().get(
             spreadsheetId=self.spreadsheet_id,
@@ -1168,6 +1180,8 @@ class SheetsRepo:
 
 
     def register_scraper(self, row: dict) -> None:
+        if "adapter_code" in row:
+            self._ensure_header("LeadFactory_Scrapers", "adapter_code")
         self.upsert_dict("LeadFactory_Scrapers", "source_id", str(row.get("source_id", "")), row)
 
 
@@ -1176,7 +1190,7 @@ class SheetsRepo:
         if not headers_rows:
             return None
         headers = headers_rows[0]
-        rows = self.read("LeadFactory_Scrapers!A2:P")
+        rows = self.read("LeadFactory_Scrapers!A2:ZZ")
         if "source_id" not in headers:
             return None
         idx = headers.index("source_id")
@@ -1263,6 +1277,33 @@ class SheetsRepo:
 
     def append_approval_queue(self, row: dict) -> None:
         self.append_dict("LeadFactory_ApprovalQueue", row)
+
+    def append_operational_event(self, row: dict) -> None:
+        """Write pipeline/send outcomes to the existing operational event ledger."""
+        self.append_dict("SalesControl_Events", row)
+
+    def operational_event_summary(self, limit: int = 5000) -> dict:
+        """Aggregate send, reply, and pipeline failure outcomes for the control UI."""
+        rows = self._rows_as_dicts("SalesControl_Events", "Z")[-max(1, int(limit)):]
+        counts: dict[str, int] = {}
+        failures: dict[str, int] = {}
+        for row in rows:
+            event_type = str(row.get("event_type") or "UNKNOWN").strip().upper()
+            counts[event_type] = counts.get(event_type, 0) + 1
+            if event_type.endswith("FAILED") or event_type in {"PIPELINE_FAILURE", "OUTBOUND_BLOCKED"}:
+                code = str(row.get("reason_code") or "UNKNOWN_FAILURE").strip().upper()
+                failures[code] = failures.get(code, 0) + 1
+        return {
+            "events_scanned": len(rows),
+            "event_counts": counts,
+            "failure_counts": failures,
+            "last_events": [
+                {"occurred_at": r.get("occurred_at", ""), "event_type": r.get("event_type", ""),
+                 "company_name": r.get("company_name", ""), "reason_code": r.get("reason_code", ""),
+                 "status": r.get("match_status", "")}
+                for r in rows[-20:]
+            ],
+        }
 
 
     def append_operational_event(self, row: dict) -> None:
