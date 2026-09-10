@@ -298,10 +298,8 @@ class OutboundEmailExecutor:
         self._sent_keys: set[str] = set()
 
     def _send_block_reason(self, draft: dict, cfg: dict[str, str]) -> str:
-        # Production is explicitly list-only. Keep this guard inside the shared
-        # executor so no route or workflow configuration can bypass it.
-        return "list_only_mode"
         lane = lane_from(draft) or self.lane
+        # Preserve the existing audit reasons for failed safety gates.
         if not _cfg_truthy(cfg, "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"):
             return "external_write_disabled"
         if str(cfg.get("LEAD_FACTORY_SEND_MODE", os.getenv("LEAD_FACTORY_SEND_MODE", "DISABLED"))).strip().upper() != "ENABLED":
@@ -313,7 +311,8 @@ class OutboundEmailExecutor:
             cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL"
         ):
             return "explicit_factory_send_approval_required"
-        return ""
+        # Even a fully approved-looking config cannot send in this deployment.
+        return "list_only_mode"
 
     def _send_enabled(self, draft: dict, cfg: dict[str, str]) -> bool:
         return not self._send_block_reason(draft, cfg)
