@@ -400,9 +400,11 @@ def qualification_pump():
     result = {"status": "QUALIFICATION_PUMP_COMPLETE", "execution_path": "SERIALIZED_IN_PROCESS"}
     with _recovery_lock:
         for key, action in (
-            ("domain", lambda: lf.domain_tick(limit=domain_limit)),
+            # Drain already-resolved candidates first so SSOT promotion starts immediately.
             ("growth_gate", lambda: lf.gate_worker.process_pending(limit=gate_limit, lane="GROWTH")),
             ("mittelstand_gate", lambda: lf.mittelstand_worker.process_pending(limit=mittelstand_limit)),
+            # Resolve new domains after the ready queue; the next scheduler tick will gate them.
+            ("domain", lambda: lf.domain_tick(limit=domain_limit)),
         ):
             try:
                 result[key] = action()

@@ -228,11 +228,14 @@ jobs:
           # All competing lanes stay paused to protect Sheets quota and append ordering.
           upsert_job lead-factory-qualified-pump "*/2 * * * *" "${URL}/qualification/pump"
 
-          # Pause every historical sacrifice job, including run-scoped names.
-          for NAME in $(gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' | sed 's#.*/##' | grep -E '^lead-factory-(approved-sacrifice|sacrifice)(-|$)' || true); do
-            gcloud scheduler jobs pause "$NAME" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
+          # Only the serialized qualification pump may run in production.
+          # Pause every other Lead Factory scheduler, including stale run-scoped jobs,
+          # so Cloud Run and Sheets cannot be contended by legacy lanes.
+          for NAME in $(gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' | sed 's#.*/##' | grep '^lead-factory-' || true); do
+            if [ "$NAME" != "lead-factory-qualified-pump" ]; then
+              gcloud scheduler jobs pause "$NAME" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
+            fi
           done
-          gcloud scheduler jobs pause lead-factory-approved-sacrifice-${{ github.run_id }} --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
 
       - name: Runtime deep health check
         run: |
