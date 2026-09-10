@@ -129,9 +129,23 @@ def _cfg_truthy(cfg: dict[str, str], key: str) -> bool:
 
 
 def outbound_lane_send_enabled(lane: str, cfg: dict[str, str]) -> bool:
-    """Global production interlock: outbound customer-facing actions are disabled."""
-    return False
-
+    """Return whether the explicitly approved BPO outbound lane may send."""
+    normalized = lane_from({"lane": lane})
+    if normalized != "BPO":
+        # Factory/SSOT/Mittelstand and legacy EC lanes stay closed here.
+        return False
+    allowed = {
+        item.strip().upper()
+        for item in str(cfg.get("OUTREACH_ALLOWED_LANES", "") or "").split(",")
+        if item.strip()
+    }
+    return (
+        "BPO" in allowed
+        and _cfg_truthy(cfg, "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE")
+        and str(cfg.get("LEAD_FACTORY_SEND_MODE", "")).strip().upper() == "ENABLED"
+        and _cfg_truthy(cfg, "OUTREACH_BPO_SEND_ENABLED")
+        and _cfg_truthy(cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL")
+    )
 
 def is_outbound_lane(row: dict, cfg: dict[str, str]) -> bool:
     allowed = {
@@ -311,19 +325,17 @@ class OutboundEmailExecutor:
             cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL"
         ):
             return "explicit_factory_send_approval_required"
-        if lane == "EC_SACRIFICE":
-            if not _cfg_truthy(cfg, "LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME"):
-                return "isolated_sacrifice_runtime_required"
-            if not str(
-                cfg.get(
-                    "OUTREACH_SACRIFICE_TARGET_COMPANIES",
-                    os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES", ""),
-                )
-                or ""
-            ).strip():
-                return "sacrifice_target_companies_required"
+        allowed = {
+            item.strip().upper()
+            for item in str(cfg.get("OUTREACH_ALLOWED_LANES", "") or "").split(",")
+            if item.strip()
+        }
+        if lane == "BPO":
+            if lane not in allowed:
+                return "bpo_lane_not_allowed"
             return ""
-        # All other production lanes remain list-only in this isolated executor.
+        # Factory, SSOT, Mittelstand and legacy EC lanes remain closed in this
+        # BPO stabilization runtime.
         return "list_only_mode"
 
     def _send_enabled(self, draft: dict, cfg: dict[str, str]) -> bool:
