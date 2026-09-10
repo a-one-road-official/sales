@@ -3,8 +3,6 @@
 name: Deploy Lead Factory
 
 on:
-  push:
-    branches: [main]
   # Production deployment is a control-plane operation.
   # Development commits must never enqueue or cancel production deploys.
   workflow_dispatch:

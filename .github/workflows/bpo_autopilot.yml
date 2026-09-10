@@ -54,7 +54,7 @@ permissions:
 
 concurrency:
   group: lead-factory-sales-gtm-autopilot
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   sales-gtm-autopilot:
