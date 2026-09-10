@@ -243,7 +243,7 @@ class LeadFactory:
                 "Register/login, then store the approved session material in Secret Manager. N1-N6 must not read or write Gmail/Calendar.",
             )
             # N3 is strictly Drive/Cloud/Web only. No Gmail/Calendar notification or lookup
-            # is allowed before N7/N8. The AccessRequests sheet is the internal queue.
+                    # is allowed before N7/N8. The AccessRequests sheet is the internal queue.
             return "AUTH_REQUIRED", {
                 "request_id": req_id,
                 "reason": probe.auth_reason,
@@ -352,7 +352,22 @@ class LeadFactory:
             })
             if tr.final_result == "PASS":
                 file_name = f"{source.source_id}.py"
-                file_id = self.drive.upsert_text(file_name, code)
+                file_id = ""
+                storage_error = ""
+                try:
+                    file_id = self.drive.upsert_text(file_name, code)
+                except Exception as exc:
+                    # Drive storage is an audit convenience. A service-account
+                    # quota/permission failure must not block source production.
+                    storage_error = f"drive_storage_fallback:{type(exc).__name__}:{exc}"
+                    self.notifier.notify(
+                        subject=f"A-one Lead Factory adapter storage fallback: {source.source_name}",
+                        body=(
+                            "Drive adapter storage failed; the validated adapter is being kept in the "
+                            "machine scraper sheet so cloud smoke and runtime can continue.\n\n"
+                            f"source_id={source.source_id}\nerror={storage_error[:4000]}"
+                        ),
+                    )
                 sha = hashlib.sha256(code.encode()).hexdigest()
                 now = datetime.now(timezone.utc).isoformat()
                 created_at = existing.get("created_at", now) if existing else now
@@ -365,6 +380,7 @@ class LeadFactory:
                     # from the deployed Cloud runtime.
                     "status": "READY_FOR_CLOUD_SMOKE",
                     "drive_file_id": file_id,
+                    "adapter_code": code,
                     "code_sha256": sha,
                     "adapter_type": analysis.get("adapter_type", probe.render_mode),
                     "expected_min_count": expected,
@@ -373,12 +389,14 @@ class LeadFactory:
                     "consecutive_failures": 0,
                     "health_status": "UNVERIFIED_CLOUD",
                     "repair_attempts": attempt - 1,
-                    "last_error": "",
+                    "last_error": storage_error,
                     "created_at": created_at,
                     "updated_at": now,
                 })
                 return "PASS", {
                     "file_id": file_id,
+                    "storage_mode": "DRIVE" if file_id else "SHEETS_FALLBACK",
+                    "storage_error": storage_error,
                     "test_id": test_id,
                     "attempt": attempt,
                     "version": version,
@@ -412,7 +430,19 @@ class LeadFactory:
             requested_scope_ok=True, target_exists_checked=True, destructive=False, external_effect=False,
             test_passed=True, concept_boundary_ok=True, fact_or_inference="FACT",
         )
-        code = self.drive.read_text(scraper["drive_file_id"])
+        code = str(scraper.get("adapter_code") or "")
+        drive_file_id = str(scraper.get("drive_file_id") or "")
+        if drive_file_id:
+            try:
+                code = self.drive.read_text(drive_file_id)
+            except Exception:
+                # Drive is the preferred audit store. The validated adapter
+                # kept in LeadFactory_Scrapers remains executable when Drive
+                # storage is unavailable to the service account.
+                if not code:
+                    raise
+        if not code:
+            raise RuntimeError("scraper_adapter_missing")
         adapter_type = scraper.get("adapter_type", "HTML")
         fetcher = self._runtime_fetcher(source, adapter_type)
         records, stats = run_source(source, code, fetcher, self.s.max_records_per_run)
@@ -456,7 +486,7 @@ class LeadFactory:
         scraper = self.sheets.get_scraper(source.source_id)
         build_detail = None
 
-        if not scraper or not scraper.get("drive_file_id"):
+        if not scraper or not (scraper.get("drive_file_id") or scraper.get("adapter_code")):
             status, build_detail = self.build_and_test(source, run_id)
             if status != "PASS":
                 return {"status": status, **build_detail}
