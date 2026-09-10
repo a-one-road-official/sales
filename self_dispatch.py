@@ -4,26 +4,32 @@ import concurrent.futures
 import json
 import os
 from datetime import datetime, timezone
-import urllib.request
 
 from task_queue import TaskDispatcher
 
 
 def _post_fallback(factory, path: str, payload: dict) -> dict:
-    """Best-effort independent lane when Cloud Tasks administration is unavailable."""
-    base = str(os.getenv("LEAD_FACTORY_SERVICE_URL", "")).rstrip("/")
-    token = str(os.getenv("LEAD_FACTORY_INTERNAL_TOKEN", ""))
-    if not base:
-        return {"ok": False, "error": "missing_service_url"}
-    req = urllib.request.Request(
-        f"{base}/{path.lstrip('/')}",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json", "X-Aone-Internal-Token": token},
-        method="POST",
-    )
+    """Run a bounded fallback in-process when Cloud Tasks administration is unavailable.
+
+    Self-HTTP fan-out from the dispatcher deadlocks/saturates a max-one Cloud Run
+    instance and turns otherwise valid work into 503s. The fallback must therefore
+    execute the same worker entrypoints in-process, with the caller's bounded
+    thread pool providing the only fan-out.
+    """
     try:
-        with urllib.request.urlopen(req, timeout=530) as response:
-            return {"ok": 200 <= response.status < 300, "status_code": response.status}
+        lead_id = str(payload.get("lead_id") or "").strip()
+        source_id = str(payload.get("source_id") or "").strip()
+        if path == "/worker/domain" and lead_id:
+            result = factory.domain_one(lead_id)
+        elif path == "/worker/gate" and lead_id:
+            result = factory.gate_one(lead_id)
+        elif path == "/worker/mittelstand" and lead_id:
+            result = factory.mittelstand_one(lead_id)
+        elif path == "/worker/source" and source_id:
+            result = factory.run_source_pipeline(source_id)
+        else:
+            return {"ok": False, "error": "invalid_fallback_job"}
+        return {"ok": True, "status_code": 200, "result": result}
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}:{exc}"}
 
