@@ -15,6 +15,7 @@ from orchestrator import LeadFactory as BaseLeadFactory
 from safe_fetch import TrustedFetcher
 from source_universe import for_lane as bootstrap_sources_for_lane
 from task_queue import TaskDispatcher
+from observability import failure_code, record_event
 
 
 THIRD_PARTY_HOSTS = {
@@ -106,6 +107,61 @@ class OfficialSiteResolver:
         sources.discard("")
         return bool(h and h in sources)
 
+    @staticmethod
+    def _is_exhibition(company: dict) -> bool:
+        """Exhibitor pages are identity evidence, never website directories.
+
+        Most exhibition indexes expose only a company name and booth number. Trying
+        to harvest outbound links from those pages creates a false sense of URL
+        coverage and makes the resolver depend on a link that usually does not
+        exist. Company-name web search is the authoritative candidate generator for
+        this source class.
+        """
+        source_type = str(company.get("source_type") or "").upper()
+        source_name = str(company.get("source_name") or "").lower()
+        return "EXHIBITION" in source_type or any(
+            token in source_name for token in ("expo", "exhibitor", "messe", "trade fair", "tradefair")
+        )
+
+    @staticmethod
+    def _name_domain_candidates(company: dict) -> list[str]:
+        """Build low-risk domain-shaped hints for a second-pass HTTP check.
+
+        These are only probes. `_verify` must establish first-party identity before
+        any candidate is accepted, so a guessed domain can never become SSOT data
+        by itself.
+        """
+        tokens = _tokens(company.get("company_name", ""))
+        if len(tokens) < 2:
+            return []
+        slug = "".join(tokens)
+        dashed = "-".join(tokens)
+        country = str(company.get("hq_country") or "").strip().lower()
+        suffixes = [".com"]
+        country_suffixes = {
+            "india": [".in", ".co.in"],
+            "germany": [".de"],
+            "austria": [".at"],
+            "italy": [".it"],
+            "netherlands": [".nl"],
+            "switzerland": [".ch"],
+            "france": [".fr"],
+            "united kingdom": [".co.uk"],
+            "uk": [".co.uk"],
+            "japan": [".co.jp"],
+            "taiwan": [".tw"],
+        }
+        suffixes[0:0] = country_suffixes.get(country, [])
+        out = []
+        for base in (slug, dashed):
+            if not base:
+                continue
+            for suffix in suffixes:
+                candidate = f"https://{base}{suffix}"
+                if candidate not in out:
+                    out.append(candidate)
+        return out[:8]
+
     def _verify(self, company: dict, url: str, source_direct: bool = False) -> dict:
         h = _host(url)
         if not h:
@@ -146,36 +202,43 @@ class OfficialSiteResolver:
 
     def resolve(self, company: dict) -> dict:
         candidates: list[tuple[str, bool, str]] = []
+        search_research: dict = {}
         existing = str(company.get("website") or company.get("domain") or "").strip()
-        if existing:
+        exhibition = self._is_exhibition(company)
+        if existing and not exhibition:
             if not existing.startswith(("http://", "https://")):
                 existing = "https://" + existing
             candidates.append((existing, False, "raw_candidate"))
 
-        record_url = str(company.get("source_record_url") or company.get("source_url") or "").strip()
-        if record_url.startswith(("http://", "https://")):
-            try:
-                snap = self._fetch(record_url, 1)
-                for url in list(getattr(snap, "external_links", []) or []):
-                    candidates.append((str(url), True, "source_external_link"))
-            except Exception:
-                pass
-
+        # For exhibitor sources, the source page is intentionally not crawled for
+        # company URLs. It remains in the candidate context as provenance only.
         if self.llm is not None:
             try:
-                research = self.llm.resolve_company_domain(company)
+                search_research = self.llm.resolve_company_domain(company)
                 for key in ("official_website", "official_domain"):
-                    value = str(research.get(key) or "").strip()
+                    value = str(search_research.get(key) or "").strip()
                     if value:
                         if not value.startswith(("http://", "https://")):
                             value = "https://" + value
-                        candidates.append((value, False, "research_candidate"))
+                        candidates.append((value, False, "company_name_web_search"))
             except Exception:
                 pass
 
+        # A name-shaped domain is only a bounded second pass after web search. It
+        # is never accepted without a first-party content check in `_verify`.
+        for value in self._name_domain_candidates(company):
+            candidates.append((value, False, "name_domain_probe"))
+
+        if existing and exhibition:
+            # An exhibition row may carry a prefilled domain from a separate
+            # authoritative signal. Verify it, but do not treat the exhibitor page
+            # as the reason it is trusted.
+            if not existing.startswith(("http://", "https://")):
+                existing = "https://" + existing
+            candidates.append((existing, False, "raw_candidate"))
+
         seen: set[str] = set()
         rejected: list[str] = []
-        candidates.sort(key=lambda x: (not x[1], 0 if x[2] == "raw_candidate" else 1))
         for url, source_direct, origin in candidates:
             h = _host(url)
             if not h or h in seen:
@@ -190,6 +253,28 @@ class OfficialSiteResolver:
                     "confidence": "HIGH",
                     "verification": "VERIFIED_FIRST_PARTY",
                     "evidence": [origin] + list(result.get("evidence", [])),
+                }
+            # A search result can be conclusive while the Cloud Run egress path
+            # is temporarily unable to fetch the candidate site. Keep that row
+            # moving when the model returned the exact candidate, HIGH confidence,
+            # and a source URL; guessed name-shaped domains never use this path.
+            if (
+                origin == "company_name_web_search"
+                and str(search_research.get("confidence") or "").upper() == "HIGH"
+                and str(result.get("reason") or "").startswith("fetch:")
+                and _host(str(search_research.get("official_website") or search_research.get("official_domain") or "")) == h
+                and search_research.get("evidence")
+            ):
+                official = str(search_research.get("official_website") or url).strip()
+                if not official.startswith(("http://", "https://")):
+                    official = "https://" + official
+                return {
+                    "official_domain": h,
+                    "official_website": official,
+                    "hq_country": company.get("hq_country", ""),
+                    "confidence": "HIGH",
+                    "verification": "VERIFIED_BY_COMPANY_NAME_SEARCH",
+                    "evidence": [origin] + [str(x) for x in search_research.get("evidence", [])] + [str(result.get("reason"))],
                 }
             rejected.append(f"{origin}:{h}:{result.get('reason', 'rejected')}")
         return {
@@ -207,7 +292,31 @@ class OfficialSiteResolver:
             return {"verified": False, "reason": "missing_website"}
         if not value.startswith(("http://", "https://")):
             value = "https://" + value
-        return self._verify(company, value, source_direct=False)
+        result = self._verify(company, value, source_direct=False)
+        if result.get("verified") or self.llm is None:
+            return result
+        # Re-check the same persisted domain through company-name search when a
+        # transient HTTP fetch failure prevents direct page verification.
+        if not str(result.get("reason") or "").startswith("fetch:"):
+            return result
+        try:
+            research = self.llm.resolve_company_domain(company)
+            confidence = str(research.get("confidence") or "").upper()
+            candidate = str(research.get("official_website") or research.get("official_domain") or "").strip()
+            if candidate and not candidate.startswith(("http://", "https://")):
+                candidate = "https://" + candidate
+            if confidence == "HIGH" and _host(candidate) == _host(value) and research.get("evidence"):
+                return {
+                    "verified": True,
+                    "official_domain": _host(value),
+                    "official_website": candidate or value,
+                    "confidence": "HIGH",
+                    "reason": "verified_by_company_name_search_http_unavailable",
+                    "evidence": [str(x) for x in research.get("evidence", [])] + [str(result.get("reason"))],
+                }
+        except Exception:
+            pass
+        return result
 
 
 class StrictGateWorker(GateWorker):
@@ -442,7 +551,17 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
             return {"status": "NOT_FOUND", "lead_id": lead_id}
         if str(company.get("intake_status", "")).upper() != "NEEDS_DOMAIN":
             return {"status": "NOOP_ALREADY_ADVANCED", "lead_id": lead_id, "intake_status": company.get("intake_status", "")}
-        research = self.official_site_resolver.resolve(company)
+        try:
+            research = self.official_site_resolver.resolve(company)
+        except Exception as exc:
+            record_event(
+                self.sheets, event_type="PIPELINE_FAILURE",
+                reason_code=failure_code(exc), reason_note=f"domain_resolution:{type(exc).__name__}:{exc}",
+                company_name=str(company.get("company_name") or ""),
+                source_id=str(company.get("lead_id") or lead_id),
+                raw_ref=str(company.get("source_record_url") or ""), status="DOMAIN_FAILED",
+            )
+            raise
         evidence = research.get("evidence", [])
         evidence_text = " | ".join(str(x) for x in evidence) if isinstance(evidence, list) else str(evidence or "")
         result = self.sheets.update_raw_domain_resolution(
@@ -453,12 +572,25 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
             confidence=str(research.get("confidence", "LOW") or "LOW"),
             evidence=evidence_text,
         )
+        resolved = str(research.get("official_domain") or "").strip()
+        unresolved_reason = evidence_text or str(research.get("verification") or "")
+        record_event(
+            self.sheets,
+            event_type="PIPELINE_STAGE" if resolved else "PIPELINE_FAILURE",
+            reason_code="DOMAIN_RESOLVED" if resolved else (failure_code(unresolved_reason) if unresolved_reason else "OFFICIAL_SITE_NOT_VERIFIED"),
+            reason_note=unresolved_reason,
+            company_name=str(company.get("company_name") or ""),
+            domain=resolved,
+            source_id=str(company.get("lead_id") or lead_id),
+            raw_ref=str(company.get("source_record_url") or ""),
+            status="DOMAIN_RESOLVED" if resolved else "DOMAIN_UNRESOLVED",
+        )
         return {"lead_id": lead_id, "verification": research.get("verification", ""), **result}
 
 
-    def source_tick(self, run_id: str | None = None, lane: str | None = None) -> dict:
+    def source_tick(self, run_id: str | None = None, lane: str | None = None, limit: int | None = None) -> dict:
         """Run sources and immediately activate tested adapters through Cloud smoke."""
-        result = super().source_tick(run_id=run_id, lane=lane)
+        result = super().source_tick(run_id=run_id, lane=lane, limit=limit)
         for item in result.get("results", []):
             if item.get("status") not in {"READY_FOR_CLOUD_SMOKE", "REPAIR_READY_FOR_CLOUD_SMOKE"}:
                 continue
@@ -686,41 +818,6 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
                 + json.dumps(result, ensure_ascii=False, indent=2)
                 + "\n\nNo customer-facing action was executed."
             ),
+
         )
         return {**result, "notification": notice}
-
-    def deep_health(self) -> dict:
-        # Readiness must stay cheap. Backlog totals are exposed by the
-        # autonomy status endpoint and must not block deployment probes.
-        # Deployment probes must not call Drive, Sheets, Gate or LLM APIs.
-        # Those are production operations and belong to the scheduled pipeline.
-        task_ready = bool(os.getenv("LEAD_FACTORY_SERVICE_URL"))
-        return {
-            "ok": True,
-            "factory_enabled": self._enabled(),
-            "gemini_vertex_ready": bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")),
-            "gate_doc_id": os.getenv("TARGET_SCREENING_GATE_DOC_ID", ""),
-            "gate_version": "LIVE_PER_EVALUATION",
-            "task_service_url_present": task_ready,
-            "backlog": {},
-            "backlog_status": "AVAILABLE_VIA_AUTONOMY_STATUS",
-            "external_write": False,
-            "delete": False,
-        }
-
-    def evaluate_gate(self, company_context: dict) -> dict:
-        verification = self.official_site_resolver.verify_existing(company_context)
-        if not verification.get("verified"):
-            return {
-                "run_id": f"gate-preflight-{uuid.uuid4()}",
-                "final_result": "BLOCKED_UNVERIFIED_OFFICIAL_SITE",
-                "verification": verification,
-            }
-        ctx = dict(company_context)
-        ctx["domain"] = verification.get("official_domain", "")
-        ctx["website"] = verification.get("official_website", "")
-        return super().evaluate_gate(ctx)
-
-    def evaluate_mittelstand(self, company_context: dict) -> dict:
-        return self.mittelstand_worker.evaluate_and_persist(company_context)
-
