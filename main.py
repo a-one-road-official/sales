@@ -631,15 +631,8 @@ def _outbound_runtime_config(lf: LeadFactory) -> dict[str, str]:
 
 
 def _sacrifice_send_enabled() -> bool:
-    """Enable only the explicitly configured, isolated EC sacrifice runtime."""
-    return (
-        _config_truthy(os.getenv("LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME", "FALSE"))
-        and _config_truthy(os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE"))
-        and str(os.getenv("LEAD_FACTORY_SEND_MODE", "DISABLED")).strip().upper() == "ENABLED"
-        and _config_truthy(os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE"))
-        and _config_truthy(os.getenv("LEAD_FACTORY_EXPLICIT_SEND_APPROVAL", "FALSE"))
-        and bool(os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES", "").strip())
-    )
+    """List-only production invariant: customer-facing sends are impossible."""
+    return False
 
 
 def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict:
