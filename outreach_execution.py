@@ -145,14 +145,22 @@ def is_outbound_lane(row: dict, cfg: dict[str, str]) -> bool:
     }
     lane = lane_from(row)
     source = str(row.get("source_type") or "").upper()
-    if lane in allowed or any(token in source for token in ("EC", "RETAIL", "SACRIFICE")):
+
+    # Protected lanes are evaluated first. A misleading source_type or a broad
+    # allowlist must never turn a factory/BPO/SSOT row into an EC send.
+    if lane in PROTECTED_FACTORY_LANES:
+        return (
+            lane in allowed
+            and _cfg_truthy(cfg, _lane_flag(lane))
+            and _cfg_truthy(cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL")
+        )
+    if lane in allowed:
         return True
-    # The same executor can serve the future SSOT lane, while factory/BPO
-    # remains inert until both the lane switch and explicit approval are live.
+
+    # Keep compatibility with older EC rows that carried only source_type.
     return (
-        lane in PROTECTED_FACTORY_LANES
-        and _cfg_truthy(cfg, _lane_flag(lane))
-        and _cfg_truthy(cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL")
+        lane in {"", "EC", "RETAIL", "SACRIFICE", "EC_SACRIFICE"}
+        and any(token in source for token in ("EC", "RETAIL", "SACRIFICE"))
     )
 
 
@@ -220,21 +228,31 @@ class OutboundEmailExecutor:
         self.lane = lane_from({"lane": lane}) or "EC_SACRIFICE"
         self._sent_keys: set[str] = set()
 
-    def _send_enabled(self, draft: dict, cfg: dict[str, str]) -> bool:
+    def _send_block_reason(self, draft: dict, cfg: dict[str, str]) -> str:
         lane = lane_from(draft) or self.lane
+        if not _cfg_truthy(cfg, "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"):
+            return "external_write_disabled"
+        if str(cfg.get("LEAD_FACTORY_SEND_MODE", os.getenv("LEAD_FACTORY_SEND_MODE", "DISABLED"))).strip().upper() != "ENABLED":
+            return "send_mode_disabled"
         flag = _lane_flag(lane)
         if not _cfg_truthy(cfg, flag):
-            return False
-        if lane in PROTECTED_FACTORY_LANES:
-            return _cfg_truthy(cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL")
-        return True
+            return f"{flag.lower()}_disabled"
+        if lane in PROTECTED_FACTORY_LANES and not _cfg_truthy(
+            cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL"
+        ):
+            return "explicit_factory_send_approval_required"
+        return ""
+
+    def _send_enabled(self, draft: dict, cfg: dict[str, str]) -> bool:
+        return not self._send_block_reason(draft, cfg)
 
     def execute(self, draft: dict, cfg: dict[str, str]) -> dict:
         lane = lane_from(draft) or self.lane
-        if not self._send_enabled(draft, cfg):
+        block_reason = self._send_block_reason(draft, cfg)
+        if block_reason:
             return {
                 "status": "BLOCKED",
-                "reason": f"{_lane_flag(lane).lower()}_disabled",
+                "reason": block_reason,
                 "lane": lane,
                 "recipient": str(draft.get("recipient") or "").strip(),
             }
