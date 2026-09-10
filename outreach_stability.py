@@ -23,7 +23,7 @@ def _truthy(value: object) -> bool:
 
 
 class SacrificeStability:
-    """Persistent promotion gate for isolated EC/retail execution."""
+    """Persistent promotion gate for the active isolated outbound lane."""
 
     def __init__(self, sheets):
         self.sheets = sheets
@@ -44,7 +44,7 @@ class SacrificeStability:
             prior = self._batches()
             streak = 0
             for row in reversed(prior):
-                if str(row.get("lane") or "").upper() not in {"EC", "RETAIL", "SACRIFICE", "EC_SACRIFICE"}:
+                if str(row.get("lane") or "").upper() not in {"EC", "RETAIL", "SACRIFICE", "EC_SACRIFICE", "BPO"}:
                     continue
                 if str(row.get("stability_status") or "") not in {"BATCH_PASS", "STABLE"}:
                     break
