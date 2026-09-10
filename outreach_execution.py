@@ -128,8 +128,19 @@ def _cfg_truthy(cfg: dict[str, str], key: str) -> bool:
     return _truthy(cfg.get(key, os.getenv(key, "FALSE")))
 
 
+def _list_only_hard_lock(cfg: dict[str, str]) -> bool:
+    """Keep outbound execution closed unless an explicit code/test override exists."""
+    value = cfg.get(
+        "LEAD_FACTORY_LIST_ONLY_LOCK",
+        os.getenv("LEAD_FACTORY_LIST_ONLY_LOCK", "TRUE"),
+    )
+    return not _truthy(value)
+
+
 def outbound_lane_send_enabled(lane: str, cfg: dict[str, str]) -> bool:
     """Return whether an explicitly approved outbound lane may send."""
+    if _list_only_hard_lock(cfg):
+        return False
     normalized = lane_from({"lane": lane})
     allowed = {
         item.strip().upper()
@@ -330,6 +341,8 @@ class OutboundEmailExecutor:
         self._sent_keys: set[str] = set()
 
     def _send_block_reason(self, draft: dict, cfg: dict[str, str]) -> str:
+        if _list_only_hard_lock(cfg):
+            return "list_only_hard_lock"
         lane = lane_from(draft) or self.lane
         if not _cfg_truthy(cfg, "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"):
             return "external_write_disabled"

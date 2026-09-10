@@ -25,6 +25,7 @@ def test_sacrificial_lane_is_explicit_and_factory_is_blocked():
 
 def test_bpo_uses_its_own_flag_and_explicit_approval():
     cfg = {
+        "LEAD_FACTORY_LIST_ONLY_LOCK": "FALSE",
         "OUTREACH_ALLOWED_LANES": "BPO",
         "OUTREACH_BPO_SEND_ENABLED": "TRUE",
         "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL": "TRUE",
@@ -48,6 +49,7 @@ def test_protected_ssot_cannot_be_relabelled_as_bpo():
 
 def test_shared_executor_blocks_bpo_without_explicit_approval():
     cfg = {
+        "LEAD_FACTORY_LIST_ONLY_LOCK": "FALSE",
         "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE": "TRUE",
         "LEAD_FACTORY_SEND_MODE": "ENABLED",
         "OUTREACH_ALLOWED_LANES": "BPO",

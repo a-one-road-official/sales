@@ -33,6 +33,7 @@ class FakeFactory:
 
 def _enabled_bpo_config():
     return {
+        "LEAD_FACTORY_LIST_ONLY_LOCK": "FALSE",
         "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE": "TRUE",
         "LEAD_FACTORY_SEND_MODE": "ENABLED",
         "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL": "TRUE",
