@@ -124,7 +124,7 @@ def _field_key(el, label: str) -> str:
     tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
     if typ == "email" or re.search(r"\b(e[- ]?mail|email)\b", marker):
         return "email"
-    if re.search(r"gmv[_ -]?range|annual\s+revenue|年商", marker):
+    if re.search(r"gmv[_ -]?range|annual[_ -]?(?:e[_ -]?)?commerce[_ -]?(?:revenue|sales)|annual\s+revenue|年商", marker):
         return "revenue"
     if re.search(r"monthly[_ -]?(?:website[_ -]?)?traffic|website\s+traffic|月間.*(?:traffic|アクセス)", marker):
         return "monthly_traffic"
@@ -564,6 +564,25 @@ def _choose_form(contexts):
     return best
 
 
+def _visible_step_signature(form) -> tuple:
+    """Return a stable signature of the visible multi-step form state."""
+    try:
+        steps = form.locator("[data-hsfc-id='Step']")
+        signature = []
+        for index in range(steps.count()):
+            step = steps.nth(index)
+            signature.append(
+                (
+                    index,
+                    bool(step.is_visible()),
+                    str(step.get_attribute("style") or ""),
+                )
+            )
+        return tuple(signature)
+    except Exception:
+        return ()
+
+
 class PublicContactFormExecutor:
     def __init__(self, sheets=None):
         self.sheets = sheets
@@ -709,6 +728,9 @@ class PublicContactFormExecutor:
                         if typ in {"submit", "button", "file", "checkbox", "radio", "reset", "image"} or (
                             (el.get_attribute("role") or "").lower() == "button"
                             and el.get_attribute("aria-haspopup")
+                        ) or (
+                            el.get_attribute("readonly") is not None
+                            and (el.get_attribute("role") or "").lower() == "combobox"
                         ):
                             continue
                         label = _label_for(el)
@@ -767,7 +789,7 @@ class PublicContactFormExecutor:
 
 
                     custom_fields = form.locator(
-                        "div[role=combobox], [role=button][aria-haspopup='listbox']"
+                        "input[role=combobox], div[role=combobox], [role=button][aria-haspopup='listbox']"
                     )
                     custom_seen = set()
                     for custom_index in range(custom_fields.count()):
@@ -961,6 +983,7 @@ class PublicContactFormExecutor:
                         return result_payload("FORM_FAILED", reason="SUBMIT_CONTROL_NOT_FOUND")
                     control_label = _control_label(submit)
                     if re.search(r"\bnext\b", control_label, re.I):
+                        before_click_signature = _visible_step_signature(form)
                         try:
                             submit.click(timeout=15000)
                         except Exception as first_click_error:
@@ -974,7 +997,18 @@ class PublicContactFormExecutor:
                         except Exception:
                             pass
                         page.wait_for_timeout(1500)
+                        after_click_signature = _visible_step_signature(form)
+                        if after_click_signature == before_click_signature:
+                            return result_payload(
+                                "FORM_FAILED",
+                                reason="MULTI_STEP_NOT_ADVANCED",
+                            )
                         continue
+                if re.search(r"\bnext\b", control_label, re.I):
+                    return result_payload(
+                        "FORM_FAILED",
+                        reason="MULTI_STEP_NOT_COMPLETED",
+                    )
                 submission_attempted = True
                 try:
                     submit.click(timeout=15000)

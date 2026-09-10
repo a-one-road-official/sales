@@ -59,7 +59,7 @@ FORM_URL_HINTS = {
     "Tapcart": "https://www.tapcart.com/lp/demo-2025",
     "Workato": "https://www.workato.com/editions/sales",
     "RetailNext": "https://retailnext.net/about/contact-us",
-    "Plytix": "https://www.plytix.com/contact/",
+    "Plytix": "https://www.plytix.com/contact",
 }
 
 FORM_PATH_MARKERS = (
