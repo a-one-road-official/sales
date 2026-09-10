@@ -575,9 +575,9 @@ def run_ten_sacrifice_batch(
                         prompt_meta = dict(prompt_meta or {})
                         prompt_meta["draft_strategy"] = "verified_site_form_audit_template"
                     else:
-                    draft, prompt_meta = _draft_with_auto_repair(
-                        llm, drive, cfg, context, form_contact, candidate, site, prompt_meta
-                    )
+                        draft, prompt_meta = _draft_with_auto_repair(
+                            llm, drive, cfg, context, form_contact, candidate, site, prompt_meta
+                        )
                     form_url = form_links[0]
                     draft_subject = str(draft.get("subject") or "")
                     draft_body = str(draft.get("body") or "")
