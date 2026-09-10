@@ -5,7 +5,12 @@ import time
 
 from outreach_autopilot import BPOAutopilot, _adjust_strategy, _normalized_results
 from outreach_execution import outbound_lane_send_enabled
-from sales_leads_sacrifice_run import _BATCH_ASSIGNMENTS, _BATCH_ASSIGNMENTS_LOCK, _batch_candidates
+from sales_leads_sacrifice_run import (
+    _BATCH_ASSIGNMENTS,
+    _BATCH_ASSIGNMENTS_LOCK,
+    _attempted_source_rows,
+    _batch_candidates,
+)
 
 
 class FakeSheets:
@@ -112,6 +117,21 @@ def test_batch_slots_do_not_reuse_source_rows():
     second = _batch_candidates(pool, set(), batch_token=token, batch_slot=1, limit=10)
     assert [row["source_row"] for row in first] == [str(index) for index in range(10)]
     assert [row["source_row"] for row in second] == [str(index) for index in range(10, 20)]
+
+def test_operational_lanes_consume_all_logged_attempts():
+    sheets = FakeSheets()
+    sheets.rows.extend([
+        {"source_row": "sales-001", "lane": "SALES_GTM", "status": "FAILED"},
+        {"source_row": "sales-002", "lane": "SALES_GTM", "status": "SENT"},
+        {"source_row": "bpo-001", "lane": "BPO", "status": "FORM_FAILED"},
+        {"source_row": "ec-001", "lane": "EC_SACRIFICE", "status": "FAILED"},
+    ])
+    assert _attempted_source_rows(sheets, lane="SALES_GTM") == {"sales-001", "sales-002"}
+    assert _attempted_source_rows(sheets, lane="BPO") == {"bpo-001"}
+    # Legacy EC audit behavior still consumes only confirmed/terminal records.
+    assert _attempted_source_rows(sheets, lane="EC_SACRIFICE") == set()
+
+
 
 
 def test_autopilot_runs_multiple_batches_and_checkpoints_state():
