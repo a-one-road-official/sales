@@ -261,8 +261,34 @@ class SheetsRepo:
         headers = headers_rows[0] if headers_rows else []
         if header in headers:
             return
+        meta = self.svc.spreadsheets().get(
+            spreadsheetId=self.spreadsheet_id,
+            fields="sheets(properties(sheetId,title,gridProperties(columnCount)))",
+        ).execute()
+        sheet_id = None
+        column_count = 0
+        for item in meta.get("sheets", []):
+            props = item.get("properties", {})
+            if props.get("title") == sheet:
+                sheet_id = props.get("sheetId")
+                column_count = int((props.get("gridProperties") or {}).get("columnCount") or 0)
+                break
+        next_column = len(headers) + 1
+        if sheet_id is None:
+            raise RuntimeError(f"missing_sheet:{sheet}")
+        if next_column > column_count:
+            self.svc.spreadsheets().batchUpdate(
+                spreadsheetId=self.spreadsheet_id,
+                body={"requests": [{
+                    "appendDimension": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "length": next_column - column_count,
+                    }
+                }]},
+            ).execute()
         self.update_range(
-            f"{sheet}!{self._column_letter(len(headers) + 1)}1",
+            f"{sheet}!{self._column_letter(next_column)}1",
             [[header]],
         )
 
