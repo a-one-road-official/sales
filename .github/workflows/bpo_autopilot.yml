@@ -36,11 +36,13 @@ jobs:
   bpo-autopilot:
     if: ${{ inputs.execute_bpo == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    # Actions only bootstraps and observes the worker. Cloud Run continues the job.
+    timeout-minutes: 60
     env:
       PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       REGION: asia-northeast1
-      SERVICE: aone-bpo-autopilot-${{ github.run_id }}
+      # Stable service identity: the runtime outlives this Actions invocation.
+      SERVICE: aone-bpo-autopilot
       RUNTIME_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       OPENAI_SECRET: aone-openai-api-key
 
@@ -133,10 +135,10 @@ jobs:
           assert result.get("accepted") is True, result
           PY
 
-      - name: Wait for durable BPO autopilot
+      - name: Confirm durable BPO autopilot accepted
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 720); do
+          for attempt in $(seq 1 12); do
             curl --fail-with-body --silent --show-error --max-time 60 \
               -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
               "${SERVICE_URL}/outreach/bpo-autopilot/status" \
@@ -152,15 +154,9 @@ jobs:
                 exit 1
                 ;;
             esac
-            sleep 30
+            sleep 10
           done
-          echo "BPO autopilot polling timed out" >&2
-          exit 1
+          echo "BPO autopilot is running on ${SERVICE}; Cloud Run remains active after this workflow exits."
 
-      - name: Delete isolated BPO runtime
-        if: ${{ always() }}
-        run: |
-          gcloud run services delete "$SERVICE" \
-            --region="$REGION" \
-            --project="$PROJECT" \
-            --quiet || true
+# The fixed Cloud Run service is intentionally retained. The durable job stops itself
+# at COMPLETED_TARGET, SOURCE_CAPACITY_SHORTFALL, TARGET_NOT_REACHED, or PAUSED_SAFETY.
