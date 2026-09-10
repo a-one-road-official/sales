@@ -640,8 +640,8 @@ def _outbound_flag(lane: str) -> str:
 
 
 def _outbound_send_enabled(lane: str, cfg: dict[str, str] | None = None) -> bool:
-    """Compatibility wrapper around the shared sender interlock."""
-    return outbound_lane_send_enabled(lane, cfg or {} )
+    """Global production interlock: this deployment is list-only."""
+    return False
 
 
 def _sacrifice_send_enabled(
