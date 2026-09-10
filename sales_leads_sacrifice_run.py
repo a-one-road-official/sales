@@ -196,15 +196,24 @@ def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
         )
         if ambiguous_submission:
             status = "FORM_UNCONFIRMED"
-        if status not in {"SENT", "FORM_SENT", "SENT_UNVERIFIED", "DUPLICATE_BLOCKED", "FORM_UNCONFIRMED"}:
-            continue
         source_row = str(row.get("source_row") or "").strip()
-        if source_row:
-            consumed.add(source_row)
-        else:
+        if not source_row:
             draft_id = str(row.get("draft_id") or "").strip()
             if ":" in draft_id:
-                consumed.add(draft_id.rsplit(":", 1)[-1])
+                source_row = draft_id.rsplit(":", 1)[-1]
+        if not source_row:
+            continue
+        # BPO and Sales/GTM are continuous operational lanes: every durable
+        # attempt, including a failed or unconfirmed one, consumes its source
+        # row so the loop advances to the next ten and leaves human follow-up
+        # in the execution log. Keep the legacy EC audit retry behavior intact.
+        if lane in {"BPO", "SALES_GTM"}:
+            if status:
+                consumed.add(source_row)
+            continue
+        if status not in {"SENT", "FORM_SENT", "SENT_UNVERIFIED", "DUPLICATE_BLOCKED", "FORM_UNCONFIRMED"}:
+            continue
+        consumed.add(source_row)
     return consumed
 
 _BATCH_ASSIGNMENTS: dict[str, list[dict]] = {}
