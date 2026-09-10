@@ -119,10 +119,11 @@ def resume_bpo_autopilot() -> None:
         return
     try:
         autopilot = get_bpo_autopilot()
-        resumed = autopilot.resume_if_active()
+        expected_job_id = str(os.getenv("OUTREACH_AUTOPILOT_JOB_ID", "") or "").strip()
+        resumed = autopilot.resume_if_active(expected_job_id=expected_job_id)
         if _config_truthy(os.getenv("OUTREACH_AUTOPILOT_AUTOSTART", "FALSE")) and not resumed.get("active"):
             lane = _autopilot_lane()
-            job_id = str(os.getenv("OUTREACH_AUTOPILOT_JOB_ID", "") or "").strip()
+            job_id = expected_job_id
             started = autopilot.start({
                 "job_id": job_id or f"{lane.lower()}-auto-runtime",
                 "lane": lane,
