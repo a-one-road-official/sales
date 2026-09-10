@@ -202,6 +202,7 @@ class OfficialSiteResolver:
 
     def resolve(self, company: dict) -> dict:
         candidates: list[tuple[str, bool, str]] = []
+        search_research: dict = {}
         existing = str(company.get("website") or company.get("domain") or "").strip()
         exhibition = self._is_exhibition(company)
         if existing and not exhibition:
@@ -213,9 +214,9 @@ class OfficialSiteResolver:
         # company URLs. It remains in the candidate context as provenance only.
         if self.llm is not None:
             try:
-                research = self.llm.resolve_company_domain(company)
+                search_research = self.llm.resolve_company_domain(company)
                 for key in ("official_website", "official_domain"):
-                    value = str(research.get(key) or "").strip()
+                    value = str(search_research.get(key) or "").strip()
                     if value:
                         if not value.startswith(("http://", "https://")):
                             value = "https://" + value
@@ -253,6 +254,28 @@ class OfficialSiteResolver:
                     "verification": "VERIFIED_FIRST_PARTY",
                     "evidence": [origin] + list(result.get("evidence", [])),
                 }
+            # A search result can be conclusive while the Cloud Run egress path
+            # is temporarily unable to fetch the candidate site. Keep that row
+            # moving when the model returned the exact candidate, HIGH confidence,
+            # and a source URL; guessed name-shaped domains never use this path.
+            if (
+                origin == "company_name_web_search"
+                and str(search_research.get("confidence") or "").upper() == "HIGH"
+                and str(result.get("reason") or "").startswith("fetch:")
+                and _host(str(search_research.get("official_website") or search_research.get("official_domain") or "")) == h
+                and search_research.get("evidence")
+            ):
+                official = str(search_research.get("official_website") or url).strip()
+                if not official.startswith(("http://", "https://")):
+                    official = "https://" + official
+                return {
+                    "official_domain": h,
+                    "official_website": official,
+                    "hq_country": company.get("hq_country", ""),
+                    "confidence": "HIGH",
+                    "verification": "VERIFIED_BY_COMPANY_NAME_SEARCH",
+                    "evidence": [origin] + [str(x) for x in search_research.get("evidence", [])] + [str(result.get("reason"))],
+                }
             rejected.append(f"{origin}:{h}:{result.get('reason', 'rejected')}")
         return {
             "official_domain": "",
@@ -269,7 +292,31 @@ class OfficialSiteResolver:
             return {"verified": False, "reason": "missing_website"}
         if not value.startswith(("http://", "https://")):
             value = "https://" + value
-        return self._verify(company, value, source_direct=False)
+        result = self._verify(company, value, source_direct=False)
+        if result.get("verified") or self.llm is None:
+            return result
+        # Re-check the same persisted domain through company-name search when a
+        # transient HTTP fetch failure prevents direct page verification.
+        if not str(result.get("reason") or "").startswith("fetch:"):
+            return result
+        try:
+            research = self.llm.resolve_company_domain(company)
+            confidence = str(research.get("confidence") or "").upper()
+            candidate = str(research.get("official_website") or research.get("official_domain") or "").strip()
+            if candidate and not candidate.startswith(("http://", "https://")):
+                candidate = "https://" + candidate
+            if confidence == "HIGH" and _host(candidate) == _host(value) and research.get("evidence"):
+                return {
+                    "verified": True,
+                    "official_domain": _host(value),
+                    "official_website": candidate or value,
+                    "confidence": "HIGH",
+                    "reason": "verified_by_company_name_search_http_unavailable",
+                    "evidence": [str(x) for x in research.get("evidence", [])] + [str(result.get("reason"))],
+                }
+        except Exception:
+            pass
+        return result
 
 
 class StrictGateWorker(GateWorker):
@@ -771,39 +818,3 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
                 + "\n\nNo customer-facing action was executed."
             ),
         )
-        return {**result, "notification": notice}
-
-    def deep_health(self) -> dict:
-        # Readiness must stay cheap. Backlog totals are exposed by the
-        # autonomy status endpoint and must not block deployment probes.
-        # Deployment probes must not call Drive, Sheets, Gate or LLM APIs.
-        # Those are production operations and belong to the scheduled pipeline.
-        task_ready = bool(os.getenv("LEAD_FACTORY_SERVICE_URL"))
-        return {
-            "ok": True,
-            "factory_enabled": self._enabled(),
-            "gemini_vertex_ready": bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")),
-            "gate_doc_id": os.getenv("TARGET_SCREENING_GATE_DOC_ID", ""),
-            "gate_version": "LIVE_PER_EVALUATION",
-            "task_service_url_present": task_ready,
-            "backlog": {},
-            "backlog_status": "AVAILABLE_VIA_AUTONOMY_STATUS",
-            "external_write": False,
-            "delete": False,
-        }
-
-    def evaluate_gate(self, company_context: dict) -> dict:
-        verification = self.official_site_resolver.verify_existing(company_context)
-        if not verification.get("verified"):
-            return {
-                "run_id": f"gate-preflight-{uuid.uuid4()}",
-                "final_result": "BLOCKED_UNVERIFIED_OFFICIAL_SITE",
-                "verification": verification,
-            }
-        ctx = dict(company_context)
-        ctx["domain"] = verification.get("official_domain", "")
-        ctx["website"] = verification.get("official_website", "")
-        return super().evaluate_gate(ctx)
-
-    def evaluate_mittelstand(self, company_context: dict) -> dict:
-        return self.mittelstand_worker.evaluate_and_persist(company_context)
