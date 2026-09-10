@@ -478,7 +478,12 @@ COMPANY CONTEXT:
 CONTACT (use exact email only if present; do not infer one):
 {json.dumps(contact, ensure_ascii=False)[:10000]}
 """
-        resp = self.client.responses.create(model=self.model, tools=[{"type": "web_search"}], input=prompt)
+        try:
+            resp = self.client.responses.create(model=self.model, tools=[{"type": "web_search"}], input=prompt)
+        except Exception:
+            # Existing researched contacts can be drafted from the supplied evidence
+            # when Vertex's optional search tool is temporarily unavailable.
+            resp = self.client.responses.create(model=self.model, input=prompt)
         data = self._json(resp.output_text)
         if not isinstance(data, dict):
             raise RuntimeError("draft_result_not_object")
