@@ -11,11 +11,11 @@ from google.cloud import tasks_v2
 
 
 class TaskDispatcher:
-    def __init__(self):
+    def __init__(self, queue: str | None = None):
         creds, project = google.auth.default()
         self.project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT") or project
         self.location = os.getenv("LEAD_FACTORY_TASKS_LOCATION", "asia-northeast1")
-        self.queue = os.getenv("LEAD_FACTORY_TASKS_QUEUE", "lead-factory-workers")
+        self.queue = str(queue or os.getenv("LEAD_FACTORY_TASKS_QUEUE", "lead-factory-workers")).strip()
         self.service_url = os.getenv("LEAD_FACTORY_SERVICE_URL", "").rstrip("/")
         self.service_account = os.getenv(
             "LEAD_FACTORY_TASKS_SERVICE_ACCOUNT",
