@@ -576,7 +576,10 @@ def run_ten_sacrifice_batch(
                     site,
                 ):
                     site_emails = _unique([candidate_email] + site_emails)
-                form_links = _unique(list(site.get("contact_links") or []) + list(site.get("forms") or []))
+                # Only pages where the inspector found an actual HTML form are
+                # eligible for form submission. A marketing/persona/contact link
+                # without a form must fall through to email research.
+                form_links = _unique(list(site.get("forms") or []))
                 preferred_form = _preferred_form_url(
                     str(candidate.get("company_name") or "").strip(),
                     str(site.get("official_website") or site_url),
