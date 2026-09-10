@@ -195,7 +195,7 @@ def deep_healthz():
         "factory_enabled": os.getenv("LEAD_FACTORY_ENABLED", "TRUE").upper() == "TRUE",
         "gemini_vertex_ready": bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")),
         "external_write": os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE").upper() == "TRUE",
-        "customer_facing_send": os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "TRUE").upper() == "TRUE",
+        "customer_facing_send": os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE").upper() == "TRUE",
     }
 
 
@@ -561,7 +561,7 @@ def _sacrifice_limit(payload: dict | None) -> int:
 
 
 def _sacrifice_send_enabled() -> bool:
-    return os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "TRUE").upper() == "TRUE"
+    return os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE").upper() == "TRUE"
 
 
 def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict:

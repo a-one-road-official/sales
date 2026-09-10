@@ -164,7 +164,7 @@ def run_ten_sacrifice_batch(
     drive,
     cfg: dict[str, str] | None = None,
     executor=None,
-    execute_external: bool = True,
+    execute_external: bool = False,
     limit: int = 10,
     batch_id: str | None = None,
     batch_slot: int | None = None,
