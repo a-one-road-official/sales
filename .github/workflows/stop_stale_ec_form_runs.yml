@@ -1,0 +1,31 @@
+name: Stop stale EC form audit runtimes
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  cleanup:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Cleanup stale EC form runs') }}
+    runs-on: ubuntu-latest
+    env:
+      PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: asia-northeast1
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Delete only stale isolated audit services
+        run: |
+          set -euo pipefail
+          for SERVICE in aone-sacrifice-34489893563 aone-sacrifice-34491032094; do
+            gcloud run services delete "${SERVICE}"               --region="${REGION}"               --project="${PROJECT}"               --quiet || true
+          done
