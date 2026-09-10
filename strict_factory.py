@@ -818,3 +818,6 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
                 + json.dumps(result, ensure_ascii=False, indent=2)
                 + "\n\nNo customer-facing action was executed."
             ),
+
+        )
+        return {**result, "notification": notice}
