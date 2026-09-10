@@ -154,9 +154,10 @@ def test_json_parser_accepts_complete_value_with_trailing_model_text():
     assert LLM._json(response) == {"subject": "Subject", "body": "Body"}
 
 
-def test_deploy_keeps_prompt_scheduler_and_bootstrap_wired():
+def test_deploy_is_list_only_and_outreach_is_disabled():
     workflow = Path(".github/workflows/deploy.yml").read_text(encoding="utf-8")
-    assert 'upsert_job lead-factory-outreach-ready "*/5 * * * *" "${URL}/prep/tick"' in workflow
-    assert "Bootstrap outreach Prompt refresh" in workflow
-    assert "OUTREACH_READY_ENABLED=TRUE" in workflow
-    assert "OUTREACH_PROMPT_DOC_TITLE=outreach_prompt_production_v1" in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "LEAD_FACTORY_LIST_ONLY_LOCK=TRUE" in workflow
+    assert "OUTREACH_READY_ENABLED=FALSE" in workflow
+    assert '"/prep/tick"' not in workflow
+    assert "Customer-facing sends, forms, invitations, and CRM notifications are disabled." in workflow
