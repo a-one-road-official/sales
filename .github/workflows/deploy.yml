@@ -167,7 +167,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail-with-body --silent --show-error --max-time 60             -H "X-Aone-Internal-Token: $INTERNAL_TOKEN"             "$SERVICE_URL/healthz/deep"
-          echo "List-only mode verified; outreach draft generation is not part of this production run."
+          echo "List-only mode verified; outreach draft generation runs only through the internal /prep/tick lane, and external sending remains disabled."
 
 
       - name: Ensure durable worker queues
