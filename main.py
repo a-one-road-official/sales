@@ -518,3 +518,111 @@ def growth_tick():
 
 @app.post("/prep/tick")
 def prep_tick():
+    try:
+        lf = get_factory()
+        if hasattr(lf, "outreach_ready_tick"):
+            return lf.outreach_ready_tick()
+        return lf.prep_tick()
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/outreach/execute-sacrificial")
+def execute_sacrificial(payload: dict):
+    raise HTTPException(status_code=410, detail="deprecated_ssot_sacrifice_endpoint")
+
+
+@app.post("/outreach/sacrificial-tick")
+def sacrificial_tick(payload: dict):
+    raise HTTPException(status_code=410, detail="deprecated_ssot_sacrifice_endpoint")
+
+
+@app.post("/outreach/sales-leads-sacrifice-tick")
+def sales_leads_sacrifice_tick(payload: dict):
+    """Prepare only the attached sales_leads EC sacrifice population.
+
+    This endpoint intentionally does not instantiate SheetsRepo reads for lead data,
+    does not read LeadFactory_MessageDrafts, and does not write any production SSOT
+    sheet. External customer-facing execution remains blocked at this stage.
+    """
+    try:
+        limit = min(10, max(1, int((payload or {}).get("limit", 10))))
+        candidates = sacrifice_candidates(load_rows(), limit=limit)
+        prepared = []
+        for candidate in candidates:
+            item = dict(candidate)
+            item["research_context"] = make_research_context(candidate)
+            item["status"] = "READY_FOR_RESEARCH"
+            prepared.append(item)
+        return {
+            "status": "SACRIFICE_PREP_ONLY",
+            "source": "sales_leads",
+            "lane": "EC_SACRIFICE",
+            "production_ssot_touched": False,
+            "external_send": "BLOCKED",
+            "candidates": prepared,
+        }
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/outreach/sales-leads-sacrifice-failure-analysis")
+def sales_leads_sacrifice_failure_analysis(payload: dict):
+    """Classify one completed ten-company run and decide the next repair action."""
+    results = list((payload or {}).get("results") or [])
+    if len(results) > 10:
+        raise HTTPException(status_code=400, detail="maximum_ten_results")
+    return {
+        "source": "sales_leads",
+        "lane": "EC_SACRIFICE",
+        "production_ssot_touched": False,
+        "failure_analysis": classify_batch(results),
+        "gate": batch_gate(results),
+    }
+
+
+@app.post("/outreach/sales-leads-sacrifice-run")
+def sales_leads_sacrifice_run(payload: dict):
+    """Run one exact ten-company batch on sales_leads only.
+
+    External execution is opt-in per request and hard-scoped to the attached
+    EC/retail sacrifice source. Production SSOT is never touched here.
+    """
+    try:
+        if int((payload or {}).get("limit", 10)) != 10:
+            raise HTTPException(status_code=400, detail="sacrifice_batch_must_be_exactly_ten")
+        lf = get_factory()
+        cfg = lf._config()
+        execute_external = bool((payload or {}).get("execute_external", False))
+        if execute_external:
+            cfg = dict(cfg)
+            cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = "TRUE"
+            cfg["OUTREACH_FACTORY_SEND_ENABLED"] = "FALSE"
+        executor = SacrificialEmailExecutor(lf.sheets) if execute_external else None
+        return run_ten_sacrifice_batch(
+            llm=lf.llm, drive=lf.drive, cfg=cfg, limit=10,
+            executor=executor, execute_external=execute_external,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/pipeline/tick")
+def pipeline_tick():
+    try:
+        lf = get_factory()
+        discovery_growth = lf.discover_lane(f"pipeline-growth-{uuid.uuid4()}", "GROWTH")
+        discovery_mittel = lf.discover_lane(f"pipeline-mittel-{uuid.uuid4()}", "MITTELSTAND")
+        dispatch_growth_result = self_dispatch_lane(lf, "GROWTH")
+        dispatch_mittel_result = self_dispatch_lane(lf, "MITTELSTAND")
+        return {
+            "status": "DISPATCHED",
+            "discovery_growth": discovery_growth,
+            "discovery_mittelstand": discovery_mittel,
+            "dispatch_growth": dispatch_growth_result,
+            "dispatch_mittelstand": dispatch_mittel_result,
+        }
+    except Exception as exc:
+        _fail(exc)
