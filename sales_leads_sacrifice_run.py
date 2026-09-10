@@ -471,6 +471,10 @@ def run_ten_sacrifice_batch(
     batch_token = str(batch_id or uuid.uuid4().hex).strip()
     run_id = f"sales-leads-{normalized_lane.lower()}-{batch_token}"
     normalized_slot = None if batch_slot is None else int(batch_slot)
+    fast_sales_gtm_mode = (
+        normalized_lane == "SALES_GTM"
+        and _cfg_truthy(cfg, "OUTREACH_FAST_SALES_GTM_MODE")
+    )
     rows = load_rows_for_lane(normalized_lane, sheets=sheets)
     target_domain = {
         "BPO": "BPO",
@@ -539,9 +543,18 @@ def run_ten_sacrifice_batch(
                     "source": "first_party_domain_catalog",
                 }
             elif evidence.get("status") == "MISMATCH_REJECTED":
-                resolved = llm.resolve_company_domain(context) if hasattr(llm, "resolve_company_domain") else {}
-                result["domain_resolution"] = resolved
-                site_url = str(resolved.get("official_website") or "").strip()
+                if fast_sales_gtm_mode:
+                    # Do not spend an unbounded resolver call on a
+                    # low-confidence source URL in the throughput lane.
+                    result["domain_resolution"] = {
+                        "status": "MISMATCH_REJECTED",
+                        "source": "fast_sales_gtm_mode",
+                    }
+                    site_url = ""
+                else:
+                    resolved = llm.resolve_company_domain(context) if hasattr(llm, "resolve_company_domain") else {}
+                    result["domain_resolution"] = resolved
+                    site_url = str(resolved.get("official_website") or "").strip()
 
             try:
                 max_pages = max(1, min(8, int(cfg.get("OUTREACH_SITE_MAX_PAGES", "3") or 3)))
@@ -616,7 +629,7 @@ def run_ten_sacrifice_batch(
                     }
                     # Contact web search is only needed when the verified site
                     # exposes neither a public form nor a usable first-party email.
-                    if not form_links:
+                    if not form_links and not fast_sales_gtm_mode:
                         research = llm.research_outreach_contact(context)
                         proposed_email = str(research.get("email") or "").strip()
                         email = (
@@ -661,7 +674,10 @@ def run_ten_sacrifice_batch(
                         "recipient_verified": True,
                         "contact_confidence": "FORM",
                     }
-                    if _cfg_truthy(cfg, "OUTREACH_FORM_AUDIT_TEMPLATE_ONLY"):
+                    if (
+                        _cfg_truthy(cfg, "OUTREACH_FORM_AUDIT_TEMPLATE_ONLY")
+                        or fast_sales_gtm_mode
+                    ):
                         draft = _verified_site_draft(candidate, site)
                         prompt_meta = dict(prompt_meta or {})
                         prompt_meta["draft_strategy"] = "verified_site_form_audit_template"
@@ -738,9 +754,13 @@ def run_ten_sacrifice_batch(
                         "recipient_verified": True,
                         "contact_confidence": research.get("confidence", "HIGH"),
                     }
-                    draft, prompt_meta = _draft_with_auto_repair(
-                        llm, drive, cfg, context, contact, candidate, site, prompt_meta
-                    )
+                    if fast_sales_gtm_mode:
+                        draft = _verified_site_draft(candidate, site)
+                        prompt_meta = dict(prompt_meta or {})
+                    else:
+                        draft, prompt_meta = _draft_with_auto_repair(
+                            llm, drive, cfg, context, contact, candidate, site, prompt_meta
+                        )
                     draft_subject = str(draft.get("subject") or "")
                     draft_body = str(draft.get("body") or "")
                     row = {
