@@ -133,10 +133,16 @@ class SacrificialEmailExecutor:
         key = f"sacrificial:{draft.get('draft_id','')}:{preflight['message_hash']}"
         if key in self._sent_keys:
             return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key}
+        sheet_idempotency_error = ""
         try:
             existing = _sheet_rows_with_retry(self.sheets)
         except Exception as exc:
-            return {"status": "IDEMPOTENCY_LOOKUP_FAILED", "idempotency_key": key, "reason": f"{type(exc).__name__}:{exc}"}
+            # The Gmail recipient lookup below remains authoritative for this
+            # isolated lane. Keep the attempt auditable, but do not make a
+            # transient Sheet-read outage prevent a verified Gmail duplicate
+            # check from running.
+            sheet_idempotency_error = f"{type(exc).__name__}:{exc}"
+            existing = []
         if any(str(row.get("idempotency_key") or "") == key for row in existing):
             return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "existing_status": "SHEET_RECORD"}
 
@@ -196,6 +202,7 @@ class SacrificialEmailExecutor:
             "preflight": preflight,
             "sender": sender,
             "audit_log_written": not bool(audit_log_error),
+            "sheet_idempotency_lookup_error": sheet_idempotency_error,
         }
         if audit_log_error:
             response["audit_log_error"] = audit_log_error
