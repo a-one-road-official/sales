@@ -129,23 +129,41 @@ def _cfg_truthy(cfg: dict[str, str], key: str) -> bool:
 
 
 def outbound_lane_send_enabled(lane: str, cfg: dict[str, str]) -> bool:
-    """Return whether the explicitly approved BPO outbound lane may send."""
+    """Return whether an explicitly approved outbound lane may send."""
     normalized = lane_from({"lane": lane})
-    if normalized != "BPO":
-        # Factory/SSOT/Mittelstand and legacy EC lanes stay closed here.
-        return False
     allowed = {
         item.strip().upper()
         for item in str(cfg.get("OUTREACH_ALLOWED_LANES", "") or "").split(",")
         if item.strip()
     }
-    return (
-        "BPO" in allowed
-        and _cfg_truthy(cfg, "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE")
+    common = (
+        _cfg_truthy(cfg, "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE")
         and str(cfg.get("LEAD_FACTORY_SEND_MODE", "")).strip().upper() == "ENABLED"
-        and _cfg_truthy(cfg, "OUTREACH_BPO_SEND_ENABLED")
         and _cfg_truthy(cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL")
     )
+    if normalized == "BPO":
+        return (
+            "BPO" in allowed
+            and common
+            and _cfg_truthy(cfg, "OUTREACH_BPO_SEND_ENABLED")
+        )
+    if normalized == "EC_SACRIFICE":
+        target_companies = str(
+            cfg.get(
+                "OUTREACH_SACRIFICE_TARGET_COMPANIES",
+                os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES", ""),
+            )
+            or ""
+        ).strip()
+        return (
+            "EC_SACRIFICE" in allowed
+            and common
+            and _cfg_truthy(cfg, "LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME")
+            and _cfg_truthy(cfg, "OUTREACH_SACRIFICE_SEND_ENABLED")
+            and bool(target_companies)
+        )
+    return False
+
 
 def is_outbound_lane(row: dict, cfg: dict[str, str]) -> bool:
     allowed = {
@@ -313,30 +331,47 @@ class OutboundEmailExecutor:
 
     def _send_block_reason(self, draft: dict, cfg: dict[str, str]) -> str:
         lane = lane_from(draft) or self.lane
-        # Preserve the existing audit reasons for failed safety gates.
         if not _cfg_truthy(cfg, "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"):
             return "external_write_disabled"
-        if str(cfg.get("LEAD_FACTORY_SEND_MODE", os.getenv("LEAD_FACTORY_SEND_MODE", "DISABLED"))).strip().upper() != "ENABLED":
+        if str(
+            cfg.get("LEAD_FACTORY_SEND_MODE", os.getenv("LEAD_FACTORY_SEND_MODE", "DISABLED"))
+        ).strip().upper() != "ENABLED":
             return "send_mode_disabled"
         flag = _lane_flag(lane)
         if not _cfg_truthy(cfg, flag):
             return f"{flag.lower()}_disabled"
-        if lane in PROTECTED_FACTORY_LANES and not _cfg_truthy(
-            cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL"
-        ):
-            return "explicit_factory_send_approval_required"
         allowed = {
             item.strip().upper()
             for item in str(cfg.get("OUTREACH_ALLOWED_LANES", "") or "").split(",")
             if item.strip()
         }
+        if lane == "EC_SACRIFICE":
+            if not _cfg_truthy(cfg, "LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME"):
+                return "isolated_sacrifice_runtime_required"
+            target_companies = str(
+                cfg.get(
+                    "OUTREACH_SACRIFICE_TARGET_COMPANIES",
+                    os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES", ""),
+                )
+                or ""
+            ).strip()
+            if not target_companies:
+                return "sacrifice_target_companies_required"
+            if lane not in allowed:
+                return "sacrifice_lane_not_allowed"
+            if not _cfg_truthy(cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL"):
+                return "explicit_sacrifice_send_approval_required"
+            return ""
+        if lane in PROTECTED_FACTORY_LANES and not _cfg_truthy(
+            cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL"
+        ):
+            return "explicit_factory_send_approval_required"
         if lane == "BPO":
             if lane not in allowed:
                 return "bpo_lane_not_allowed"
             return ""
-        # Factory, SSOT, Mittelstand and legacy EC lanes remain closed in this
-        # BPO stabilization runtime.
         return "list_only_mode"
+
 
     def _send_enabled(self, draft: dict, cfg: dict[str, str]) -> bool:
         return not self._send_block_reason(draft, cfg)

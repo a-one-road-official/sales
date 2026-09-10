@@ -50,7 +50,7 @@ CANONICAL_WEBSITE_HINTS = {
 # Campaign-configured official forms. The allowlist is supplied by the
 # deployment environment so the next batch can be changed without code edits.
 FORM_URL_HINTS = {
-    "Abnormal AI": "https://abnormal.ai/risk",
+    "Abnormal AI": "https://abnormal.ai/demo",
     "ChannelEngine": "https://www.channelengine.com/contact-us",
     "CommerceIQ": "https://www.commerceiq.ai/contact-us",
     "commercetools": "https://commercetools.com/contact-us",

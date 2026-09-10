@@ -392,7 +392,8 @@ class PublicContactFormExecutor:
                 if not chosen:
                     return result_payload("FORM_FAILED", reason="FORM_NOT_FOUND")
                 form_context, form = chosen
-                action = urljoin(page.url, str(form.get_attribute("action") or page.url))
+                base_url = getattr(form_context, "url", "") or page.url
+                action = urljoin(base_url, str(form.get_attribute("action") or base_url))
                 if not _same_host_or_subdomain(action, website):
                     return result_payload(
                         "FORM_FAILED",
@@ -578,18 +579,14 @@ class PublicContactFormExecutor:
                         continue
                 visible_text = "\n".join(dict.fromkeys(part for part in visible_parts if part))
                 success_match = SUCCESS_RE.search(visible_text or "")
-                url_changed = (
-                    final_url != form_url
-                    and _same_host_or_subdomain(final_url, website)
-                )
-                if not success_match and not url_changed:
+                if not success_match:
                     return result_payload(
                         "FORM_FAILED",
                         reason="SUBMISSION_NOT_CONFIRMED",
                         form_url=final_url,
                         confirmation_text=(visible_text or "")[:4000],
                     )
-                confirmation = "SUCCESS_TEXT" if success_match else "URL_CHANGED"
+                confirmation = "SUCCESS_TEXT"
                 result = result_payload(
                     "FORM_SENT",
                     form_url=final_url,

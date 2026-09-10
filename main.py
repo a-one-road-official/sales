@@ -627,6 +627,8 @@ _OUTBOUND_RUNTIME_KEYS = (
     "OUTREACH_FACTORY_SEND_ENABLED",
     "OUTREACH_SSOT_SEND_ENABLED",
     "OUTREACH_PROMPT_DOC_TITLE",
+    "LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME",
+    "OUTREACH_SACRIFICE_TARGET_COMPANIES",
     "OUTREACH_AUTOPILOT_ENABLED",
     "OUTREACH_SITE_MAX_PAGES",
     "OUTREACH_AUTOFIX_GENERATION",
@@ -671,23 +673,22 @@ def _outbound_flag(lane: str) -> str:
     return f"OUTREACH_{normalized}_SEND_ENABLED"
 
 
-def _outbound_send_enabled(lane: str, cfg: dict[str, str] | None = None) -> bool:
-    """Delegate outbound permission to the shared BPO gate."""
+def _outbound_send_enabled(
+    lane: str,
+    cfg: dict[str, str] | None = None,
+) -> bool:
+    """Use the shared outbound gate for the requested lane."""
     runtime_cfg = dict(cfg or {})
     for key in _OUTBOUND_RUNTIME_KEYS:
         runtime_cfg.setdefault(key, os.getenv(key, ""))
     return outbound_lane_send_enabled(lane, runtime_cfg)
+
+
 def _sacrifice_send_enabled(
     lane: str = "BPO",
     cfg: dict[str, str] | None = None,
 ) -> bool:
-    """Return whether the explicitly approved outbound test lane may send."""
-    normalized = str(lane or "").strip().upper()
-    if normalized == "EC_SACRIFICE":
-        if not _config_truthy(os.getenv("LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME", "FALSE")):
-            return False
-        if not str(os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES", "")).strip():
-            return False
+    """Return whether the explicitly approved outbound lane may send."""
     return _outbound_send_enabled(lane, cfg)
 
 
@@ -724,13 +725,21 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
                 "TRUE" if _config_truthy(policy["autofix_generation"]) else "FALSE"
             )
 
-    # The current approved lane is BPO; EC_SACRIFICE remains explicit-only for
-    # historical replay. Both lanes use the same executor and audit path.
-    execute_external = outbound_lane_send_enabled(lane, cfg) and not bool(
-        (payload or {}).get("dry_run", False)
+    # Resolve the requested lane before evaluating its gate. The isolated
+    # EC campaign receives only its own lane and target allowlist.
+    cfg.setdefault(
+        "LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME",
+        os.getenv("LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME", "FALSE"),
+    )
+    cfg.setdefault(
+        "OUTREACH_SACRIFICE_TARGET_COMPANIES",
+        os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES", ""),
     )
     cfg["OUTREACH_ALLOWED_LANES"] = lane
     cfg["OUTREACH_SACRIFICE_LANES"] = lane
+    execute_external = outbound_lane_send_enabled(lane, cfg) and not bool(
+        (payload or {}).get("dry_run", False)
+    )
     cfg["OUTREACH_BPO_SEND_ENABLED"] = (
         "TRUE" if lane == "BPO" and execute_external else "FALSE"
     )
