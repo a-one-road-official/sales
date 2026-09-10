@@ -19,6 +19,7 @@ def failure_code(*values: object) -> str:
         ("TIMEOUT", ("timeout", "timed out", "deadline")),
         ("DUPLICATE_BLOCKED", ("duplicate", "idempotency")),
         ("AUTHORIZATION", ("401", "403", "permission", "unauthorized")),
+        ("SANDBOX_UNAVAILABLE", ("sandboxerror", "sandbox_no_output", "sandbox_launcher")),
         ("NETWORK_ERROR", ("http", "connection", "connecterror", "connect", "dns", "ssl")),
     )
     for code, needles in rules:
