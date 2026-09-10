@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from llm import LLM
@@ -150,3 +152,11 @@ def test_provenance_contains_all_required_trace_fields():
 def test_json_parser_accepts_complete_value_with_trailing_model_text():
     response = "Here is the requested JSON:\n```json\n{\"subject\":\"Subject\",\"body\":\"Body\"}\n```\nI hope this helps."
     assert LLM._json(response) == {"subject": "Subject", "body": "Body"}
+
+
+def test_deploy_keeps_prompt_scheduler_and_bootstrap_wired():
+    workflow = Path(".github/workflows/deploy.yml").read_text(encoding="utf-8")
+    assert 'upsert_job lead-factory-outreach-ready "*/5 * * * *" "${URL}/prep/tick"' in workflow
+    assert "Bootstrap outreach Prompt refresh" in workflow
+    assert "OUTREACH_READY_ENABLED=TRUE" in workflow
+    assert "OUTREACH_PROMPT_DOC_TITLE=outreach_prompt_production_v1" in workflow
