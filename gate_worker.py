@@ -77,6 +77,7 @@ class GateWorker:
                 screening_status=row["final_result"],
                 gate_version=gate.version,
                 error="",
+                row_number=company_context.get("row_number"),
             )
 
         record_event(
@@ -114,6 +115,7 @@ class GateWorker:
                         screening_status="ERROR",
                         gate_version="",
                         error=reason[:5000],
+                        row_number=company.get("row_number"),
                     )
                 record_event(
                     self.sheets,
