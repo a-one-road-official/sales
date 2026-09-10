@@ -32,7 +32,8 @@ class SacrificeStability:
         return self.sheets._rows_as_dicts("LeadFactory_ExecutionBatches", "O")
 
     def record(self, *, lane: str, attempted: int, successes: int,
-               critical_errors: list[str], cfg: dict[str, str], batch_id: str | None = None):
+               critical_errors: list[str], cfg: dict[str, str], batch_id: str | None = None,
+               job_id: str | None = None):
         batch_id = batch_id or f"sacrifice-{uuid4()}"
         required = int(cfg.get("OUTREACH_STABLE_BATCHES_REQUIRED", "3") or 3)
         minimum = int(cfg.get("OUTREACH_STABLE_BATCH_MIN_SUCCESS", "5") or 5)
@@ -42,11 +43,24 @@ class SacrificeStability:
             streak = 0
         else:
             prior = self._batches()
+            normalized_lane = str(lane or "").strip().upper()
+            scope = str(job_id or "").strip()
             streak = 0
             for row in reversed(prior):
-                if str(row.get("lane") or "").upper() not in {"EC", "RETAIL", "SACRIFICE", "EC_SACRIFICE", "BPO"}:
+                if str(row.get("lane") or "").strip().upper() != normalized_lane:
                     continue
-                if str(row.get("stability_status") or "") not in {"BATCH_PASS", "STABLE"}:
+                stability_status = str(row.get("stability_status") or "").strip().upper()
+                # Job/checkpoint rows share this sheet but are not stability
+                # observations. Ignore them instead of breaking the streak.
+                if not stability_status:
+                    continue
+                row_job = str(row.get("job_id") or "").strip()
+                row_batch = str(row.get("batch_id") or "").strip()
+                if scope and row_job and row_job != scope:
+                    continue
+                if scope and not row_job and not (row_batch == scope or row_batch.startswith(scope + "-")):
+                    continue
+                if stability_status not in {"BATCH_PASS", "STABLE"}:
                     break
                 streak += 1
                 if streak >= required:
@@ -55,6 +69,8 @@ class SacrificeStability:
         promoted = streak >= required
         now = datetime.now(timezone.utc).isoformat()
         self.sheets.append_dict("LeadFactory_ExecutionBatches", {
+            "record_type": "OUTREACH_STABILITY_BATCH",
+            "job_id": str(job_id or "").strip(),
             "batch_id": batch_id, "lane": lane, "started_at": now,
             "completed_at": now, "attempted": attempted,
             "semantic_success": successes, "critical_errors": ",".join(sorted(set(critical_errors))),
