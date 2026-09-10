@@ -134,7 +134,7 @@ def _list_only_hard_lock(cfg: dict[str, str]) -> bool:
         "LEAD_FACTORY_LIST_ONLY_LOCK",
         os.getenv("LEAD_FACTORY_LIST_ONLY_LOCK", "TRUE"),
     )
-    return not _truthy(value)
+    return _truthy(value)
 
 
 def outbound_lane_send_enabled(lane: str, cfg: dict[str, str]) -> bool:
