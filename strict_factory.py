@@ -573,11 +573,12 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
             evidence=evidence_text,
         )
         resolved = str(research.get("official_domain") or "").strip()
+        unresolved_reason = evidence_text or str(research.get("verification") or "")
         record_event(
             self.sheets,
             event_type="PIPELINE_STAGE" if resolved else "PIPELINE_FAILURE",
-            reason_code="DOMAIN_RESOLVED" if resolved else "OFFICIAL_SITE_NOT_VERIFIED",
-            reason_note=evidence_text or str(research.get("verification") or ""),
+            reason_code="DOMAIN_RESOLVED" if resolved else (failure_code(unresolved_reason) if unresolved_reason else "OFFICIAL_SITE_NOT_VERIFIED"),
+            reason_note=unresolved_reason,
             company_name=str(company.get("company_name") or ""),
             domain=resolved,
             source_id=str(company.get("lead_id") or lead_id),
@@ -817,4 +818,3 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
                 + json.dumps(result, ensure_ascii=False, indent=2)
                 + "\n\nNo customer-facing action was executed."
             ),
-        )
