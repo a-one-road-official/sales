@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import google.auth
 from fastapi import FastAPI, HTTPException, Request
@@ -20,6 +21,7 @@ from outreach_stability import CRITICAL, SacrificeStability
 from sales_leads_sacrifice import load_rows, sacrifice_candidates, make_research_context
 from sacrifice_failure_loop import classify_batch, batch_gate
 from sales_leads_sacrifice_run import run_ten_sacrifice_batch
+from task_queue import TaskDispatcher
 
 
 app = FastAPI(title="A-one Lead Factory", version="0.3.2")
@@ -319,19 +321,6 @@ def domain_tick():
     except Exception as exc:
         _fail(exc)
 
-@app.post("/failover/domain")
-def failover_domain_tick():
-    """Direct domain-drain lane independent of dispatch and Cloud Tasks.
-
-    This recovery pump uses the same official-site resolver and Gate contract,
-    and never writes to the customer-facing send path.
-    """
-    try:
-        limit = max(1, min(6, int(os.getenv("LEAD_FACTORY_FAILOVER_DOMAIN_BATCH", "2") or 2)))
-        return get_factory().domain_tick(lane="GROWTH", limit=limit)
-    except Exception as exc:
-        _fail(exc)
-
 
 @app.post("/supply/growth")
 def growth_supply_tick():
@@ -479,6 +468,91 @@ def sales_leads_sacrifice_run(payload: dict):
         )
     except HTTPException:
         raise
+    except Exception as exc:
+        _fail(exc)
+
+
+def _sacrifice_worker(payload: dict) -> dict:
+    """Execute one company only; queue retries must not replay the other nine."""
+    if int(payload.get("limit", 10)) != 10:
+        raise HTTPException(status_code=400, detail="sacrifice_batch_must_be_exactly_ten")
+    index = int(payload.get("candidate_index", -1))
+    run_id = str(payload.get("run_id") or "").strip()
+    if not run_id or index < 0 or index >= 10:
+        raise HTTPException(status_code=400, detail="invalid_sacrifice_worker_payload")
+    lf = get_factory()
+    cfg = dict(lf._config())
+    cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = "TRUE"
+    cfg["OUTREACH_FACTORY_SEND_ENABLED"] = "FALSE"
+    result = run_ten_sacrifice_batch(
+        llm=lf.llm, drive=lf.drive, cfg=cfg, limit=10,
+        candidate_index=index, run_id=run_id,
+        executor=SacrificialEmailExecutor(None), execute_external=True,
+    )
+    result["execution_route"] = "CLOUD_TASK_WORKER"
+    return result
+
+
+@app.post("/outreach/sales-leads-sacrifice-worker")
+def sales_leads_sacrifice_worker(payload: dict):
+    """Cloud Tasks target. A transient exception returns 500 so the task retries."""
+    try:
+        return _sacrifice_worker(payload or {})
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/outreach/sales-leads-sacrifice-trigger")
+def sales_leads_sacrifice_trigger(payload: dict | None = None):
+    """Fan out the exact ten EC/retail candidates without a serial deploy dependency.
+
+    Cloud Tasks is the primary route. If the queue is unavailable, each company is
+    run through an isolated bounded worker in this request and its result is returned;
+    one company failure never aborts the other nine.
+    """
+    payload = payload or {}
+    try:
+        candidates = sacrifice_candidates(load_rows(), limit=10)
+        if len(candidates) != 10:
+            raise RuntimeError(f"sacrifice_source_has_{len(candidates)}_eligible_rows_not_ten")
+        signature = ":".join(str(row.get("source_row") or row.get("company_name")) for row in candidates)
+        run_id = str(payload.get("run_id") or f"sales-leads-sacrifice-{uuid.uuid5(uuid.NAMESPACE_URL, signature)}")
+        task_payloads = [
+            {"limit": 10, "candidate_index": index, "run_id": run_id, "execute_external": True}
+            for index in range(10)
+        ]
+        try:
+            dispatcher = TaskDispatcher()
+            queued = [dispatcher.enqueue("/outreach/sales-leads-sacrifice-worker", item, f"{run_id}:{item['candidate_index']}") for item in task_payloads]
+            return {
+                "status": "DISPATCHED",
+                "run_id": run_id,
+                "route": "CLOUD_TASKS",
+                "attempted": 10,
+                "queued": queued,
+                "production_ssot_touched": False,
+            }
+        except Exception as queue_exc:
+            results = []
+            with ThreadPoolExecutor(max_workers=5, thread_name_prefix="sacrifice") as pool:
+                futures = [pool.submit(_sacrifice_worker, item) for item in task_payloads]
+                for future in as_completed(futures):
+                    try:
+                        results.append(future.result())
+                    except Exception as exc:
+                        results.append({"status": "FAILED", "stage": "FALLBACK_WORKER", "error_message": f"{type(exc).__name__}:{exc}", "production_ssot_touched": False})
+            return {
+                "status": "COMPLETE_WITH_FALLBACK",
+                "run_id": run_id,
+                "route": "DIRECT_PARALLEL_FALLBACK",
+                "queue_error": f"{type(queue_exc).__name__}:{queue_exc}",
+                "attempted": 10,
+                "results": results,
+                "failure_analysis": classify_batch([row for result in results for row in result.get("results", [])]),
+                "production_ssot_touched": False,
+            }
     except Exception as exc:
         _fail(exc)
 
