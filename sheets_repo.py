@@ -1511,7 +1511,8 @@ class SheetsRepo:
 
     def list_needs_domain(self, limit: int = 30, lane: str | None = None) -> list[dict]:
         rows = self.read("LeadFactory_Raw!A2:R")
-        out: list[dict] = []
+        normal: list[dict] = []
+        priority: list[dict] = []
         lane_key = str(lane or "").strip().upper()
         for row_number, r in enumerate(rows, start=2):
             padded = r + [""] * (18 - len(r))
@@ -1524,16 +1525,17 @@ class SheetsRepo:
                 continue
             if str(padded[11]).upper() not in {"", "PENDING"}:
                 continue
-            out.append({
+            candidate = {
                 "row_number": row_number, "lead_id": padded[0], "company_name": padded[1],
                 "domain": padded[2], "website": padded[3], "hq_country": padded[4],
                 "source_type": padded[5], "source_name": padded[6], "source_url": padded[7],
                 "source_record_url": padded[8],
-            })
-            if len(out) >= max(0, int(limit)):
-                break
-        return out
-
+            }
+            if str(padded[6]).strip() == "MAKTEK Eurasia 2026":
+                priority.append(candidate)
+            else:
+                normal.append(candidate)
+        return (priority + normal)[:max(0, int(limit))]
 
     def _raw_domain_duplicate_state(self, lead_id: str, company_name: str, domain: str) -> str:
         domain = self._normalize_domain(domain)
@@ -1834,7 +1836,8 @@ class SheetsRepo:
 
     def list_pending_gate(self, limit: int = 20) -> list[dict]:
         rows = self.read("LeadFactory_Raw!A2:R")
-        out: list[dict] = []
+        normal: list[dict] = []
+        priority: list[dict] = []
         for row_number, r in enumerate(rows, start=2):
             padded = r + [""] * (18 - len(r))
             source_type = str(padded[5]).upper()
@@ -1846,7 +1849,7 @@ class SheetsRepo:
                 continue
             if screening not in {"", "PENDING"}:
                 continue
-            out.append({
+            candidate = {
                 "row_number": row_number,
                 "lead_id": padded[0],
                 "company_name": padded[1],
@@ -1857,15 +1860,17 @@ class SheetsRepo:
                 "source_name": padded[6],
                 "source_url": padded[7],
                 "source_record_url": padded[8],
-            })
-            if len(out) >= max(0, int(limit)):
-                break
-        return out
-
+            }
+            if str(padded[6]).strip() == "MAKTEK Eurasia 2026":
+                priority.append(candidate)
+            else:
+                normal.append(candidate)
+        return (priority + normal)[:max(0, int(limit))]
 
     def list_pending_mittelstand(self, limit: int = 20) -> list[dict]:
         rows = self.read("LeadFactory_Raw!A2:R")
-        out: list[dict] = []
+        normal: list[dict] = []
+        priority: list[dict] = []
         for row_number, r in enumerate(rows, start=2):
             padded = r + [""] * (18 - len(r))
             source_type = str(padded[5]).upper()
@@ -1877,7 +1882,7 @@ class SheetsRepo:
                 continue
             if screening not in {"", "PENDING"}:
                 continue
-            out.append({
+            candidate = {
                 "row_number": row_number,
                 "lead_id": padded[0],
                 "company_name": padded[1],
@@ -1888,11 +1893,12 @@ class SheetsRepo:
                 "source_name": padded[6],
                 "source_url": padded[7],
                 "source_record_url": padded[8],
-            })
-            if len(out) >= max(0, int(limit)):
-                break
-        return out
-
+            }
+            if str(padded[6]).strip() == "MAKTEK Eurasia 2026":
+                priority.append(candidate)
+            else:
+                normal.append(candidate)
+        return (priority + normal)[:max(0, int(limit))]
 
     def update_raw_screening(self, lead_id: str, screening_status: str, gate_version: str, error: str = "") -> None:
         rows = self.read("LeadFactory_Raw!A2:R")
