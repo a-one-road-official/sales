@@ -149,31 +149,36 @@ def dispatch_lane(factory, lane: str) -> dict:
         fallback_jobs = []
         try:
             dispatcher = TaskDispatcher(queue=queue_name)
-            cloud_tasks_failed = False
-            for path, payload, stage in queue_jobs:
+            def enqueue_one(item):
+                path, payload, stage = item
                 key = f"{lane_key.lower()}:{stage}:{payload.get('source_id') or payload.get('lead_id')}:{bucket}"
-                if cloud_tasks_failed:
-                    fallback_jobs.append((path, payload, stage))
-                    continue
                 try:
-                    result = dispatcher.enqueue(path, payload, key)
+                    return item, dispatcher.enqueue(path, payload, key), None
+                except Exception as exc:
+                    return item, None, exc
+
+            # Cloud Tasks creation is an RPC per task. Submit bounded parallel
+            # RPCs so a 200+ candidate dispatch cannot hit the service request
+            # deadline before any work is queued.
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(16, max(1, len(queue_jobs)))
+            ) as pool:
+                futures = [pool.submit(enqueue_one, item) for item in queue_jobs]
+                for future in futures:
+                    item, result, exc = future.result()
+                    path, payload, stage = item
+                    if exc is not None:
+                        fallback_jobs.append(item)
+                        errors.append({
+                            "stage": stage,
+                            "queue": queue_name or "default",
+                            "error": f"cloud_tasks:{type(exc).__name__}:{exc}",
+                        })
+                        continue
                     if result.get("status") == "ALREADY_QUEUED":
                         queued["already_queued"] += 1
                     else:
                         queued[stage] += 1
-                except Exception as exc:
-                    # A missing queue or enqueuer permission is isolated to the
-                    # selected queue; do not let an old FIFO queue block MAKTEK.
-                    cloud_tasks_failed = True
-                    fallback_jobs.extend(
-                        (p, pl, st) for p, pl, st in queue_jobs[queue_jobs.index((path, payload, stage)):]
-                    )
-                    errors.append({
-                        "stage": stage,
-                        "queue": queue_name or "default",
-                        "error": f"cloud_tasks:{type(exc).__name__}:{exc}",
-                    })
-                    break
             enqueue_http_fallback(fallback_jobs)
         except Exception as exc:
             errors.append({
