@@ -220,97 +220,18 @@ class MaktekIngestor:
         return len(new_rows), skipped
 
     def _upsert_human(self, records: list[dict]) -> tuple[int, int]:
-        sheet = "営業リスト＿Factory/BPO"
-        headers_rows = self.sheets.read(f"'{sheet}'!1:1")
-        if not headers_rows:
-            raise RuntimeError(f"missing_header:{sheet}")
-        headers = headers_rows[0]
-        hidx = {str(h): i for i, h in enumerate(headers) if h}
-        existing_rows = self.sheets.read(f"'{sheet}'!A2:Z")
-        existing_by_name: dict[str, tuple[int, list[str]]] = {}
-        for row_number, r in enumerate(existing_rows, start=2):
-            if not r:
-                continue
-            name = str(r[0] or "").strip()
-            if name:
-                existing_by_name.setdefault(_norm(name), (row_number, r + [""] * (26 - len(r))))
-
-        new_dicts = []
-        updates = []
-        today = datetime.now(timezone.utc).date().isoformat()
-        for rec in records:
-            key = _norm(rec["company_name"])
-            loc = str(rec.get("location") or "").strip()
-            note = f"{SOURCE_TAG} exhibitor" + (f" / {loc}" if loc else "")
-            current = existing_by_name.get(key)
-            if current:
-                row_number, existing = current
-                # Preserve Status and human-owned fields; only augment provenance/note fields.
-                for header, value in (
-                    ("source", SOURCE_TAG),
-                    ("selection_reason", note),
-                    ("japan_opportunity_note", SOURCE_TAG),
-                    ("record_origin", "LeadFactory"),
-                ):
-                    idx = hidx.get(header)
-                    if idx is None:
-                        continue
-                    old = str(existing[idx] if idx < len(existing) else "").strip()
-                    merged = old if SOURCE_TAG.lower() in old.lower() else (f"{old} | {value}" if old else value)
-                    if merged != old:
-                        col = self.sheets._column_letter(idx + 1)
-                        updates.append({"range": f"'{sheet}'!{col}{row_number}", "values": [[merged]]})
-                for header, value in (("hq_country", rec.get("hq_country", "")), ("country", rec.get("hq_country", ""))):
-                    idx = hidx.get(header)
-                    if idx is None or not value:
-                        continue
-                    old = str(existing[idx] if idx < len(existing) else "").strip()
-                    if not old:
-                        col = self.sheets._column_letter(idx + 1)
-                        updates.append({"range": f"'{sheet}'!{col}{row_number}", "values": [[value]]})
-                continue
-
-            new_dicts.append(
-                {
-                    "company_name": rec["company_name"],
-                    "Status": "未接触",
-                    "ステータス理由": note,
-                    "hq_country": rec.get("hq_country", ""),
-                    "source": SOURCE_TAG,
-                    "added_at": today,
-                    "selection_reason": note,
-                    "record_origin": "LeadFactory",
-                    "japan_opportunity_note": SOURCE_TAG,
-                    "country": rec.get("hq_country", ""),
-                }
-            )
-
-        # Batch-update existing records in bounded chunks.
-        for start in range(0, len(updates), 400):
-            self.sheets.svc.spreadsheets().values().batchUpdate(
-                spreadsheetId=self.sheets.spreadsheet_id,
-                body={"valueInputOption": "RAW", "data": updates[start : start + 400]},
-            ).execute()
-
-        # Append all genuinely new companies in one request. Their provenance is explicit and
-        # Status starts at 未接触, matching the user's requested human-facing inventory semantics.
-        if new_dicts:
-            new_rows = [[row.get(h, "") for h in headers] for row in new_dicts]
-            self.sheets.svc.spreadsheets().values().append(
-                spreadsheetId=self.sheets.spreadsheet_id,
-                range=f"'{sheet}'!A:ZZ",
-                valueInputOption="RAW",
-                insertDataOption="INSERT_ROWS",
-                body={"values": new_rows},
-            ).execute()
-        return len(new_dicts), len(records) - len(new_dicts)
+        raise RuntimeError(
+            "direct_human_ssot_ingest_disabled:raw_then_domain_then_gate_then_promotion"
+        )
 
     def run(self) -> dict:
         records, pages = self._fetch_all()
         sales_rows = self.sheets.read("'営業リスト＿Factory/BPO'!A2:A")
         sales_names = {_norm(r[0]) for r in sales_rows if r and str(r[0] or "").strip()}
         raw_new, raw_existing = self._append_raw(records, sales_names)
-        human_new, human_existing = self._upsert_human(records)
+        # MAKTEK capture is Raw-only. Human SSOT writes require a persisted
+        # domain resolution and an authoritative Gate result.
+        human_new, human_existing = 0, 0
         self.sheets.update_source_crawl_state(
             SOURCE_ID,
             crawl_status="CRAWLED_FULL",
@@ -321,7 +242,7 @@ class MaktekIngestor:
         self.sheets.append("LeadFactory_RunLog", [
             f"run-maktek2026-full-{now}", now, now, "MAKTEK_FULL_INGEST",
             0, raw_new, raw_existing, 0, 0, 0, 0, human_new, 0, SOURCE_TAG,
-            "maktek2026-full-ingest", "maktek2026-full-ingest", "deterministic_maktek_ingestor", "FULL_DIRECTORY_CAPTURED",
+            "maktek2026-full-ingest", "maktek2026-full-ingest", "deterministic_maktek_ingestor", "RAW_CAPTURED_GATE_PENDING",
         ])
         return {
             "status": "PASS",
@@ -333,4 +254,5 @@ class MaktekIngestor:
             "human_new": human_new,
             "human_existing_updated_or_preserved": human_existing,
             "customer_facing_action": False,
+            "promotion_deferred_until_gate": True,
         }

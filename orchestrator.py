@@ -895,19 +895,38 @@ class LeadFactory:
 
 
     def _autonomy_guard(self, lane: str) -> dict | None:
-        """Stop internal supply after target or repeated zero-yield runs."""
-        if str(self.s.autonomy_mode or "").upper() != "UNTIL_TARGET":
+        """Stop only on an explicit target completion; zero-yield runs trigger recovery."""
+        mode = str(self.s.autonomy_mode or "").upper()
+        if mode not in {"UNTIL_TARGET", "UNTIL_EXHAUSTED"}:
             return None
         if self._config().get("LEAD_FACTORY_GOAL_STATUS", "").upper() in {"RUNNING", "AT_RISK"}:
             return None
-        promoted = self.sheets.count_promoted_leads()
-        added_since_start = max(0, promoted - int(self.s.autonomy_start_promoted))
-        if added_since_start >= int(self.s.autonomy_target_new_companies):
-            return {"status": "STOPPED_TARGET_REACHED", "lane": lane, "promoted_total": promoted, "new_since_start": added_since_start, "target": int(self.s.autonomy_target_new_companies)}
-        zero_limit = max(1, int(self.s.autonomy_stop_after_zero_runs))
-        recent = self.sheets.recent_supply_runlogs(lane, limit=zero_limit)
-        if len(recent) >= zero_limit and all(int(item.get("promoted", 0) or 0) == 0 for item in recent):
-            return {"status": "STOPPED_NO_NEW_COMPANIES", "lane": lane, "promoted_total": promoted, "new_since_start": added_since_start, "target": int(self.s.autonomy_target_new_companies), "zero_promotion_runs": zero_limit}
+        cfg = self._config()
+        try:
+            baseline = int(cfg.get("LEAD_FACTORY_GOAL_BASELINE_SSOT", "0") or 0)
+        except (TypeError, ValueError):
+            baseline = 0
+        start_at = cfg.get("LEAD_FACTORY_GOAL_START_AT", "")
+        snapshot_fn = getattr(self.sheets, "promotion_accounting_snapshot", None)
+        if callable(snapshot_fn):
+            snapshot = snapshot_fn(baseline, start_at)
+            promoted = int(snapshot.get("current_qualified_ssot", 0) or 0)
+            added_since_start = int(snapshot.get("daily_added", 0) or 0)
+        else:
+            promoted = self.sheets.count_promoted_leads()
+            added_since_start = max(0, promoted - int(self.s.autonomy_start_promoted))
+        target = int(self.s.autonomy_target_new_companies)
+        if mode == "UNTIL_TARGET" and added_since_start >= target:
+            return {
+                "status": "STOPPED_TARGET_REACHED",
+                "lane": lane,
+                "promoted_total": promoted,
+                "new_since_start": added_since_start,
+                "target": target,
+            }
+        # A zero-promotion interval is a recovery signal. The frontier, domain,
+        # Gate, and promotion workers continue so they can repair or discover
+        # more supply; zero alone never shuts down autonomous list production.
         return None
 
     def _notify_autonomy_stop(self, result: dict) -> dict:

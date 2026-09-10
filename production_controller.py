@@ -56,10 +56,17 @@ class QualifiedLeadProductionController:
                 self.sheets.append("Config", [key, rendered])
 
     def _ssot_count(self) -> int:
+        counter = getattr(self.sheets, "count_valid_qualified_ssot", None)
+        if callable(counter):
+            return int(counter())
         cfg = self._config()
         sheet = cfg.get("LEAD_FACTORY_HUMAN_SSOT_SHEET", "営業リスト＿Factory/BPO")
         rows = self.sheets.read(f"'{sheet}'!A2:A")
-        return sum(1 for row in rows if row and str(row[0]).strip())
+        return sum(
+            1
+            for row in rows
+            if row and str(row[0]).strip() and str(row[0]).strip().upper() not in {"#N/A", "#REF!", "#VALUE!"}
+        )
 
     def _queue_counts(self) -> dict[str, int]:
         def count(range_name: str, predicate=None) -> int:
@@ -128,7 +135,23 @@ class QualifiedLeadProductionController:
         now = datetime.now(UTC)
         elapsed_h = max(0.0, (now - start).total_seconds() / 3600) if start else 0.0
         remaining_h = max(0.0, (deadline - now).total_seconds() / 3600) if deadline else 0.0
-        added = max(0, current - baseline)
+        accounting = {}
+        snapshot = getattr(self.sheets, "promotion_accounting_snapshot", None)
+        if callable(snapshot):
+            try:
+                accounting = snapshot(baseline, cfg.get(GOAL_KEYS["start_at"], ""))
+                current = int(accounting.get("current_qualified_ssot", current) or current)
+                added = int(accounting.get("daily_added", 0) or 0)
+            except Exception as exc:
+                accounting = {
+                    "accounting_status": "UNAVAILABLE",
+                    "accounting_error": f"{type(exc).__name__}:{exc}",
+                }
+                added = max(0, current - baseline)
+        else:
+            added = max(0, current - baseline)
+        accounted = int(accounting.get("accounted_qualified_ssot", baseline + added) or (baseline + added))
+        drift = int(accounting.get("accounting_drift", current - accounted) or (current - accounted))
         velocity = added / elapsed_h if elapsed_h > 0 else 0.0
         required = max(0, target - added) / remaining_h if remaining_h > 0 else 0.0
         forecast = added + velocity * remaining_h
@@ -139,13 +162,18 @@ class QualifiedLeadProductionController:
             "target": target,
             "baseline_ssot_count": baseline,
             "current_ssot_count": current,
+            "current_qualified_ssot_count": current,
+            "accounted_qualified_ssot_count": accounted,
+            "accounting_drift": drift,
             "added": added,
+            "daily_added": added,
             "remaining": max(0, target - added),
             "elapsed_hours": round(elapsed_h, 3),
             "hours_remaining": round(remaining_h, 3),
             "actual_velocity_per_hour": round(velocity, 3),
             "required_velocity_per_hour": round(required, 3),
             "eod_forecast": round(forecast, 3),
+            **accounting,
             **metrics,
             **throughput,
         }

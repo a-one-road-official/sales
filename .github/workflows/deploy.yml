@@ -251,7 +251,7 @@ jobs:
 
 
       - name: Execute isolated ten-company sacrifice batch
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true) }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
         continue-on-error: true
         run: |
           set +e

@@ -121,6 +121,11 @@ class SheetsRepo:
 
 
     def append(self, sheet: str, values: list) -> None:
+        # Human-facing SSOT writes must go through promotion validation and the
+        # append-structure writer. Raw list appends cannot prove Gate/added_at
+        # invariants and are therefore rejected at the repository boundary.
+        if sheet == "営業リスト＿Factory/BPO":
+            raise RuntimeError("direct_human_ssot_append_blocked:use_promote_to_sales_if_new")
         self._execute_write(lambda: self.svc.spreadsheets().values().append(
             spreadsheetId=self.spreadsheet_id,
             range=f"{sheet}!A:ZZ",
@@ -133,10 +138,14 @@ class SheetsRepo:
 
 
     def append_dict(self, sheet: str, row: dict) -> None:
-        headers = self.read(f"{sheet}!1:1")
-        if not headers:
+        headers_rows = self.read(f"{sheet}!1:1")
+        if not headers_rows:
             raise RuntimeError(f"missing_header:{sheet}")
-        ordered = [row.get(h, "") for h in headers[0]]
+        headers = headers_rows[0]
+        if sheet == "営業リスト＿Factory/BPO":
+            from promotion_accounting import validate_new_sales_payload
+            validate_new_sales_payload(row, headers)
+        ordered = [row.get(h, "") for h in headers]
         self.append(sheet, ordered)
 
 
@@ -170,9 +179,14 @@ class SheetsRepo:
             raise RuntimeError(f"missing_header:{sheet}")
         headers = headers_rows[0]
         header_index = {str(h): i for i, h in enumerate(headers) if h}
+        cfg = self.get_config()
+        is_human_ssot = sheet == cfg.get("LEAD_FACTORY_HUMAN_SSOT_SHEET", "営業リスト＿Factory/BPO")
+        if is_human_ssot:
+            from promotion_accounting import validate_new_sales_payload
+            validate_new_sales_payload(row, headers)
 
 
-        cfg = self.get_config() if sheet == self.get_config().get("LEAD_FACTORY_HUMAN_SSOT_SHEET", "営業リスト＿Factory/BPO") else {}
+        cfg = cfg if is_human_ssot else {}
         if min_row is None:
             try:
                 min_row = int(cfg.get("LEAD_FACTORY_HUMAN_APPEND_MIN_ROW", "2") or 2)
@@ -1104,26 +1118,55 @@ class SheetsRepo:
 
 
     def promotion_tick(self, lane: str | None = None) -> dict:
+        from promotion_accounting import (
+            accounting_snapshot,
+            reconcile_promotion_ledger,
+            record_promotion,
+        )
+
+        reconciliation_before = reconcile_promotion_ledger(self)
         candidates = self.list_promotable_candidates(lane=lane)
         promoted = 0
         existing = 0
         skipped = 0
+        ledger_errors = 0
         details = []
         for c in candidates:
             result = self.promote_to_sales_if_new(c)
-            details.append({"lead_id": c.get("lead_id", ""), **result})
             if result.get("status") == "PROMOTED":
                 promoted += 1
+                try:
+                    ledger_result = record_promotion(self, c, result, reason="new_gate_promotion")
+                    result = {**result, "ledger": ledger_result}
+                except Exception as exc:
+                    ledger_errors += 1
+                    result = {**result, "ledger_error": f"{type(exc).__name__}:{exc}"}
             elif str(result.get("status") or "").startswith("EXISTING"):
                 existing += 1
             else:
                 skipped += 1
+            details.append({"lead_id": c.get("lead_id", ""), **result})
+        reconciliation_after = reconcile_promotion_ledger(self)
+        cfg = self.get_config()
+        try:
+            baseline = int(cfg.get("LEAD_FACTORY_GOAL_BASELINE_SSOT", "0") or 0)
+        except (TypeError, ValueError):
+            baseline = 0
+        accounting = accounting_snapshot(
+            self,
+            baseline,
+            cfg.get("LEAD_FACTORY_GOAL_START_AT", ""),
+        )
         return {
-            "status": "COMPLETE",
+            "status": "COMPLETE" if ledger_errors == 0 else "COMPLETE_WITH_LEDGER_ERRORS",
             "eligible": len(candidates),
             "promoted": promoted,
             "existing": existing,
             "skipped": skipped,
+            "ledger_errors": ledger_errors,
+            "ledger_reconciliation_before": reconciliation_before,
+            "ledger_reconciliation_after": reconciliation_after,
+            "accounting": accounting,
             "details": details,
         }
 
@@ -1496,6 +1539,18 @@ class SheetsRepo:
             )
             return
         raise KeyError(f"lead_not_found:{lead_id}")
+
+    def count_valid_qualified_ssot(self) -> int:
+        from promotion_accounting import count_valid_qualified_ssot
+        return count_valid_qualified_ssot(self)
+
+    def promotion_accounting_snapshot(self, baseline: int, start_at: str | None) -> dict:
+        from promotion_accounting import accounting_snapshot
+        return accounting_snapshot(self, baseline, start_at)
+
+    def reconcile_promotion_ledger(self) -> dict:
+        from promotion_accounting import reconcile_promotion_ledger
+        return reconcile_promotion_ledger(self)
 
     def count_promoted_leads(self) -> int:
         """Count current Lead Factory promotions in the technical SSOT."""
