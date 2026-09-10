@@ -1,17 +1,141 @@
-name: BPO outbound batch (disabled - list only)
+name: BPO outbound batch (manual gated)
 
 on:
   workflow_dispatch:
+    inputs:
+      execute_bpo:
+        description: "Send one BPO batch of exactly 10 through the shared executor"
+        required: true
+        default: false
+        type: boolean
+      batch_id:
+        description: "Optional idempotent batch identifier"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
+  id-token: write
+
+concurrency:
+  group: lead-factory-bpo-outbound
+  cancel-in-progress: false
 
 jobs:
-  disabled:
+  bpo-batch:
+    if: ${{ inputs.execute_bpo == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
     runs-on: ubuntu-latest
+    env:
+      PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: asia-northeast1
+      SERVICE: aone-bpo-${{ github.run_id }}
+      RUNTIME_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      OPENAI_SECRET: aone-openai-api-key
+
     steps:
-      - name: Confirm list-only mode
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python compile check
+        run: python -m compileall .
+
+      - name: Run tests
         run: |
-          echo "List-only mode is enforced."
-          echo "Customer-facing sends, forms, invitations, and CRM notifications are disabled."
-          echo "This workflow intentionally performs no external action."
+          pip install -r requirements.txt
+          pytest -q
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Generate internal runtime token
+        run: |
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::$TOKEN"
+          echo "INTERNAL_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Configure Docker auth
+        run: gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
+
+      - name: Build and push the same application image
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy isolated BPO runtime with sends enabled
+        run: |
+          set -euo pipefail
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
+          gcloud run deploy "$SERVICE" \
+            --image="$IMAGE" \
+            --region="$REGION" \
+            --platform=managed \
+            --service-account="$RUNTIME_SA" \
+            --allow-unauthenticated \
+            --timeout=540 \
+            --concurrency=1 \
+            --min=1 \
+            --max=1 \
+            --no-cpu-throttling \
+            --update-env-vars="^|^GOOGLE_CLOUD_PROJECT=${PROJECT}|GCP_PROJECT=${PROJECT}|LEAD_FACTORY_SPREADSHEET_ID=1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo|LEAD_FACTORY_DRIVE_ROOT_FOLDER_ID=14JY0cfJrNM9uteVmPOQ-SDoYKkSrEX3E|LEAD_FACTORY_DRIVE_SCRAPERS_FOLDER_ID=1c5vE9oAGMXn209JKIyGonJ7pZ4-1bplk|LEAD_FACTORY_OPENAI_SECRET=${OPENAI_SECRET}|LEAD_FACTORY_INTERNAL_TOKEN=${INTERNAL_TOKEN}|LEAD_FACTORY_DRIVE_IMPERSONATE=admin@a1-road.com|LEAD_FACTORY_GMAIL_IMPERSONATE=admin@a1-road.com|OUTREACH_PROMPT_DOC_TITLE=outreach_prompt_production_v1|LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=TRUE|LEAD_FACTORY_SEND_MODE=ENABLED|LEAD_FACTORY_EXPLICIT_SEND_APPROVAL=TRUE|OUTREACH_ALLOWED_LANES=BPO|OUTREACH_SACRIFICE_LANES=BPO|OUTREACH_BPO_SEND_ENABLED=TRUE|OUTREACH_SACRIFICE_SEND_ENABLED=FALSE|OUTREACH_FACTORY_SEND_ENABLED=FALSE|OUTREACH_SSOT_SEND_ENABLED=FALSE|LEAD_FACTORY_FACTORY_SEND_ENABLED=FALSE|OUTREACH_READY_ENABLED=FALSE|LEAD_FACTORY_ALLOW_DELETE=FALSE|LEAD_FACTORY_INTERNAL_NOTIFY_ENABLED=FALSE|LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED=FALSE|LEAD_FACTORY_SHEETS_READ_MIN_INTERVAL_SECONDS=0.5|LEAD_FACTORY_SHEETS_READ_CACHE_TTL_SECONDS=10|LEAD_FACTORY_SHEETS_WRITE_MIN_INTERVAL_SECONDS=0.25" \
+            --project="$PROJECT"
+          URL="$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format='value(status.url)')"
+          test -n "$URL"
+          echo "SERVICE_URL=$URL" >> "$GITHUB_ENV"
+
+      - name: Verify BPO runtime gate before send
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --max-time 60 \
+            -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
+            "${SERVICE_URL}/healthz/deep"
+          echo "BPO lane is enabled; Factory and SSOT lanes remain disabled."
+
+      - name: Send exactly one BPO batch
+        env:
+          BATCH_INPUT: ${{ inputs.batch_id }}
+        run: |
+          set -euo pipefail
+          BATCH_ID="$BATCH_INPUT"
+          if [ -z "$BATCH_ID" ]; then
+            BATCH_ID="bpo-${GITHUB_RUN_ID}"
+          fi
+          PAYLOAD="$(BATCH_ID="$BATCH_ID" python -c 'import json,os; print(json.dumps({"limit":10,"batch_id":os.environ["BATCH_ID"],"lane":"BPO","dry_run":False}))')"
+          curl --fail-with-body --silent --show-error --max-time 540 \
+            -X POST \
+            -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "${SERVICE_URL}/outreach/bpo-run" \
+            -o /tmp/bpo-response.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path("/tmp/bpo-response.json").read_text())
+          attempted = int(result.get("attempted", 0) or 0)
+          successes = int(result.get("success_count", 0) or 0)
+          print(json.dumps({
+              "lane": result.get("lane"),
+              "batch_id": result.get("batch_id"),
+              "attempted": attempted,
+              "success_count": successes,
+              "external_action": result.get("external_action"),
+              "stability": result.get("stability"),
+          }, ensure_ascii=False, indent=2))
+          assert result.get("lane") == "BPO", result
+          assert attempted == 10, result
+          assert successes >= 5, result
+          PY
+
+      - name: Delete isolated BPO runtime
+        if: ${{ always() }}
+        run: |
+          gcloud run services delete "$SERVICE" \
+            --region="$REGION" \
+            --project="$PROJECT" \
+            --quiet || true
