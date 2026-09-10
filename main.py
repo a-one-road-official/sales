@@ -150,6 +150,19 @@ def autonomy_status():
     except Exception as exc:
         _fail(exc)
 
+@app.get("/ops/status")
+def ops_status():
+    """Internal status surface for progress and concrete failure reasons."""
+    try:
+        return {
+            "status": "OK",
+            "autonomy": get_production_controller().status(),
+            "operational_events": get_factory().sheets.operational_event_summary(),
+            "customer_facing_send": "EXPLICIT_APPROVAL_REQUIRED",
+        }
+    except Exception as exc:
+        _fail(exc)
+
 
 @app.post("/autonomy/start")
 def autonomy_start(body: dict):
@@ -318,6 +331,15 @@ def promotion_tick():
 def domain_tick():
     try:
         return get_factory().domain_tick()
+    except Exception as exc:
+        _fail(exc)
+
+@app.post("/failover/domain")
+def failover_domain_tick():
+    """Direct domain-drain lane independent of dispatch and Cloud Tasks."""
+    try:
+        limit = max(1, min(6, int(os.getenv("LEAD_FACTORY_FAILOVER_DOMAIN_BATCH", "2") or 2)))
+        return get_factory().domain_tick(lane="GROWTH", limit=limit)
     except Exception as exc:
         _fail(exc)
 
