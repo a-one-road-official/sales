@@ -218,6 +218,38 @@ def _research_urls(site: dict, research: dict, form_url: str = "") -> list[str]:
     )
 
 
+def _verified_site_draft(candidate: dict, site: dict) -> dict:
+    """Create a bounded test message from verified site evidence without an LLM wait."""
+    company = str(candidate.get("company_name") or "").strip()
+    titles = [
+        str(page.get("title") or "").strip()
+        for page in site.get("pages", [])
+        if isinstance(page, dict) and str(page.get("title") or "").strip()
+    ]
+    reference = titles[0] if titles else str(candidate.get("company_description") or "").strip()
+    reference = re.sub(r"\\s+", " ", reference).strip(" -|:")
+    if not reference:
+        reference = "your commerce product"
+    reference = reference[:120]
+    subject = f"Japan market opportunity for {company}"
+    body = (
+        f"Hi {company} team,\\n\\n"
+        "I’m Kazuma Tamura, Founder & CEO of A-one road in Japan. "
+        f"I’ve been reviewing the product information published on your official website, including “{reference}”.\\n\\n"
+        "A-one road helps international software companies validate Japan through "
+        "customer discovery, partner development, and first conversations with Japanese "
+        "retailers and e-commerce operators. I’d like to explore whether a focused Japan "
+        "conversation could be useful for your current priorities.\\n\\n"
+        "Would you be open to a 20–30 minute conversation? "
+        "If so, you can choose a time here: https://calendar.app.google/adKEhXC4UWhQXfJp6\\n\\n"
+        "Best,\\n"
+        "Kazuma Tamura\\n"
+        "A-one road Co., Ltd.\\n"
+        "Yokohama, Japan"
+    )
+    return {"subject": subject, "body": body, "draft_source": "verified_site_template"}
+
+
 def run_ten_sacrifice_batch(
     *,
     llm,
@@ -383,7 +415,7 @@ def run_ten_sacrifice_batch(
                         "recipient_verified": True,
                         "contact_confidence": "FORM",
                     }
-                    draft = llm.draft_outreach_email(prompt, context, form_contact)
+                    draft = _verified_site_draft(candidate, site)
                     form_url = form_links[0]
                     draft_subject = str(draft.get("subject") or "")
                     draft_body = str(draft.get("body") or "")
@@ -435,7 +467,7 @@ def run_ten_sacrifice_batch(
                         "recipient_verified": True,
                         "contact_confidence": research.get("confidence", "HIGH"),
                     }
-                    draft = llm.draft_outreach_email(prompt, context, contact)
+                    draft = _verified_site_draft(candidate, site)
                     draft_subject = str(draft.get("subject") or "")
                     draft_body = str(draft.get("body") or "")
                     row = {
