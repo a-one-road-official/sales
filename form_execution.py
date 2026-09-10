@@ -272,6 +272,18 @@ def _select_custom_option(el, key: str) -> tuple[bool, str]:
     if key == "monthly_traffic":
         configured = str(os.getenv("OUTREACH_FORM_MONTHLY_TRAFFIC") or "").strip().lower()
         wanted = (configured,) if configured else ()
+    configured_by_key = {
+        "reason": "OUTREACH_FORM_REASON",
+        "discovery_source": "OUTREACH_FORM_DISCOVERY_SOURCE",
+        "category": "OUTREACH_FORM_CATEGORY",
+        "platform": "OUTREACH_FORM_ECOMMERCE_PLATFORM",
+    }
+    config_name = configured_by_key.get(key)
+    if config_name:
+        configured = str(os.getenv(config_name) or "").strip().lower()
+        if configured:
+            # Permit site-specific labels in one deployment configuration.
+            wanted = tuple(part.strip() for part in configured.split("|") if part.strip())
     try:
         el.click(timeout=5000)
         time.sleep(0.2)
@@ -585,7 +597,8 @@ def _visible_step_signature(form) -> tuple:
                         (
                             marker,
                             (field.get_attribute("type") or "").lower(),
-                            _current_value(field),
+                            # Values are intentionally excluded: filling a field must not
+                            # look like a new multi-step state.
                         )
                     )
                 visible_controls = step.locator(
@@ -840,6 +853,7 @@ class PublicContactFormExecutor:
                                 continue
                             # Input-based dropdowns are processed in the main field loop.
                             # Keep only non-input custom controls here to avoid duplicate audits.
+                            tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
                             if tag == "input":
                                 continue
                             label = _label_for(el)
