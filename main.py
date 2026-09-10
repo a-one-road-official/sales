@@ -640,9 +640,23 @@ def _outbound_flag(lane: str) -> str:
 
 
 def _outbound_send_enabled(lane: str, cfg: dict[str, str] | None = None) -> bool:
-    """Global production interlock: this deployment is list-only."""
-    return False
+    """Enable only the explicitly configured isolated EC sacrifice lane."""
+    normalized = str(lane or "").strip().upper()
+    if normalized != "EC_SACRIFICE":
+        return False
+    values = cfg if cfg is not None else os.environ
 
+    def value(key: str, default: str = "FALSE") -> object:
+        return values.get(key, os.getenv(key, default))
+
+    return (
+        _config_truthy(value("LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME"))
+        and _config_truthy(value("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"))
+        and str(value("LEAD_FACTORY_SEND_MODE", "DISABLED")).strip().upper() == "ENABLED"
+        and _config_truthy(value("OUTREACH_SACRIFICE_SEND_ENABLED"))
+        and _config_truthy(value("LEAD_FACTORY_EXPLICIT_SEND_APPROVAL"))
+        and bool(str(value("OUTREACH_SACRIFICE_TARGET_COMPANIES", "") or "").strip())
+    )
 
 def _sacrifice_send_enabled(
     lane: str = "BPO",
