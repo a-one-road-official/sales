@@ -564,6 +564,8 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
             raise
         evidence = research.get("evidence", [])
         evidence_text = " | ".join(str(x) for x in evidence) if isinstance(evidence, list) else str(evidence or "")
+        source_name = str(company.get("source_name") or "").strip()
+        fast_literal_raw = source_name == "MAKTEK Eurasia 2026"
         result = self.sheets.update_raw_domain_resolution(
             lead_id=lead_id,
             domain=str(research.get("official_domain", "") or ""),
@@ -571,6 +573,10 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
             hq_country=str(research.get("hq_country", "") or ""),
             confidence=str(research.get("confidence", "LOW") or "LOW"),
             evidence=evidence_text,
+            row_number=int(company.get("row_number") or 0) or None,
+            source_type=str(company.get("source_type") or ""),
+            preserve_formulas=not fast_literal_raw,
+            check_duplicates=not fast_literal_raw,
         )
         resolved = str(research.get("official_domain") or "").strip()
         unresolved_reason = evidence_text or str(research.get("verification") or "")
