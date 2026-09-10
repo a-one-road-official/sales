@@ -1,0 +1,152 @@
+name: Approved EC form audit
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      execute_sacrifice:
+        description: "Run the explicitly approved ten-company EC/retail form audit"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: approved-ec-form-audit
+  cancel-in-progress: false
+
+jobs:
+  sacrifice:
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.before == '3875e1f8b6e473ff8a640d21636b1937af29e3d9') || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}
+    runs-on: ubuntu-latest
+    env:
+      PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: asia-northeast1
+      RUNTIME_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      OPENAI_SECRET: aone-openai-api-key
+      SPREADSHEET_ID: 1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo
+      SACRIFICE_SERVICE: aone-sacrifice-${{ github.run_id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python compile and tests
+        run: |
+          python -m compileall .
+          pip install -r requirements.txt
+          pytest -q
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Generate sacrifice token
+        run: |
+          TOKEN="$(openssl rand -hex 32)"
+          echo "::add-mask::${TOKEN}"
+          echo "SACRIFICE_TOKEN=${TOKEN}" >> "${GITHUB_ENV}"
+
+      - name: Configure Docker and build image
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker ${REGION}-docker.pkg.dev --quiet
+          gcloud artifacts repositories describe aone-lead-factory --location="${REGION}" --project="${PROJECT}" >/dev/null 2>&1 || \
+            gcloud artifacts repositories create aone-lead-factory --repository-format=docker --location="${REGION}" --project="${PROJECT}"
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
+          docker build -t "${IMAGE}" .
+          docker push "${IMAGE}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Deploy isolated EC form-audit runtime
+        run: |
+          set -euo pipefail
+          gcloud run deploy "${SACRIFICE_SERVICE}" \
+            --image="${IMAGE}" \
+            --region="${REGION}" \
+            --platform=managed \
+            --service-account="${RUNTIME_SA}" \
+            --allow-unauthenticated \
+            --timeout=540 \
+            --concurrency=1 \
+            --min=1 \
+            --max=1 \
+            --no-cpu-throttling \
+            --update-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT},GCP_PROJECT=${PROJECT},LEAD_FACTORY_SPREADSHEET_ID=${SPREADSHEET_ID},LEAD_FACTORY_OPENAI_SECRET=${OPENAI_SECRET},LEAD_FACTORY_INTERNAL_TOKEN=${SACRIFICE_TOKEN},LEAD_FACTORY_GMAIL_IMPERSONATE=admin@a1-road.com,LEAD_FACTORY_DRIVE_IMPERSONATE=admin@a1-road.com,LEAD_FACTORY_SACRIFICE_SOURCE_PATH=/app/data/sales_leads_ec_sacrifice.json,OUTREACH_SACRIFICE_TARGET_COMPANIES=AbnormalAI|ChannelEngine|CommerceIQ|commercetools|FitAnalytics|Narvar|Tapcart|Workato|RetailNext|Plytix,LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_FACTORY_SEND_ENABLED=FALSE,OUTREACH_FACTORY_SEND_ENABLED=FALSE,OUTREACH_SACRIFICE_SEND_ENABLED=TRUE,LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED=FALSE,LEAD_FACTORY_DIRECT_ADAPTER_FALLBACK_ENABLED=TRUE,LEAD_FACTORY_SHEETS_READ_MIN_INTERVAL_SECONDS=0.5,LEAD_FACTORY_SHEETS_READ_CACHE_TTL_SECONDS=10,LEAD_FACTORY_SHEETS_WRITE_MIN_INTERVAL_SECONDS=0.25" \
+            --project="${PROJECT}"
+          URL="$(gcloud run services describe "${SACRIFICE_SERVICE}" --region="${REGION}" --project="${PROJECT}" --format='value(status.url)')"
+          test -n "${URL}"
+          echo "SACRIFICE_URL=${URL}" >> "${GITHUB_ENV}"
+          curl --fail-with-body --retry 10 --retry-all-errors --retry-delay 3 \
+            -H "X-Aone-Internal-Token: ${SACRIFICE_TOKEN}" \
+            "${URL}/healthz/deep"
+
+      - name: Execute ten-company form audit
+        run: |
+          set +e
+          BATCH_ID="ec-form-audit-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          for N in $(seq 1 10); do
+            BODY="$(python - "${BATCH_ID}" "${N}" <<'PY'
+          import json, sys
+          print(json.dumps({
+              "limit": 1,
+              "execute_external": True,
+              "batch_id": sys.argv[1],
+              "batch_slot": int(sys.argv[2]) - 1,
+          }))
+          PY
+            )"
+            OUT="/tmp/ec-form-audit-${N}.json"
+            curl --silent --show-error --max-time 240 --retry 1 --retry-all-errors --retry-delay 4 \
+              --write-out "slot=${N} http=%{http_code}\n" \
+              -X POST \
+              -H "X-Aone-Internal-Token: ${SACRIFICE_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data "${BODY}" \
+              -o "${OUT}" \
+              "${SACRIFICE_URL}/outreach/sales-leads-sacrifice-run"
+            if [ ! -s "${OUT}" ]; then
+              echo '{"status":"REQUEST_FAILED","results":[]}' > "${OUT}"
+            fi
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          entries = []
+          successes = 0
+          for path in sorted(Path("/tmp").glob("ec-form-audit-*.json")):
+              try:
+                  data = json.loads(path.read_text(encoding="utf-8"))
+              except Exception as exc:
+                  data = {"status": "REQUEST_FAILED", "error": f"{type(exc).__name__}:{exc}", "results": []}
+              rows = data.get("results") or []
+              row = rows[0] if rows else {"status": data.get("status", "REQUEST_FAILED")}
+              if row.get("status") in {"SENT", "FORM_SENT"}:
+                  successes += 1
+              entries.append({"slot": path.stem.rsplit("-", 1)[-1], "response": data})
+          report = {"attempted": 10, "successes": successes, "failures": 10 - successes, "results": entries}
+          Path("/tmp/ec-form-audit-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          if successes < 10:
+              raise SystemExit("ten_company_form_audit_incomplete")
+          PY
+
+      - name: Publish full form audit
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ec-form-audit-${{ github.run_id }}
+          path: |
+            /tmp/ec-form-audit-*.json
+            /tmp/ec-form-audit-report.json
+
+      - name: Remove isolated runtime
+        if: ${{ always() }}
+        run: |
+          gcloud run services delete "${SACRIFICE_SERVICE}" --region="${REGION}" --project="${PROJECT}" --quiet || true
