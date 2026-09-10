@@ -137,6 +137,23 @@ class SheetsRepo:
             self.invalidate_config_cache()
 
 
+    def append_rows(self, sheet: str, values_rows: list[list]) -> None:
+        """Append multiple technical rows in one Sheets API call."""
+        if not values_rows:
+            return
+        if sheet == "営業リスト＿Factory/BPO":
+            raise RuntimeError("direct_human_ssot_append_blocked:use_batch_promotion")
+        self._execute_write(lambda: self.svc.spreadsheets().values().append(
+            spreadsheetId=self.spreadsheet_id,
+            range=f"{sheet}!A:ZZ",
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": values_rows},
+        ).execute())
+        if sheet == "Config":
+            self.invalidate_config_cache()
+
+
     def append_dict(self, sheet: str, row: dict) -> None:
         headers_rows = self.read(f"{sheet}!1:1")
         if not headers_rows:
@@ -340,6 +357,97 @@ class SheetsRepo:
                     body={"valueInputOption": "RAW", "data": data},
                 ).execute()
             return new_row_number
+
+
+    def append_rows_preserving_previous_row_structure(
+        self, sheet: str, rows: list[dict], start_row: int
+    ) -> tuple[int, int]:
+        """Write qualified rows contiguously at the SSOT bottom in bounded batches."""
+        if not rows:
+            return (0, 0)
+        with self._write_lock:
+            headers_rows = self.read(f"'{sheet}'!1:1")
+            if not headers_rows:
+                raise RuntimeError(f"missing_header:{sheet}")
+            headers = [str(h or "").strip() for h in headers_rows[0]]
+            header_index = {h: i for i, h in enumerate(headers) if h}
+            if sheet == "営業リスト＿Factory/BPO":
+                from promotion_accounting import validate_new_sales_payload
+                for row in rows:
+                    validate_new_sales_payload(row, headers)
+
+            start = max(2, int(start_row))
+            end = start + len(rows) - 1
+            meta = self.svc.spreadsheets().get(
+                spreadsheetId=self.spreadsheet_id,
+                fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))",
+            ).execute()
+            props = next(
+                (
+                    item.get("properties", {})
+                    for item in meta.get("sheets", [])
+                    if item.get("properties", {}).get("title") == sheet
+                ),
+                None,
+            )
+            if props is None:
+                raise RuntimeError(f"missing_sheet:{sheet}")
+            sheet_id = int(props["sheetId"])
+            row_count = int(props.get("gridProperties", {}).get("rowCount", 0) or 0)
+            if end > row_count:
+                self.svc.spreadsheets().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body={"requests": [{
+                        "appendDimension": {
+                            "sheetId": sheet_id,
+                            "dimension": "ROWS",
+                            "length": end - row_count + 100,
+                        }
+                    }]},
+                ).execute()
+
+            prior = self.read(f"'{sheet}'!A1:A{max(1, start - 1)}")
+            template_row = 1
+            for idx in range(len(prior) - 1, -1, -1):
+                if prior[idx] and str(prior[idx][0] or "").strip():
+                    template_row = idx + 1
+                    break
+            source = {
+                "sheetId": sheet_id,
+                "startRowIndex": template_row - 1,
+                "endRowIndex": template_row,
+                "startColumnIndex": 0,
+                "endColumnIndex": len(headers),
+            }
+            destination = {
+                "sheetId": sheet_id,
+                "startRowIndex": start - 1,
+                "endRowIndex": end,
+                "startColumnIndex": 0,
+                "endColumnIndex": len(headers),
+            }
+            self.svc.spreadsheets().batchUpdate(
+                spreadsheetId=self.spreadsheet_id,
+                body={"requests": [
+                    {"copyPaste": {"source": source, "destination": destination, "pasteType": "PASTE_FORMAT"}},
+                    {"copyPaste": {"source": source, "destination": destination, "pasteType": "PASTE_DATA_VALIDATION"}},
+                ]},
+            ).execute()
+
+            last_col = self._column_letter(len(headers))
+            values = [[row.get(header, "") for header in headers] for row in rows]
+            # Keep each request comfortably below Sheets payload and timeout limits.
+            for offset in range(0, len(values), 250):
+                chunk = values[offset:offset + 250]
+                chunk_start = start + offset
+                chunk_end = chunk_start + len(chunk) - 1
+                self.svc.spreadsheets().values().update(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"'{sheet}'!A{chunk_start}:{last_col}{chunk_end}",
+                    valueInputOption="RAW",
+                    body={"values": chunk},
+                ).execute()
+            return (start, end)
 
 
     def update_row(self, sheet: str, row_number: int, values: list) -> None:
@@ -955,6 +1063,188 @@ class SheetsRepo:
                     "domain": existing_domain,
                 }
         return None
+
+
+    def _sales_row_from_candidate(self, candidate: dict, now: str) -> dict:
+        """Build the header-keyed human SSOT row after Gate approval."""
+        def first_value(*keys: str):
+            for key in keys:
+                value = candidate.get(key)
+                if value not in (None, "", [], {}):
+                    return value
+            return ""
+
+        company_name = str(candidate.get("company_name") or candidate.get("original_company") or "").strip()
+        domain = self._normalize_domain(candidate.get("domain") or candidate.get("website") or "")
+        website = str(candidate.get("website") or "").strip()
+        if not company_name:
+            raise ValueError("missing_company_name")
+        if not domain:
+            raise ValueError("verified_official_domain_required")
+        if not website:
+            website = f"https://{domain}"
+
+        evidence_parts = []
+        for key in (
+            "research_sources", "evidence",
+            "G1_evidence", "G2_evidence", "G3_evidence", "G4_evidence", "G5_evidence", "G6_evidence",
+            "M1_evidence", "M2_evidence", "M3_evidence", "why_now_evidence",
+        ):
+            value = candidate.get(key)
+            if value in (None, "", [], {}):
+                continue
+            parts = value if isinstance(value, (list, tuple, set)) else str(value).split(" | ")
+            for part in parts:
+                part = str(part).strip()
+                if part and part not in evidence_parts:
+                    evidence_parts.append(part)
+
+        g6_or_m3_result = str(
+            first_value("G6_result", "M3_result", "japan_openness", "japan_presence") or ""
+        ).strip()
+        japan_evidence = first_value("G6_evidence", "M3_evidence", "japan_evidence_url")
+        japan_reason = first_value("japan_opportunity_note", "G6_reason", "M3_reason")
+        source_type = str(candidate.get("source_type") or "").strip().upper()
+        lane_subcategory = "Mittelstand" if source_type.startswith("MITTELSTAND_") else "Growth"
+
+        return {
+            "company_name": company_name,
+            "Status": "未接触",
+            "Category": first_value("category") or "Factory",
+            "ステータス理由": "",
+            "hq_country": first_value("hq_country", "country"),
+            "funding_stage": first_value("funding_stage"),
+            "website": website,
+            "what_it_solves": first_value("what_it_solves"),
+            "japan_status": g6_or_m3_result,
+            "source": first_value("source", "source_name") or "LeadFactory",
+            "added_at": now,
+            "japan_distributor_status": first_value("japan_distributor_status", "channel_structure", "exclusivity"),
+            "japan_evidence_url": japan_evidence,
+            "japan_checked_at": first_value("evaluated_at") if (g6_or_m3_result or japan_evidence) else "",
+            "original_domain": domain,
+            "subcategory": first_value("subcategory") or lane_subcategory,
+            "priority": first_value("priority", "priority_signal"),
+            "classification_confidence": first_value("classification_confidence", "confidence"),
+            "selection_reason": first_value("selection_reason", "most_important_reason", "M3_reason"),
+            "record_origin": "LeadFactory",
+            "research_sources": " | ".join(evidence_parts),
+            "reviewed_at": first_value("evaluated_at") or now,
+            "japan_opportunity_note": japan_reason,
+            "country": first_value("country", "hq_country"),
+            "last_funding_date": first_value("last_funding_date"),
+            "last_funding_amount": first_value("last_funding_amount"),
+            "investors": first_value("investors"),
+            "LF_lead_id": first_value("lead_id"),
+            "LF_company_name": company_name,
+            "LF_domain": domain,
+            "LF_website": website,
+            "LF_hq_country": first_value("hq_country", "country"),
+            "LF_source_type": first_value("source_type"),
+            "LF_source_name": first_value("source_name", "source"),
+            "LF_source_url": first_value("source_url"),
+            "LF_source_record_url": first_value("source_record_url"),
+            "LF_discovered_at": first_value("discovered_at"),
+            "LF_last_seen_at": first_value("last_seen_at"),
+            "LF_screening_status": first_value("final_result", "screening_status"),
+            "LF_last_screened_at": first_value("evaluated_at", "last_screened_at"),
+            "LF_gate_version": first_value("gate_version"),
+            "LF_error": first_value("error"),
+            "LF_normalized_domain": domain,
+            "LF_duplicate_state": first_value("duplicate_state"),
+            "LF_intake_status": first_value("intake_status"),
+            "LF_history": f"{now}|PROMOTED|{first_value('final_result', 'screening_status')}",
+        }
+
+    def promote_candidates_batch(self, candidates: list[dict], max_rows: int = 500) -> list[dict]:
+        """Deduplicate and promote approved candidates to contiguous SSOT rows."""
+        if not candidates:
+            return []
+        cfg = self.get_config()
+        sheet = cfg.get("LEAD_FACTORY_HUMAN_SSOT_SHEET", "営業リスト＿Factory/BPO")
+        headers_rows = self.read(f"'{sheet}'!1:1")
+        if not headers_rows:
+            raise RuntimeError(f"missing_header:{sheet}")
+        headers = [str(h or "").strip() for h in headers_rows[0]]
+        name_idx = headers.index("company_name") if "company_name" in headers else 0
+        website_idx = headers.index("website") if "website" in headers else None
+        original_domain_idx = headers.index("original_domain") if "original_domain" in headers else None
+        lead_idx = headers.index("LF_lead_id") if "LF_lead_id" in headers else None
+        last_col = self._column_letter(len(headers))
+        existing_rows = self.read(f"'{sheet}'!A2:{last_col}")
+        names = set()
+        domains = set()
+        lead_ids = set()
+        last_used_row = 1
+        for row_number, raw in enumerate(existing_rows, start=2):
+            padded = list(raw) + [""] * max(0, len(headers) - len(raw))
+            company = str(padded[name_idx] or "").strip()
+            if company:
+                last_used_row = row_number
+                names.add(self._normalize_name(company))
+            for index in (website_idx, original_domain_idx):
+                if index is not None and index < len(padded):
+                    normalized = self._normalize_domain(padded[index])
+                    if normalized:
+                        domains.add(normalized)
+            if lead_idx is not None and lead_idx < len(padded):
+                value = str(padded[lead_idx] or "").strip()
+                if value:
+                    lead_ids.add(value)
+
+        try:
+            configured_min_row = int(cfg.get("LEAD_FACTORY_HUMAN_APPEND_MIN_ROW", "2") or 2)
+        except (TypeError, ValueError):
+            configured_min_row = 2
+        max_rows = max(1, min(1500, int(max_rows or 500)))
+        now = datetime.now(timezone.utc).isoformat()
+        accepted = []
+        outcomes = []
+        for candidate in candidates:
+            final_result = str(candidate.get("final_result") or "").strip().upper()
+            if final_result not in {"GO", "PASS"}:
+                outcomes.append({"candidate": candidate, "result": {"status": "NOT_ELIGIBLE", "final_result": final_result}})
+                continue
+            try:
+                row = self._sales_row_from_candidate(candidate, now)
+            except ValueError as exc:
+                outcomes.append({"candidate": candidate, "result": {"status": "NOT_ELIGIBLE", "reason": str(exc)}})
+                continue
+            candidate_lead_id = str(candidate.get("lead_id") or "").strip()
+            candidate_name = self._normalize_name(row.get("company_name"))
+            candidate_domain = self._normalize_domain(row.get("website") or row.get("original_domain"))
+            if candidate_lead_id and candidate_lead_id in lead_ids:
+                outcomes.append({"candidate": candidate, "result": {"status": "EXISTING_LINKED", "company_name": row["company_name"], "domain": candidate_domain}})
+                continue
+            if candidate_name in names or (candidate_domain and candidate_domain in domains):
+                outcomes.append({"candidate": candidate, "result": {"status": "EXISTING", "company_name": row["company_name"], "domain": candidate_domain}})
+                continue
+            if len(accepted) >= max_rows:
+                continue
+            accepted.append((candidate, row))
+            names.add(candidate_name)
+            if candidate_domain:
+                domains.add(candidate_domain)
+            if candidate_lead_id:
+                lead_ids.add(candidate_lead_id)
+
+        if accepted:
+            start_row = max(2, configured_min_row, last_used_row + 1)
+            first, last = self.append_rows_preserving_previous_row_structure(
+                sheet, [row for _, row in accepted], start_row
+            )
+            for offset, (candidate, row) in enumerate(accepted):
+                outcomes.append({
+                    "candidate": candidate,
+                    "result": {
+                        "status": "PROMOTED",
+                        "company_name": row.get("company_name", ""),
+                        "domain": self._normalize_domain(row.get("original_domain") or row.get("website")),
+                        "new_status": "未接触",
+                        "row_number": first + offset,
+                    },
+                })
+        return outcomes
 
 
     def promote_to_sales_if_new(self, candidate: dict) -> dict:
