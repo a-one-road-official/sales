@@ -242,4 +242,3 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
         "failure_analysis": {"counts": {code: sum(1 for row in failures if row.get("failure", {}).get("code") == code) for code in sorted({row.get("failure", {}).get("code") for row in failures}) if code}},
         "next_action": "READ_ALL_FAILURES_AND_PATCH" if failures else "READY_FOR_EXPLICIT_CANARY_APPROVAL",
     }
-
