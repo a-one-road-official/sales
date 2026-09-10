@@ -25,14 +25,18 @@ SOURCE_PATH = Path(os.getenv(
 if not SOURCE_PATH.exists():
     SOURCE_PATH = _LEGACY_SOURCE_PATH
 BPO_SOURCE_PATH = _DATA_DIR / "sales_leads_bpo_verified.json"
+SALES_GTM_SOURCE_PATH = _DATA_DIR / "sales_leads_sales_gtm_verified.json"
 SACRIFICE_DOMAIN = "EC/リテール"
 BPO_DOMAIN = "BPO"
+SALES_GTM_DOMAIN = "営業/GTM"
 
 
 def source_path_for_lane(lane: str) -> Path:
     normalized = str(lane or "").strip().upper()
     if normalized == "BPO":
         return BPO_SOURCE_PATH
+    if normalized == "SALES_GTM":
+        return SALES_GTM_SOURCE_PATH
     return SOURCE_PATH
 
 # The workbook's category label is not authoritative. These companies are
@@ -79,6 +83,8 @@ def load_rows(path: Path = SOURCE_PATH) -> list[dict]:
 
 _BPO_LIVE_CACHE: list[dict] | None = None
 _BPO_LIVE_CACHE_AT = 0.0
+_SALES_GTM_LIVE_CACHE: list[dict] | None = None
+_SALES_GTM_LIVE_CACHE_AT = 0.0
 
 
 def _live_bpo_rows(sheets) -> list[dict]:
@@ -136,17 +142,79 @@ def _live_bpo_rows(sheets) -> list[dict]:
     _BPO_LIVE_CACHE = normalized
     _BPO_LIVE_CACHE_AT = now
     return [dict(row) for row in normalized]
+    
+def _live_sales_gtm_rows(sheets) -> list[dict]:
+    """Read explicit 営業/GTM rows from the shared source sheet."""
+    global _SALES_GTM_LIVE_CACHE, _SALES_GTM_LIVE_CACHE_AT
+    if sheets is None:
+        return []
+    try:
+        ttl = max(10, min(900, int(os.getenv("OUTREACH_SALES_GTM_LIVE_CACHE_SECONDS", "120") or 120)))
+    except (TypeError, ValueError):
+        ttl = 120
+    now = time.monotonic()
+    if _SALES_GTM_LIVE_CACHE is not None and now - _SALES_GTM_LIVE_CACHE_AT < ttl:
+        return [dict(row) for row in _SALES_GTM_LIVE_CACHE]
+    try:
+        source_rows = sheets._rows_as_dicts("営業リスト＿Factory/BPO", "ZZ")
+    except Exception:
+        return []
+    normalized = []
+    for row in source_rows:
+        category = str(
+            row.get("Category")
+            or row.get("category")
+            or row.get("domain")
+            or row.get("Domain")
+            or ""
+        ).strip()
+        if category.upper() not in {"営業/GTM".upper(), "SALES/GTM", "SALES_GTM"}:
+            continue
+        status = str(row.get("Status") or row.get("status") or "未接触").strip()
+        if status not in {"", "未接触"}:
+            continue
+        company_name = str(row.get("company_name") or row.get("Company") or "").strip()
+        website = str(row.get("website") or row.get("Website") or "").strip()
+        if not company_name or not website:
+            continue
+        normalized.append({
+            "record_origin": "SALES_GTM_SHEET_SOURCE",
+            "domain": SALES_GTM_DOMAIN,
+            "source_sheet": "営業リスト＿Factory/BPO",
+            "source_sheet_actual": "営業リスト＿Factory/BPO",
+            "source_row": str(row.get("row_number") or row.get("source_row") or "").strip(),
+            "company_name": company_name,
+            "website": website,
+            "email": str(row.get("email") or row.get("Email") or "").strip(),
+            "hq_country": str(row.get("hq_country") or row.get("country") or "").strip(),
+            "what_it_solves": str(
+                row.get("what_it_solves")
+                or row.get("description")
+                or row.get("What it solves")
+                or ""
+            ).strip(),
+            "status": "未接触",
+        })
+    _SALES_GTM_LIVE_CACHE = normalized
+    _SALES_GTM_LIVE_CACHE_AT = now
+    return [dict(row) for row in normalized]
 
 
 def load_rows_for_lane(lane: str, sheets=None) -> list[dict]:
-    """Load the curated snapshot plus explicit live-SSOT BPO rows."""
+    """Load the lane snapshot plus explicit live BPO or 営業/GTM rows."""
     normalized_lane = str(lane or "").strip().upper()
-    rows = load_rows(source_path_for_lane(normalized_lane))
-    if normalized_lane != "BPO":
-        return rows
+    if normalized_lane == "BPO":
+        source_path = BPO_SOURCE_PATH
+        live_rows = _live_bpo_rows(sheets)
+    elif normalized_lane == "SALES_GTM":
+        source_path = SALES_GTM_SOURCE_PATH
+        live_rows = _live_sales_gtm_rows(sheets)
+    else:
+        return load_rows(source_path_for_lane(normalized_lane))
+    rows = load_rows(source_path) if source_path.exists() else []
     merged = []
     seen = set()
-    for row in rows + _live_bpo_rows(sheets):
+    for row in rows + live_rows:
         website_key = _host(row.get("website"))
         company_key = re.sub(r"[^a-z0-9]+", "", str(row.get("company_name") or "").lower())
         key = website_key or company_key
@@ -193,10 +261,14 @@ def sacrifice_candidates(
 ) -> list[dict]:
     """Select only the explicitly permitted lane and preserve provenance."""
     normalized_lane = str(lane or "EC_SACRIFICE").strip().upper()
-    if normalized_lane not in {"EC_SACRIFICE", "BPO"}:
+    if normalized_lane not in {"EC_SACRIFICE", "BPO", "SALES_GTM"}:
         raise RuntimeError("unsupported_sacrifice_lane")
     target_domain = str(
-        domain or (BPO_DOMAIN if normalized_lane == "BPO" else SACRIFICE_DOMAIN)
+        domain
+        or {
+            "BPO": BPO_DOMAIN,
+            "SALES_GTM": SALES_GTM_DOMAIN,
+        }.get(normalized_lane, SACRIFICE_DOMAIN)
     ).strip()
     selected = []
     for row in rows:
@@ -230,7 +302,11 @@ def sacrifice_candidates(
             "candidate_website_evidence": evidence,
             "status": "RESEARCH_REQUIRED",
             "sacrifice_eligibility": (
-                "BPO_TEST_COMPANY" if normalized_lane == "BPO" else "NON_FACTORY_TEST_COMPANY"
+                "BPO_TEST_COMPANY"
+                if normalized_lane == "BPO"
+                else "SALES_GTM_TARGET"
+                if normalized_lane == "SALES_GTM"
+                else "NON_FACTORY_TEST_COMPANY"
             ),
         })
         if len(selected) >= max(0, int(limit)):
