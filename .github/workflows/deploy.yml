@@ -415,6 +415,15 @@ jobs:
           done
 
 
+      - name: Bootstrap promotion ledger reconciliation
+        run: |
+          echo "POST /promotion/tick (internal SSOT accounting bootstrap)"
+          timeout 480 curl --fail-with-body --retry 3 --retry-all-errors --retry-delay 3 \
+            -X POST \
+            -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "${SERVICE_URL}/promotion/tick"
+
       - name: Verify isolated sacrifice scheduler target
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}
         run: |
