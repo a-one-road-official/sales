@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: approved-ec-form-audit-execute-once
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   sacrifice:
