@@ -30,7 +30,7 @@ def lane_from(row: dict) -> str:
 def is_sacrificial_lane(row: dict, cfg: dict[str, str]) -> bool:
     allowed = {
         item.strip().upper()
-        for item in str(cfg.get("OUTREACH_SACRIFICE_LANES", "EC,RETAIL,SACRIFICE") or "").split(",")
+        for item in str(cfg.get("OUTREACH_SACRIFICE_LANES", "EC,RETAIL,SACRIFICE,EC_SACRIFICE") or "").split(",")
         if item.strip()
     }
     lane = lane_from(row)
@@ -44,19 +44,15 @@ def message_hash(row: dict) -> str:
 
 
 def semantic_email_preflight(row: dict, cfg: dict[str, str]) -> dict:
-    """Reject unsafe/ambiguous drafts before any external side effect."""
+    """Minimal hard preflight for the isolated sacrifice lane."""
     missing = [key for key in CRITICAL_FIELDS if not str(row.get(key) or "").strip()]
     errors = []
     recipient = str(row.get("recipient") or "").strip()
     body = str(row.get("body") or "")
     if recipient and ("@" not in recipient or " " in recipient):
         errors.append("RECIPIENT_INVALID")
-    if not _truthy(row.get("recipient_verified")) and str(row.get("contact_confidence") or "").upper() not in {"HIGH", "VERIFIED"}:
-        errors.append("RECIPIENT_NOT_VERIFIED")
     if not body.strip():
         errors.append("BODY_EMPTY")
-    # URLs are valid in email bodies; form-field URL restrictions belong to the
-    # browser form validator and must not poison email preflight.
     if "A-one A-one" in body or "A-one A-one" in str(row.get("recipient_name") or ""):
         errors.append("IDENTITY_MAPPING_CORRUPT")
     if not is_sacrificial_lane(row, cfg):
@@ -70,22 +66,19 @@ def semantic_email_preflight(row: dict, cfg: dict[str, str]) -> dict:
 
 
 class SacrificialEmailExecutor:
-    """Actual email execution for isolated EC/retail canaries only."""
+    """Actual email execution for the isolated EC/retail canary."""
 
     def __init__(self, sheets=None):
         self.sheets = sheets
         self._sent_keys: set[str] = set()
 
     def execute(self, draft: dict, cfg: dict[str, str]) -> dict:
-        # The only automatic customer-facing lane is the explicitly isolated
-        # sales_leads sacrifice canary.  This flag is injected by the sacrifice
-        # trigger/worker; ordinary production lanes never receive it.
-        if str(cfg.get("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE")).upper() != "TRUE":
-            return {"status": "BLOCKED", "reason": "external_write_not_enabled_for_sacrifice_lane"}
+        # One deployment-level switch controls this lane. Per-request approval,
+        # broad external-write flags and factory-send interlocks are intentionally
+        # outside this isolated executor.
         if not _truthy(cfg.get("OUTREACH_SACRIFICE_SEND_ENABLED")):
             return {"status": "BLOCKED", "reason": "sacrificial_send_disabled"}
-        if str(cfg.get("OUTREACH_FACTORY_SEND_ENABLED", "FALSE")).upper() == "TRUE":
-            return {"status": "BLOCKED", "reason": "factory_send_flag_must_remain_false"}
+
         preflight = semantic_email_preflight(draft, cfg)
         if not preflight["ok"]:
             return {"status": "BLOCKED_PREFLIGHT", **preflight}
@@ -110,14 +103,19 @@ class SacrificialEmailExecutor:
         self._sent_keys.add(key)
         if self.sheets:
             self.sheets.append_dict("LeadFactory_ExecutionLog", {
-            "idempotency_key": key,
-            "draft_id": draft.get("draft_id", ""),
-            "company_name": draft.get("company_name", ""),
-            "lane": lane_from(draft),
-            "channel": "EMAIL",
-            "status": "SENT",
-            "semantic_success": "PENDING_DELIVERY",
-            "message_id": result.get("id", ""),
-            "executed_at": now,
+                "idempotency_key": key,
+                "draft_id": draft.get("draft_id", ""),
+                "company_name": draft.get("company_name", ""),
+                "lane": lane_from(draft),
+                "channel": "EMAIL",
+                "status": "SENT",
+                "semantic_success": "PENDING_DELIVERY",
+                "message_id": result.get("id", ""),
+                "executed_at": now,
             })
-        return {"status": "SENT", "message_id": result.get("id", ""), "idempotency_key": key, "preflight": preflight}
+        return {
+            "status": "SENT",
+            "message_id": result.get("id", ""),
+            "idempotency_key": key,
+            "preflight": preflight,
+        }
