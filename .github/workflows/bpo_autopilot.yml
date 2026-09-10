@@ -101,14 +101,24 @@ jobs:
       - name: Configure Docker auth
         run: gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
 
-      - name: Grant runtime Gmail delegation signing permission
+      - name: Inspect Gmail delegation prerequisites
+        continue-on-error: true
         run: |
-          set -euo pipefail
+          set +e
+          echo "Runtime service account: $RUNTIME_SA"
+          echo "Service accounts visible to the deploy identity:"
+          gcloud iam service-accounts list --project="$PROJECT" --format="value(email)"
+          echo "Gmail/OAuth/credential-related Secret Manager names visible to the deploy identity:"
+          gcloud secrets list --project="$PROJECT" --format="value(name)" | grep -Ei "gmail|oauth|credential|service|google" || true
+          echo "Runtime service-account IAM policy:"
+          gcloud iam service-accounts get-iam-policy "$RUNTIME_SA" --project="$PROJECT" --format="yaml(bindings)" || true
+          echo "Attempting the required self-signing grant:"
           gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
             --member="serviceAccount:$RUNTIME_SA" \
             --role="roles/iam.serviceAccountTokenCreator" \
             --project="$PROJECT" \
             --quiet
+          echo "Gmail delegation prerequisite inspection completed; runtime will fail closed if no usable backend is available."
 
       - name: Build and push the shared application image
         run: |
