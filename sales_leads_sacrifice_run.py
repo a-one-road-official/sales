@@ -174,9 +174,23 @@ def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
                 continue
         elif "SACRIFICE" not in row_lane:
             continue
-        # Failed and unconfirmed attempts are retryable. Only a confirmed send,
-        # confirmed form submission, or an explicit duplicate block consumes a row.
+        # Failed and unconfirmed attempts are retryable. A final first-party
+        # thank-you URL is also confirmation even if an older worker wrote a
+        # stale FORM_FAILED status after the browser had already navigated.
         status = str(row.get("status") or "").strip().upper()
+        form_url = str(row.get("form_url") or "").strip()
+        confirmation = str(row.get("confirmation") or "").strip()
+        thank_you_evidence = bool(
+            re.search(r"/thank[-_]?you(?:/|$)", form_url, re.I)
+            or re.search(
+                r"(?:submissionguid|submission_id|submissionid)=",
+                form_url,
+                re.I,
+            )
+            or re.search(r"your\s+submission\s+is\s+confirmed", confirmation, re.I)
+        )
+        if status == "FORM_FAILED" and thank_you_evidence:
+            status = "FORM_SENT"
         if status not in {"SENT", "FORM_SENT", "SENT_UNVERIFIED", "DUPLICATE_BLOCKED"}:
             continue
         source_row = str(row.get("source_row") or "").strip()

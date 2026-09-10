@@ -16,9 +16,9 @@ from playwright.sync_api import sync_playwright
 
 CAPTCHA_RE = re.compile(r"captcha|recaptcha|hcaptcha|turnstile", re.I)
 SUCCESS_RE = re.compile(
-    r"thank\s+you(?:\s+for\s+reaching\s+out)?|thanks\s+for\s+contacting|"
+    r"thank\s+you(?:\s+for\s+reaching\s+out)?|thanks\s+for\s+(?:contacting|reaching\s+out)|"
     r"we\s+have\s+received|your\s+(?:message|inquiry).{0,80}(?:sent|received)|"
-    r"message\s+sent|受付|送信完了|お問い合わせ.{0,20}受け付け|ありがとうございました",
+    r"your\s+submission\s+is\s+confirmed|message\s+sent|受付|送信完了|お問い合わせ.{0,20}受け付け|ありがとうございました",
     re.I,
 )
 CORE_FIELDS = ("name", "company", "email", "phone", "country", "address", "role", "message")
@@ -34,9 +34,25 @@ def _same_host_or_subdomain(url: str, root: str) -> bool:
     return bool(host and root_host and (host == root_host or host.endswith("." + root_host)))
 
 
+def _is_first_party_thank_you_url(url: str, website: str) -> bool:
+    """Treat a same-site thank-you URL as confirmation even without body text."""
+    if not _same_host_or_subdomain(url, website):
+        return False
+    parsed = urlparse(str(url or ""))
+    return bool(
+        re.search(r"/thank[-_]?you(?:/|$)", parsed.path, re.I)
+        or re.search(
+            r"(?:submissionguid|submission_id|submissionid|success)=",
+            parsed.query,
+            re.I,
+        )
+    )
+
+
 APPROVED_FORM_ACTION_HOSTS = {
     "forms.hsforms.com",
     "forms-eu1.hsforms.com",
+    "forms-na2.hsforms.com",
 }
 APPROVED_FORM_ACTION_PATH_PREFIXES = (
     "/submissions/v3/public/submit/formsnext/",
@@ -246,6 +262,45 @@ def _captcha_present(contexts) -> bool:
     return False
 
 
+def _dismiss_cookie_banner(contexts) -> bool:
+    """Dismiss an ordinary cookie-consent overlay when it blocks the form."""
+    decision_re = re.compile(
+        r"reject(?:\s+all)?|only\s+necessary|necessary\s+cookies?|"
+        r"decline(?:\s+all)?|deny(?:\s+all)?",
+        re.I,
+    )
+    for context in contexts:
+        try:
+            controls = context.locator(
+                "button, input[type=button], input[type=submit], [role=button]"
+            )
+            for index in range(min(controls.count(), 120)):
+                control = controls.nth(index)
+                try:
+                    if not control.is_visible() or not control.is_enabled():
+                        continue
+                    label = " ".join(
+                        filter(
+                            None,
+                            [
+                                str(control.inner_text() or "").strip(),
+                                str(control.get_attribute("value") or "").strip(),
+                                str(control.get_attribute("aria-label") or "").strip(),
+                                str(control.get_attribute("title") or "").strip(),
+                            ],
+                        )
+                    )
+                    if not decision_re.search(label):
+                        continue
+                    control.click(timeout=3000)
+                    return True
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return False
+
+
 def _form_score(form) -> int:
     try:
         fields = form.locator("input:not([type=hidden]), textarea, select")
@@ -274,6 +329,115 @@ def _form_score(form) -> int:
         return relevant * 20 + visible * 3 + textareas * 4 + submit_visible * 5
     except Exception:
         return 0
+
+
+def _control_label(control) -> str:
+    try:
+        return " ".join(
+            filter(
+                None,
+                [
+                    str(control.inner_text() or "").strip(),
+                    str(control.get_attribute("value") or "").strip(),
+                    str(control.get_attribute("aria-label") or "").strip(),
+                    str(control.get_attribute("title") or "").strip(),
+                ],
+            )
+        )
+    except Exception:
+        return ""
+
+
+_SUBMIT_LABEL_RE = re.compile(
+    r"submit|send|talk\\s+to\\s+sales|contact(?:\\s+us)?|"
+    r"get\\s+in\\s+touch|request(?:\\s+a\\s+demo)?|next|お問い合わせ|送信",
+    re.I,
+)
+
+
+def _submit_control(form_context, form):
+    """Find a submit control inside, associated with, or immediately beside the form."""
+    def usable(control) -> bool:
+        try:
+            return control.count() > 0 and control.is_visible() and control.is_enabled()
+        except Exception:
+            return False
+
+    def choose(locator, *, prefer_submit_type: bool = True):
+        try:
+            ranked = []
+            for index in range(min(locator.count(), 80)):
+                control = locator.nth(index)
+                if not usable(control):
+                    continue
+                typ = str(control.get_attribute("type") or "").lower()
+                label = _control_label(control)
+                score = 0
+                if prefer_submit_type and typ == "submit":
+                    score += 100
+                if _SUBMIT_LABEL_RE.search(label):
+                    score += 50
+                if score:
+                    ranked.append((score, index, control))
+            if ranked:
+                ranked.sort(key=lambda item: (-item[0], item[1]))
+                return ranked[0][2]
+        except Exception:
+            return None
+        return None
+
+    control = choose(form.locator("button[type=submit], input[type=submit], button"))
+    if control is not None:
+        return control
+
+    try:
+        form_id = str(form.get_attribute("id") or "").strip()
+        if form_id:
+            associated = form_context.locator(
+                "button[form], input[type=submit][form], [role=button][form]"
+            )
+            for index in range(min(associated.count(), 80)):
+                candidate = associated.nth(index)
+                if (
+                    usable(candidate)
+                    and str(candidate.get_attribute("form") or "").strip() == form_id
+                ):
+                    return candidate
+    except Exception:
+        pass
+
+    try:
+        form_box = form.bounding_box()
+        if not form_box:
+            return None
+        nearby = form_context.locator(
+            "button, input[type=submit], [role=button]"
+        )
+        ranked = []
+        for index in range(min(nearby.count(), 160)):
+            candidate = nearby.nth(index)
+            if not usable(candidate) or not _SUBMIT_LABEL_RE.search(_control_label(candidate)):
+                continue
+            box = candidate.bounding_box()
+            if not box:
+                continue
+            if box["y"] + box["height"] < form_box["y"] - 40:
+                continue
+            if box["y"] > form_box["y"] + form_box["height"] + 800:
+                continue
+            if (
+                box["x"] + box["width"] < form_box["x"] - 250
+                or box["x"] > form_box["x"] + form_box["width"] + 250
+            ):
+                continue
+            distance = abs((box["y"] + box["height"] / 2) - (form_box["y"] + form_box["height"]))
+            ranked.append((distance, index, candidate))
+        if ranked:
+            ranked.sort(key=lambda item: (item[0], item[1]))
+            return ranked[0][2]
+    except Exception:
+        pass
+    return None
 
 
 def _choose_form(contexts):
@@ -407,6 +571,9 @@ class PublicContactFormExecutor:
                     pass
                 page.wait_for_timeout(2000)
                 contexts = [page] + list(page.frames[1:])
+                _dismiss_cookie_banner(contexts)
+                page.wait_for_timeout(300)
+                contexts = [page] + list(page.frames[1:])
                 if _captcha_present(contexts):
                     return result_payload("FORM_FAILED", reason="CAPTCHA_PRESENT")
                 chosen = _choose_form(contexts)
@@ -486,12 +653,17 @@ class PublicContactFormExecutor:
                     elif key in present_keys:
                         field_status[key] = "FILLED"
                 if "name" not in present_keys and {"first_name", "last_name"}.issubset(present_keys):
-                    field_status["name"] = (
-                        "FILLED"
-                        if field_status.get("first_name") == "FILLED"
-                        and field_status.get("last_name") == "FILLED"
-                        else "UNFILLED"
+                    first_filled = any(
+                        item.get("key") == "first_name"
+                        and item.get("action") in {"FILLED", "SELECTED"}
+                        for item in field_audit
                     )
+                    last_filled = any(
+                        item.get("key") == "last_name"
+                        and item.get("action") in {"FILLED", "SELECTED"}
+                        for item in field_audit
+                    )
+                    field_status["name"] = "FILLED" if first_filled and last_filled else "UNFILLED"
 
                 checkboxes = form.locator("input[type=checkbox]")
                 for index in range(checkboxes.count()):
@@ -515,6 +687,15 @@ class PublicContactFormExecutor:
                     if marketing and required:
                         action = "REQUIRED_MARKETING_OPT_IN_BLOCKED"
                         missing_required.append(f"marketing_checkbox_{index}")
+                    elif marketing:
+                        if el.is_checked():
+                            try:
+                                el.uncheck()
+                                action = "UNCHECKED_OPTIONAL_MARKETING"
+                            except Exception:
+                                action = "OPTIONAL_MARKETING_ALREADY_CHECKED"
+                        else:
+                            action = "LEFT_UNCHECKED_OPTIONAL"
                     elif (required or consent or role_match) and not el.is_checked():
                         try:
                             el.check()
@@ -567,17 +748,23 @@ class PublicContactFormExecutor:
                 if not any(item.get("action") in {"FILLED", "SELECTED"} for item in field_audit):
                     return result_payload("FORM_FAILED", reason="NO_FORM_FIELDS_FILLED")
 
-                submit = form.locator(
-                    "button[type=submit], input[type=submit], button"
-                ).first
-                if submit.count() == 0 or not submit.is_visible() or not submit.is_enabled():
+                _dismiss_cookie_banner([page] + list(page.frames[1:]))
+                submit = _submit_control(form_context, form)
+                if submit is None:
                     return result_payload("FORM_FAILED", reason="SUBMIT_CONTROL_NOT_FOUND")
-                submit.click(timeout=15000)
+                try:
+                    submit.click(timeout=15000)
+                except Exception as first_click_error:
+                    _dismiss_cookie_banner([page] + list(page.frames[1:]))
+                    try:
+                        submit.click(timeout=15000)
+                    except Exception:
+                        raise first_click_error
                 try:
                     page.wait_for_load_state("domcontentloaded", timeout=15000)
                 except Exception:
                     pass
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(2500)
                 final_url = page.url
                 final_html_parts = []
                 for frame in [page] + list(page.frames[1:]):
@@ -600,14 +787,15 @@ class PublicContactFormExecutor:
                         continue
                 visible_text = "\n".join(dict.fromkeys(part for part in visible_parts if part))
                 success_match = SUCCESS_RE.search(visible_text or "")
-                if not success_match:
+                thank_you_url = _is_first_party_thank_you_url(final_url, website)
+                if not success_match and not thank_you_url:
                     return result_payload(
                         "FORM_FAILED",
                         reason="SUBMISSION_NOT_CONFIRMED",
                         form_url=final_url,
                         confirmation_text=(visible_text or "")[:4000],
                     )
-                confirmation = "SUCCESS_TEXT"
+                confirmation = "SUCCESS_TEXT" if success_match else "THANK_YOU_URL"
                 result = result_payload(
                     "FORM_SENT",
                     form_url=final_url,
