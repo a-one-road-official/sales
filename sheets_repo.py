@@ -164,7 +164,7 @@ class SheetsRepo:
 
 
     def append_dict_preserving_previous_row_structure(self, sheet: str, row: dict, min_row: int | None = None) -> int:
-    with self._write_lock:
+        with self._write_lock:
             """Write a new human-facing lead into the first empty SSOT row.
 
 
