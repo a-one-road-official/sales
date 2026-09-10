@@ -14,6 +14,7 @@ BASE_URL = "https://www.maktekfuari.com/en/exhibitor-list"
 SOURCE_ID = "source-maktek-eurasia-2026"
 SOURCE_NAME = "MAKTEK Eurasia 2026"
 SOURCE_TAG = "MAKTEK2026"
+TEMP_IMPORT_SHEET = "__TMP_MAKTEK_IMPORT__"
 
 COUNTRIES = [
     "Bi̇rleşi̇k Arap Emi̇rli̇kleri̇", "Republic Of Korea", "Czech Republic",
@@ -121,7 +122,41 @@ class MaktekIngestor:
     def __init__(self, sheets):
         self.sheets = sheets
 
+    def _temporary_import_records(self) -> list[dict]:
+        """Read the existing CSV-shaped MAKTEK staging tab as a fast Raw-only source.
+
+        The staging tab is intentionally not a human SSOT. Rows still require
+        official-domain resolution, Gate evaluation, deduplication, and the
+        normal append-only Promotion Ledger path before reaching sales.
+        """
+        try:
+            rows = self.sheets.read(f"'{TEMP_IMPORT_SHEET}'!A1:H2000")
+        except Exception:
+            return []
+        records: dict[str, dict] = {}
+        for raw in rows or []:
+            values = list(raw or [])
+            company = _clean_company(str(values[0] if values else "").strip())
+            if not company or _norm(company) in {"company", "company name", "company_name"}:
+                continue
+            country = str(values[1] if len(values) > 1 else "").strip()
+            key = _norm(company)
+            records.setdefault(
+                key,
+                {
+                    "company_name": company,
+                    "hq_country": country,
+                    "source_record_url": BASE_URL,
+                    "source_page_url": BASE_URL,
+                    "location": "CSV_IMPORT_STAGING",
+                },
+            )
+        return list(records.values())
+
     def _fetch_all(self) -> tuple[list[dict], int]:
+        staged = self._temporary_import_records()
+        if len(staged) >= 500:
+            return staged, 0
         cfg = self.sheets.get_config()
         fetcher = TrustedFetcher(
             source_url=BASE_URL,
