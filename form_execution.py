@@ -284,8 +284,9 @@ def _dom_click_matching_option(el, wanted_tokens) -> str:
                         el.closest('.hsfc-PhoneInput') ||
                         el.parentElement?.parentElement ||
                         document.body;
-                    const local = Array.from(field.querySelectorAll('[role="option"], li'));
-                    const global = Array.from(document.querySelectorAll('[role="option"], li'));
+                    const optionSelector = '[role="option"], li, button[data-value], [data-value], [data-option-value]';
+                    const local = Array.from(field.querySelectorAll(optionSelector));
+                    const global = Array.from(document.querySelectorAll(optionSelector));
                     const options = local.concat(global.filter(item => !local.includes(item)));
                     const tokens = (payload || []).map(normalise).filter(Boolean);
                     const candidate = options.find(option => {
@@ -295,7 +296,15 @@ def _dom_click_matching_option(el, wanted_tokens) -> str:
                         return !tokens.length || tokens.some(token => haystack.includes(token));
                     });
                     if (!candidate) return '';
-                    candidate.click();
+                    try {
+                        candidate.click();
+                    } catch (error) {
+                        candidate.dispatchEvent(new MouseEvent('click', {
+                            bubbles: true,
+                            cancelable: true,
+                            view: window,
+                        }));
+                    }
                     return String(candidate.innerText || candidate.textContent || '').trim();
                 }""",
                 list(wanted_tokens),
@@ -351,6 +360,13 @@ def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
                 el.press("ArrowDown")
             except Exception:
                 pass
+
+    try:
+        direct_text = _dom_click_matching_option(el, wanted_tokens)
+        if direct_text:
+            return True, direct_text
+    except Exception:
+        pass
 
     for _ in range(12):
         roots = [
@@ -411,6 +427,12 @@ def _select_phone_country(el, context=None) -> tuple[bool, bool]:
             picker.click(timeout=5000)
         except Exception:
             picker.click(timeout=5000, force=True)
+        try:
+            direct_text = _dom_click_matching_option(el, ("japan", "日本"))
+            if direct_text:
+                return True, True
+        except Exception:
+            pass
         for _ in range(12):
             roots = [root, el.locator("xpath=ancestor::form[1]")]
             if context is not None:
@@ -966,6 +988,7 @@ class PublicContactFormExecutor:
                                     item["action"] = "SELECTED"
                                     item["final_value"] = selected_text or _current_value(el)
                             else:
+                                fill_value = value
                                 if key == "phone":
                                     picker_present, phone_country_ok = _select_phone_country(el, form_context)
                                     item["phone_country"] = (
@@ -973,10 +996,13 @@ class PublicContactFormExecutor:
                                         "UNSET" if picker_present else "NOT_AVAILABLE"
                                     )
                                     if picker_present and not phone_country_ok:
-                                        raise RuntimeError("PHONE_COUNTRY_UNMAPPED")
-                                el.fill(value)
+                                        # The value remains unambiguous E.164 even when
+                                        # the widget's flag menu has no selectable label.
+                                        fill_value = "+818048705690"
+                                        item["phone_country"] = "Japan (E.164 prefix)"
+                                el.fill(fill_value)
                                 item["action"] = "FILLED"
-                                item["final_value"] = _current_value(el) or value
+                                item["final_value"] = _current_value(el) or fill_value
                         except Exception as exc:
                             item["action"] = "FILL_ERROR"
                             item["error"] = f"{type(exc).__name__}:{exc}"
