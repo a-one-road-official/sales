@@ -126,8 +126,12 @@ def dispatch_lane(factory, lane: str) -> dict:
     try:
         dispatcher = TaskDispatcher()
         fallback_jobs = []
+        cloud_tasks_failed = False
         for path, payload, stage in jobs:
             key = f"{lane_key.lower()}:{stage}:{payload.get('source_id') or payload.get('lead_id')}:{bucket}"
+            if cloud_tasks_failed:
+                fallback_jobs.append((path, payload, stage))
+                continue
             try:
                 result = dispatcher.enqueue(path, payload, key)
                 if result.get("status") == "ALREADY_QUEUED":
@@ -135,8 +139,9 @@ def dispatch_lane(factory, lane: str) -> dict:
                 else:
                     queued[stage] += 1
             except Exception as exc:
-                # PermissionDenied/queue outages must degrade to the independent
-                # HTTP worker lane instead of dropping the job.
+                # A missing queue or enqueuer permission is container-wide. Stop
+                # repeating the same failing RPC for every remaining job.
+                cloud_tasks_failed = True
                 fallback_jobs.append((path, payload, stage))
                 errors.append({"stage": stage, "error": f"cloud_tasks:{type(exc).__name__}:{exc}"})
         enqueue_http_fallback(fallback_jobs)
