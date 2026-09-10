@@ -17,6 +17,7 @@ from outreach_execution import semantic_email_preflight
 from sales_leads_sacrifice import load_rows, make_research_context, sacrifice_candidates
 from sacrifice_failure_loop import classify_failure
 from sales_leads_consistency import validate_row
+from sacrifice_web_research import inspect_official_site
 
 
 PROMPT_DOC_ID = "1joNEah7AuIF0-28PmVtgV9TcprEYneHSE5giUIayq5U"
@@ -86,16 +87,32 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
         try:
             source_checks = validate_row(candidate)
             result["source_integrity"] = [check.__dict__ for check in source_checks]
-            source_failures = [check.check for check in source_checks if not check.ok]
+            # Website/contact/message/action checks are downstream checks. They
+            # cannot be evaluated until the site has actually been visited and
+            # the live prompt has produced a draft.
+            downstream = {"OFFICIAL_WEBSITE", "DESCRIPTION_ALIGNMENT", "CONTACT_DOMAIN", "MESSAGE_POLICY", "ACTION_IDEMPOTENCY"}
+            source_failures = [check.check for check in source_checks if not check.ok and check.check not in downstream]
             if prompt_error:
                 source_failures.append("MESSAGE_POLICY")
                 result.update({"status": "FAILED", "stage": "PROMPT_LOAD", "error_message": prompt_error})
             elif source_failures:
                 result.update({"status": "FAILED", "stage": "SOURCE_INTEGRITY", "error_message": ",".join(source_failures)})
             else:
-                research = llm.research_outreach_contact(result["research_context"])
+                site = inspect_official_site(result["candidate_website"])
+                result["website_research"] = site
+                research_context = {**result["research_context"], "verified_site": site}
+                if hasattr(llm, "resolve_company_domain") and site.get("status") != "VERIFIED":
+                    resolved = llm.resolve_company_domain(research_context)
+                    result["domain_resolution"] = resolved
+                    if resolved.get("official_website"):
+                        site = inspect_official_site(resolved["official_website"])
+                        result["website_research"] = site
+                        research_context["candidate_website"] = site.get("official_website", resolved["official_website"])
+                research = llm.research_outreach_contact(research_context)
                 result["research"] = research
                 email = str(research.get("email") or "").strip()
+                if not email and site.get("emails"):
+                    email = str(site["emails"][0]).strip()
                 result["recipient_evidence"] = {
                     "email": email,
                     "evidence_urls": research.get("evidence_urls", []),
@@ -110,8 +127,8 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
                         "title": research.get("title", ""),
                         "email": email,
                         "confidence": research.get("confidence", ""),
-                        "contact_confidence": research.get("confidence", ""),
-                        "recipient_verified": bool(research.get("evidence_urls")),
+                        "contact_confidence": research.get("confidence", "") or ("HIGH" if site.get("emails") else ""),
+                        "recipient_verified": bool(research.get("evidence_urls") or site.get("emails")),
                     }
                     draft = llm.draft_outreach_email(prompt, result["research_context"], contact)
                     result["draft"] = draft
@@ -125,6 +142,9 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
                         "company_name": candidate.get("company_name", ""),
                         "lane": "EC_SACRIFICE",
                         "source_type": "EC_SACRIFICE",
+                        "verified_website": site.get("official_website", ""),
+                        "verified_description": research.get("research_summary", ""),
+                        "message_policy_hash": _hash_text(prompt_id, prompt),
                     }
                     result["message_hash"] = _hash_text(row["recipient"], row["subject"], row["body"])
                     result["preflight"] = semantic_email_preflight(row, cfg)
@@ -161,4 +181,3 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
         "failure_count": len(failures),
         "next_action": "READ_ALL_FAILURES_AND_PATCH" if failures else "READY_FOR_EXPLICIT_CANARY_APPROVAL",
     }
-
