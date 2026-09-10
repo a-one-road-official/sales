@@ -46,7 +46,7 @@ class SacrificeStability:
             for row in reversed(prior):
                 if str(row.get("lane") or "").upper() not in {"EC", "RETAIL", "SACRIFICE", "EC_SACRIFICE"}:
                     continue
-                if str(row.get("stability_status") or "") != "BATCH_PASS":
+                if str(row.get("stability_status") or "") not in {"BATCH_PASS", "STABLE"}:
                     break
                 streak += 1
                 if streak >= required:
