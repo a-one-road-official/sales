@@ -539,23 +539,25 @@ def sacrificial_tick(payload: dict):
 
 @app.post("/outreach/sales-leads-sacrifice-tick")
 def sales_leads_sacrifice_tick(payload: dict):
-    """Scheduler entrypoint for the isolated exact-ten sacrifice execution lane."""
+    """Scheduler entrypoint for preparation only; customer-facing execution is explicit."""
     try:
         if int((payload or {}).get("limit", 10)) != 10:
             raise HTTPException(status_code=400, detail="sacrifice_batch_must_be_exactly_ten")
-        lf = get_factory()
-        cfg = dict(lf._config())
-        cfg["LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"] = "TRUE"
-        cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = "TRUE"
-        cfg["OUTREACH_FACTORY_SEND_ENABLED"] = "FALSE"
-        return run_ten_sacrifice_batch(
-            llm=lf.llm,
-            drive=lf.drive,
-            cfg=cfg,
-            executor=SacrificialEmailExecutor(None),
-            execute_external=True,
-            limit=10,
-        )
+        prepared = []
+        for candidate in sacrifice_candidates(load_rows(), limit=10):
+            item = dict(candidate)
+            item["research_context"] = make_research_context(candidate)
+            item["status"] = "READY_FOR_RESEARCH"
+            prepared.append(item)
+        return {
+            "status": "SACRIFICE_PREP_ONLY",
+            "source": "sales_leads",
+            "lane": "EC_SACRIFICE",
+            "production_ssot_touched": False,
+            "external_send": "BLOCKED",
+            "blocked_reason": "scheduler_has_no_external_send_authority",
+            "candidates": prepared,
+        }
     except Exception as exc:
         _fail(exc)
 
