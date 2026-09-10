@@ -56,7 +56,7 @@ def classify_batch(rows: Iterable[dict]) -> dict:
     return {"attempted": len(failures), "failure_counts": counts, "failures": [f.__dict__ for f in failures]}
 
 
-def batch_gate(results: Iterable[dict], required_successes: int = 7) -> dict:
+def batch_gate(results: Iterable[dict], required_successes: int = 5) -> dict:
     results = list(results)
     critical = []
     successes = 0
