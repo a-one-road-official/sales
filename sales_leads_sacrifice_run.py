@@ -72,9 +72,7 @@ def _preferred_form_url(company_name: str, website: str, links: list[str]) -> st
     company = str(company_name or "").strip()
     hint = FORM_URL_HINTS.get(company, "")
     root_host = _host(website)
-    if hint and root_host and (
-        _host(hint) == root_host or _host(hint).endswith("." + root_host)
-    ):
+    if hint:
         return hint
     candidates = []
     for value in _unique(links):
@@ -583,7 +581,7 @@ def run_ten_sacrifice_batch(
                             from form_execution import PublicContactFormExecutor
                             form_result = PublicContactFormExecutor(sheets=sheets).execute(
                                 form_url=form_url,
-                                website=str(site.get("official_website") or site_url),
+                                website=site_url,
                                 message=draft_body,
                                 subject=draft_subject,
                                 company_name=str(candidate.get("company_name") or ""),
