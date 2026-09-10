@@ -56,7 +56,7 @@ FORM_URL_HINTS = {
     "commercetools": "https://commercetools.com/contact-us",
     "Fit Analytics": "https://fitanalytics.com/contact",
     "Narvar": "https://corp.narvar.com/request-a-demo",
-    "Tapcart": "https://www.tapcart.com/demo",
+    "Tapcart": "https://www.tapcart.com/lp/demo-2025",
     "Workato": "https://www.workato.com/editions/sales",
     "RetailNext": "https://retailnext.net/about/contact-us",
     "Plytix": "https://www.plytix.com/contact/",
@@ -191,7 +191,12 @@ def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
         )
         if status == "FORM_FAILED" and thank_you_evidence:
             status = "FORM_SENT"
-        if status not in {"SENT", "FORM_SENT", "SENT_UNVERIFIED", "DUPLICATE_BLOCKED"}:
+        ambiguous_submission = status == "FORM_FAILED" and bool(
+            re.search(r"SUBMISSION_ATTEMPTED", confirmation, re.I)
+        )
+        if ambiguous_submission:
+            status = "FORM_UNCONFIRMED"
+        if status not in {"SENT", "FORM_SENT", "SENT_UNVERIFIED", "DUPLICATE_BLOCKED", "FORM_UNCONFIRMED"}:
             continue
         source_row = str(row.get("source_row") or "").strip()
         if source_row:
@@ -255,14 +260,21 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
         or execution.get("recipient")
         or ""
     ).strip()
-    reason = str(
-        form_execution.get("confirmation")
-        or execution.get("reason")
-        or execution.get("error_message")
-        or result.get("error_message")
-        or result.get("stage")
-        or ""
-    ).strip()
+    form_reason = str(form_execution.get("reason") or "").strip()
+    form_confirmation = str(form_execution.get("confirmation") or "").strip()
+    submission_attempted = bool(form_execution.get("submission_attempted"))
+    if submission_attempted:
+        reason = f"SUBMISSION_ATTEMPTED:{form_reason or form_confirmation or 'UNCONFIRMED'}"
+    else:
+        reason = str(
+            form_confirmation
+            or form_reason
+            or execution.get("reason")
+            or execution.get("error_message")
+            or result.get("error_message")
+            or result.get("stage")
+            or ""
+        ).strip()
     record = {
         "idempotency_key": key,
         "draft_id": f"{run_id}:{source_row}",

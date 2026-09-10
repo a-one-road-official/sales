@@ -16,9 +16,10 @@ from playwright.sync_api import sync_playwright
 
 CAPTCHA_RE = re.compile(r"captcha|recaptcha|hcaptcha|turnstile", re.I)
 SUCCESS_RE = re.compile(
-    r"thank\s+you(?:\s+for\s+reaching\s+out)?|thanks\s+for\s+(?:contacting|reaching\s+out)|"
+    r"thank\s+you(?:\s+for\s+reaching\s+out)?|thanks\s+for\s+(?:contacting|reaching\s+out|your\s+interest)|"
     r"we\s+have\s+received|your\s+(?:message|inquiry).{0,80}(?:sent|received)|"
-    r"your\s+submission\s+is\s+confirmed|message\s+sent|受付|送信完了|お問い合わせ.{0,20}受け付け|ありがとうございました",
+    r"your\s+submission\s+is\s+confirmed|we\s+will\s+get\s+in\s+contact\s+with\s+you\s+soon|"
+    r"message\s+sent|受付|送信完了|お問い合わせ.{0,20}受け付け|ありがとうございました",
     re.I,
 )
 CORE_FIELDS = ("name", "company", "email", "phone", "country", "address", "role", "message")
@@ -126,8 +127,10 @@ def _field_key(el, label: str) -> str:
         return "first_name"
     if re.search(r"\b(last[- _]?name|family[- _]?name|surname|姓)\b", marker):
         return "last_name"
-    if re.search(r"\b(country|nation|国|国名)\b", marker):
+    if re.search(r"\b(country|nation)\b|countryregion(?:_|$)|\b(国|国名)\b", marker):
         return "country"
+    if re.search(r"industry(?:_|$)|\bindustry\b|業種", marker):
+        return "industry"
     if re.search(r"\b(postal|postcode|zip|郵便)\b", marker):
         return "postal_code"
     if re.search(r"\b(state|province|prefecture|都道府県|県)\b", marker):
@@ -163,6 +166,8 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
         return "A-one road Co., Ltd."
     if key == "role":
         return "Founder & CEO"
+    if key == "industry":
+        return "Retail"
     if key == "name":
         return "Kazuma Tamura"
     if key == "first_name":
@@ -194,6 +199,7 @@ def _select_option(el, key: str) -> tuple[bool, str]:
     wanted = {
         "country": ("japan", "日本", "jp"),
         "state": ("kanagawa", "神奈川"),
+        "industry": ("retail", "consumer"),
         "role": ("founder", "ceo", "chief executive", "代表", "経営", "owner"),
     }.get(key, ())
     try:
@@ -341,6 +347,7 @@ def _control_label(control) -> str:
                     str(control.get_attribute("value") or "").strip(),
                     str(control.get_attribute("aria-label") or "").strip(),
                     str(control.get_attribute("title") or "").strip(),
+                    str(control.get_attribute("class") or "").strip(),
                 ],
             )
         )
@@ -349,8 +356,9 @@ def _control_label(control) -> str:
 
 
 _SUBMIT_LABEL_RE = re.compile(
-    r"submit|send|talk\\s+to\\s+sales|contact(?:\\s+us)?|"
-    r"get\\s+in\\s+touch|request(?:\\s+a\\s+demo)?|next|お問い合わせ|送信",
+    r"submit|send|talk\s+to\s+sales|contact(?:\s+us)?|"
+    r"get\s+in\s+touch|(?:get|book|request)\s+(?:my\s+|a\s+)?demo|"
+    r"request(?:\s+a\s+demo)?|next|let['’]?s\s+talk|お問い合わせ|送信|hs[-_]?button",
     re.I,
 )
 
@@ -386,7 +394,9 @@ def _submit_control(form_context, form):
             return None
         return None
 
-    control = choose(form.locator("button[type=submit], input[type=submit], button"))
+    control = choose(
+        form.locator("button[type=submit], input[type=submit], button, a, [role=button]")
+    )
     if control is not None:
         return control
 
@@ -394,7 +404,7 @@ def _submit_control(form_context, form):
         form_id = str(form.get_attribute("id") or "").strip()
         if form_id:
             associated = form_context.locator(
-                "button[form], input[type=submit][form], [role=button][form]"
+                "button[form], input[type=submit][form], a[form], [role=button][form]"
             )
             for index in range(min(associated.count(), 80)):
                 candidate = associated.nth(index)
@@ -411,7 +421,7 @@ def _submit_control(form_context, form):
         if not form_box:
             return None
         nearby = form_context.locator(
-            "button, input[type=submit], [role=button]"
+            "button, input[type=submit], a, [role=button]"
         )
         ranked = []
         for index in range(min(nearby.count(), 160)):
@@ -512,6 +522,7 @@ class PublicContactFormExecutor:
         started = datetime.now(timezone.utc).isoformat()
         field_audit = []
         checkbox_audit = []
+        submission_attempted = False
         field_status = {key: "NOT_REQUESTED" for key in CORE_FIELDS}
         missing_required = []
         core_unfilled = []
@@ -525,6 +536,7 @@ class PublicContactFormExecutor:
                 "submitted_at": started,
                 "field_audit": field_audit,
                 "checkbox_audit": checkbox_audit,
+                "submission_attempted": submission_attempted,
                 "field_status": dict(field_status),
                 "missing_required": list(missing_required),
                 "core_unfilled": list(core_unfilled),
@@ -752,6 +764,7 @@ class PublicContactFormExecutor:
                 submit = _submit_control(form_context, form)
                 if submit is None:
                     return result_payload("FORM_FAILED", reason="SUBMIT_CONTROL_NOT_FOUND")
+                submission_attempted = True
                 try:
                     submit.click(timeout=15000)
                 except Exception as first_click_error:
