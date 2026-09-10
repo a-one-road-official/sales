@@ -91,11 +91,63 @@ def _find_existing_gmail_message_with_retry(service, *, sender: str, recipient: 
     raise RuntimeError("gmail_idempotency_lookup_unavailable") from last_error
 
 
-def lane_from(row: dict) -> str:
-    return str(row.get("lane") or row.get("Lane") or row.get("source_lane") or "").strip().upper()
+PROTECTED_FACTORY_LANES = {
+    "FACTORY",
+    "BPO",
+    "SSOT",
+    "FACTORY_SSOT",
+    "PRODUCTION_SSOT",
+    "MITTELSTAND",
+}
+
+
+def _lane_flag(lane: str) -> str:
+    normalized = "".join(
+        char if char.isalnum() else "_"
+        for char in str(lane or "").strip().upper()
+    ).strip("_")
+    if normalized in {"EC", "RETAIL", "SACRIFICE", "EC_SACRIFICE"}:
+        return "OUTREACH_SACRIFICE_SEND_ENABLED"
+    return f"OUTREACH_{normalized}_SEND_ENABLED"
+
+
+def _cfg_truthy(cfg: dict[str, str], key: str) -> bool:
+    return _truthy(cfg.get(key, os.getenv(key, "FALSE")))
+
+
+def is_outbound_lane(row: dict, cfg: dict[str, str]) -> bool:
+    allowed = {
+        item.strip().upper()
+        for item in str(
+            cfg.get(
+                "OUTREACH_ALLOWED_LANES",
+                cfg.get(
+                    "OUTREACH_SACRIFICE_LANES",
+                    "EC,RETAIL,SACRIFICE,EC_SACRIFICE",
+                ),
+            )
+            or ""
+        ).split(",")
+        if item.strip()
+    }
+    lane = lane_from(row)
+    source = str(row.get("source_type") or "").upper()
+    if lane in allowed or any(token in source for token in ("EC", "RETAIL", "SACRIFICE")):
+        return True
+    # The same executor can serve the future SSOT lane, while factory/BPO
+    # remains inert until both the lane switch and explicit approval are live.
+    return (
+        lane in PROTECTED_FACTORY_LANES
+        and _cfg_truthy(cfg, _lane_flag(lane))
+        and _cfg_truthy(cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL")
+    )
 
 
 def is_sacrificial_lane(row: dict, cfg: dict[str, str]) -> bool:
+    """Backward-compatible name for the shared lane eligibility check."""
+    return is_outbound_lane(row, cfg)
+
+
     allowed = {
         item.strip().upper()
         for item in str(cfg.get("OUTREACH_SACRIFICE_LANES", "EC,RETAIL,SACRIFICE,EC_SACRIFICE") or "").split(",")
@@ -128,7 +180,7 @@ def prompt_freshness_preflight(draft: dict, drive, prompt_title: str = "") -> di
 
 
 def semantic_email_preflight(row: dict, cfg: dict[str, str]) -> dict:
-    """Minimal hard preflight for the isolated sacrifice lane."""
+    """Shared hard preflight for every outbound lane."""
     missing = [key for key in CRITICAL_FIELDS if not str(row.get(key) or "").strip()]
     errors = []
     recipient = str(row.get("recipient") or "").strip()
@@ -139,7 +191,7 @@ def semantic_email_preflight(row: dict, cfg: dict[str, str]) -> dict:
         errors.append("BODY_EMPTY")
     if "A-one A-one" in body or "A-one A-one" in str(row.get("recipient_name") or ""):
         errors.append("IDENTITY_MAPPING_CORRUPT")
-    if not is_sacrificial_lane(row, cfg):
+    if not is_outbound_lane(row, cfg):
         errors.append("NON_SACRIFICIAL_LANE")
     return {
         "ok": not missing and not errors,
@@ -149,21 +201,40 @@ def semantic_email_preflight(row: dict, cfg: dict[str, str]) -> dict:
     }
 
 
-class SacrificialEmailExecutor:
-    """Actual email execution for the isolated EC/retail canary."""
+class OutboundEmailExecutor:
+    """Shared email executor used by EC sacrifice and future SSOT lanes."""
 
-    def __init__(self, sheets=None, drive=None, prompt_title: str = ""):
+    def __init__(
+        self,
+        sheets=None,
+        drive=None,
+        prompt_title: str = "",
+        lane: str = "EC_SACRIFICE",
+    ):
         self.sheets = sheets
         self.drive = drive
         self.prompt_title = str(prompt_title or "").strip()
+        self.lane = lane_from({"lane": lane}) or "EC_SACRIFICE"
         self._sent_keys: set[str] = set()
 
+    def _send_enabled(self, draft: dict, cfg: dict[str, str]) -> bool:
+        lane = lane_from(draft) or self.lane
+        flag = _lane_flag(lane)
+        if not _cfg_truthy(cfg, flag):
+            return False
+        if lane in PROTECTED_FACTORY_LANES:
+            return _cfg_truthy(cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL")
+        return True
+
     def execute(self, draft: dict, cfg: dict[str, str]) -> dict:
-        # One deployment-level switch controls this lane. Per-request approval,
-        # broad external-write flags and factory-send interlocks are intentionally
-        # outside this isolated executor.
-        if not _truthy(cfg.get("OUTREACH_SACRIFICE_SEND_ENABLED")):
-            return {"status": "BLOCKED", "reason": "sacrificial_send_disabled", "recipient": str(draft.get("recipient") or "").strip()}
+        lane = lane_from(draft) or self.lane
+        if not self._send_enabled(draft, cfg):
+            return {
+                "status": "BLOCKED",
+                "reason": f"{_lane_flag(lane).lower()}_disabled",
+                "lane": lane,
+                "recipient": str(draft.get("recipient") or "").strip(),
+            }
 
         preflight = semantic_email_preflight(draft, cfg)
         if not preflight["ok"]:
@@ -173,9 +244,9 @@ class SacrificialEmailExecutor:
         if not prompt_check.get("ok"):
             return {"status": prompt_check.get("status", "STALE_PROMPT"), "prompt_preflight": prompt_check}
 
-        key = f"sacrificial:{draft.get('draft_id','')}:{preflight['message_hash']}"
+        key = f"outbound:{lane.lower()}:{draft.get('draft_id','')}:{preflight['message_hash']}"
         if key in self._sent_keys:
-            return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "recipient": str(draft.get("recipient") or "").strip()}
+            return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "lane": lane, "recipient": str(draft.get("recipient") or "").strip()}
         sheet_idempotency_error = ""
         try:
             existing = _sheet_rows_with_retry(self.sheets)
@@ -194,12 +265,13 @@ class SacrificialEmailExecutor:
                 return {
                     "status": "DUPLICATE_BLOCKED",
                     "idempotency_key": key,
+                    "lane": lane,
                     "recipient": str(draft.get("recipient") or "").strip(),
                     "existing_status": row_status,
                     "existing_message_id": row.get("message_id", ""),
                 }
         if any(str(row.get("idempotency_key") or "") == key for row in existing):
-            return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "recipient": str(draft.get("recipient") or "").strip(), "existing_status": "SHEET_RECORD"}
+            return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "lane": lane, "recipient": str(draft.get("recipient") or "").strip(), "existing_status": "SHEET_RECORD"}
 
         sender = os.getenv("LEAD_FACTORY_GMAIL_IMPERSONATE", "admin@a1-road.com").strip()
         creds, _ = default(scopes=["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/gmail.readonly"])
@@ -220,6 +292,7 @@ class SacrificialEmailExecutor:
                 return {
                     "status": "IDEMPOTENCY_LOOKUP_FAILED",
                     "idempotency_key": key,
+                    "lane": lane,
                     "recipient": str(draft.get("recipient") or "").strip(),
                     "reason": gmail_idempotency_error,
                 }
@@ -228,6 +301,7 @@ class SacrificialEmailExecutor:
             return {
                 "status": "DUPLICATE_BLOCKED",
                 "idempotency_key": key,
+                "lane": lane,
                 "recipient": str(draft.get("recipient") or "").strip(),
                 "existing_message_id": existing_message_id,
             }
@@ -269,6 +343,7 @@ class SacrificialEmailExecutor:
             "status": "SENT",
             "message_id": message_id,
             "idempotency_key": key,
+            "lane": lane,
             "recipient": str(draft.get("recipient") or "").strip(),
             "preflight": preflight,
             "sender": sender,
@@ -279,3 +354,10 @@ class SacrificialEmailExecutor:
         if audit_log_error:
             response["audit_log_error"] = audit_log_error
         return response
+
+
+class SacrificialEmailExecutor(OutboundEmailExecutor):
+    """Compatibility wrapper; it uses the shared outbound executor."""
+
+    def __init__(self, sheets=None, drive=None, prompt_title: str = "", lane: str = "EC_SACRIFICE"):
+        super().__init__(sheets=sheets, drive=drive, prompt_title=prompt_title, lane=lane)
