@@ -481,9 +481,43 @@ class OutboundEmailExecutor:
         message["subject"] = str(draft["subject"]).strip()
         message["X-Aone-Idempotency-Key"] = key
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
-        # Use the delegated mailbox explicitly. Some Workspace tenants reject
-        # userId="me" for service-account delegated sends with a 400 precondition error.
-        result = service.users().messages().send(userId=sender, body={"raw": raw}).execute()
+        # Prefer the explicit delegated mailbox, but keep the same code path
+        # usable when the tenant rejects that userId with a Gmail precondition
+        # error. The idempotency re-check must happen before retrying because a
+        # transport/API error can arrive after Gmail has accepted the message.
+        send_user_id = sender
+        try:
+            result = service.users().messages().send(
+                userId=send_user_id,
+                body={"raw": raw},
+            ).execute()
+        except Exception as exc:
+            if "Precondition check failed" not in str(exc):
+                raise
+            time.sleep(1)
+            recovered_message_id = _find_existing_gmail_message_with_retry(
+                service,
+                sender=sender,
+                recipient=str(draft["recipient"]).strip(),
+                idempotency_key=key,
+            )
+            if recovered_message_id:
+                return {
+                    "status": "DUPLICATE_BLOCKED",
+                    "idempotency_key": key,
+                    "lane": lane,
+                    "recipient": str(draft.get("recipient") or "").strip(),
+                    "existing_message_id": recovered_message_id,
+                    "reason": "send_precondition_recovered",
+                }
+            # The notifier path already uses userId="me" with the same
+            # delegated credentials. Reuse that proven API form for this
+            # retry, still under the exact same idempotency key.
+            send_user_id = "me"
+            result = service.users().messages().send(
+                userId=send_user_id,
+                body={"raw": raw},
+            ).execute()
         now = datetime.now(timezone.utc).isoformat()
         self._sent_keys.add(key)
         message_id = str(result.get("id") or "").strip()
