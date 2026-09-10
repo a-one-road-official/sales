@@ -43,6 +43,18 @@ def _enabled_bpo_config():
     }
 
 
+def _enabled_sales_gtm_config():
+    return {
+        "LEAD_FACTORY_LIST_ONLY_LOCK": "FALSE",
+        "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE": "TRUE",
+        "LEAD_FACTORY_SEND_MODE": "ENABLED",
+        "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL": "TRUE",
+        "OUTREACH_ALLOWED_LANES": "SALES_GTM",
+        "OUTREACH_SALES_GTM_SEND_ENABLED": "TRUE",
+        "OUTREACH_CRITICAL_ERROR_RESETS": "TRUE",
+    }
+
+
 def _result(batch_number):
     return {
         "lane": "BPO",
@@ -60,6 +72,14 @@ def test_bpo_gate_is_explicit_and_other_lanes_are_closed():
     assert outbound_lane_send_enabled("BPO", cfg)
     assert not outbound_lane_send_enabled("SSOT", cfg)
     assert not outbound_lane_send_enabled("EC_SACRIFICE", cfg)
+
+
+def test_sales_gtm_gate_is_explicit_and_factory_lanes_are_closed():
+    cfg = _enabled_sales_gtm_config()
+    assert outbound_lane_send_enabled("SALES_GTM", cfg)
+    assert not outbound_lane_send_enabled("BPO", cfg)
+    assert not outbound_lane_send_enabled("FACTORY", cfg)
+    assert not outbound_lane_send_enabled("SSOT", cfg)
 
 
 def test_strategy_adjustment_is_bounded_and_failure_driven():
@@ -131,3 +151,54 @@ def test_autopilot_runs_multiple_batches_and_checkpoints_state():
     assert any(row.get("record_type") == "OUTREACH_AUTOPILOT_BATCH" for row in sheets.rows)
     assert sum(row.get("record_type") == "OUTREACH_AUTOPILOT_JOB" for row in sheets.rows) >= 3
     assert any(row.get("stability_status") == "BATCH_PASS" for row in sheets.rows)
+
+
+
+def test_sales_gtm_autopilot_uses_the_same_ten_item_loop():
+    sheets = FakeSheets()
+    factory = FakeFactory(sheets)
+    calls = []
+
+    def run_batch(payload):
+        calls.append(dict(payload))
+        return {
+            "lane": "SALES_GTM",
+            "attempted": 10,
+            "success_count": 6,
+            "results": [
+                {"status": "SENT" if index < 6 else "FAILED", "stage": "test"}
+                for index in range(10)
+            ],
+        }
+
+    autopilot = BPOAutopilot(
+        factory_getter=lambda: factory,
+        config_getter=_enabled_sales_gtm_config,
+        batch_runner=run_batch,
+        lane="SALES_GTM",
+    )
+    accepted = autopilot.start({
+        "job_id": "test-sales-gtm-autopilot",
+        "target_successes": 10,
+        "max_attempts": 20,
+        "stable_batches_required": 2,
+        "minimum_successes": 5,
+    })
+    assert accepted["accepted"] is True
+    thread = autopilot._thread
+    assert thread is not None
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+
+    status = autopilot.status("test-sales-gtm-autopilot")
+    assert status["status"] == "COMPLETED_TARGET"
+    assert status["total_attempts"] == 20
+    assert status["total_successes"] == 12
+    assert len(calls) == 2
+    assert all(call["lane"] == "SALES_GTM" for call in calls)
+    assert all(call["limit"] == 10 for call in calls)
+    assert any(
+        row.get("record_type") == "OUTREACH_AUTOPILOT_BATCH"
+        and row.get("lane") == "SALES_GTM"
+        for row in sheets.rows
+    )
