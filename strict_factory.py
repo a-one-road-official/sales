@@ -540,9 +540,9 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
         return {"lead_id": lead_id, "verification": research.get("verification", ""), **result}
 
 
-    def source_tick(self, run_id: str | None = None, lane: str | None = None) -> dict:
+    def source_tick(self, run_id: str | None = None, lane: str | None = None, limit: int | None = None) -> dict:
         """Run sources and immediately activate tested adapters through Cloud smoke."""
-        result = super().source_tick(run_id=run_id, lane=lane)
+        result = super().source_tick(run_id=run_id, lane=lane, limit=limit)
         for item in result.get("results", []):
             if item.get("status") not in {"READY_FOR_CLOUD_SMOKE", "REPAIR_READY_FOR_CLOUD_SMOKE"}:
                 continue
