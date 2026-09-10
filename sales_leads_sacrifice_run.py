@@ -454,25 +454,34 @@ def run_ten_sacrifice_batch(
                         "form_url": form_url,
                         "idempotency_key": form_key,
                     }
-                    form_prompt_check = prompt_freshness_preflight({**form_contact, "prompt_hash": prompt_meta.get("prompt_hash", "")}, drive, prompt_title)
+                    form_prompt_check = prompt_freshness_preflight(
+                        {**form_contact, "prompt_hash": prompt_meta.get("prompt_hash", "")},
+                        drive,
+                        prompt_title,
+                    )
                     if not form_prompt_check.get("ok"):
-                        result.update(status=form_prompt_check.get("status", "STALE_PROMPT"), stage="PROMPT_PREFLIGHT", error_message=form_prompt_check.get("reason", "prompt_not_current"))
-                    elif execute_external:
-                        from form_execution import PublicContactFormExecutor
-                        form_result = PublicContactFormExecutor(sheets=sheets).execute(
-                            form_url=form_url,
-                            website=str(site.get("official_website") or site_url),
-                            message=draft_body,
-                            subject=draft_subject,
-                            company_name=str(candidate.get("company_name") or ""),
-                            idempotency_key=form_key,
-                            draft_id=f"{run_id}:{candidate.get('source_row', '')}",
-                            source_row=str(candidate.get("source_row") or ""),
+                        result.update(
+                            status=form_prompt_check.get("status", "STALE_PROMPT"),
+                            stage="PROMPT_PREFLIGHT",
+                            error_message=form_prompt_check.get("reason", "prompt_not_current"),
                         )
+                    else:
+                        if execute_external:
+                            from form_execution import PublicContactFormExecutor
+                            form_result = PublicContactFormExecutor(sheets=sheets).execute(
+                                form_url=form_url,
+                                website=str(site.get("official_website") or site_url),
+                                message=draft_body,
+                                subject=draft_subject,
+                                company_name=str(candidate.get("company_name") or ""),
+                                idempotency_key=form_key,
+                                draft_id=f"{run_id}:{candidate.get('source_row', '')}",
+                                source_row=str(candidate.get("source_row") or ""),
+                            )
+                        result["external_action"] = form_result.get("status", "FORM_FAILED")
+                        result.update(status=form_result.get("status", "FORM_FAILED"), stage="FORM_EXECUTION")
                     result["form_execution"] = form_result
                     result["audit"]["form_execution"] = form_result
-                    result["external_action"] = form_result.get("status", "FORM_FAILED")
-                    result.update(status=form_result.get("status", "FORM_FAILED"), stage="FORM_EXECUTION")
                 elif not email:
                     result.update(
                         status="FAILED",
@@ -521,11 +530,16 @@ def run_ten_sacrifice_batch(
                         message_hash=result["message_hash"],
                     )
                     row["prompt_hash"] = prompt_meta.get("prompt_hash", "")
+                    row["prompt_hash"] = prompt_meta.get("prompt_hash", "")
                     result["preflight"] = semantic_email_preflight(row, cfg)
                     result["prompt_preflight"] = prompt_freshness_preflight(row, drive, prompt_title)
                     if not result["prompt_preflight"].get("ok"):
-                        result.update(status=result["prompt_preflight"].get("status", "STALE_PROMPT"), stage="PROMPT_PREFLIGHT", error_message=result["prompt_preflight"].get("reason", "prompt_not_current"))
-                    if not result["preflight"].get("ok"):
+                        result.update(
+                            status=result["prompt_preflight"].get("status", "STALE_PROMPT"),
+                            stage="PROMPT_PREFLIGHT",
+                            error_message=result["prompt_preflight"].get("reason", "prompt_not_current"),
+                        )
+                    elif not result["preflight"].get("ok"):
                         result.update(
                             status="FAILED",
                             stage="DRAFT_PREFLIGHT",
@@ -541,7 +555,11 @@ def run_ten_sacrifice_batch(
                         execution = executor.execute(row, cfg)
                         if execution.get("status") == "STALE_PROMPT":
                             draft, prompt_meta = _draft_from_live_prompt(llm, drive, cfg, context, contact)
-                            row.update(subject=draft["subject"], body=draft["body"], prompt_hash=prompt_meta.get("prompt_hash", ""))
+                            row.update(
+                                subject=draft["subject"],
+                                body=draft["body"],
+                                prompt_hash=prompt_meta.get("prompt_hash", ""),
+                            )
                             result["draft"] = draft
                             result["prompt"] = {
                                 "prompt_doc_title": prompt_meta.get("prompt_doc_title", prompt_title),
