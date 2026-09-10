@@ -172,3 +172,4 @@ def test_failure_codes_are_stable_for_operational_reporting():
     assert failure_code("no_channel_found") == "EMAIL_NOT_FOUND"
     assert failure_code("SandboxError:cloud_run_sandbox_launcher_not_available") == "SANDBOX_UNAVAILABLE"
     assert failure_code("drive_storage_fallback:HttpError:Service Accounts do not have storage quota") == "DRIVE_STORAGE_UNAVAILABLE"
+    assert failure_code("HttpError: Range (LeadFactory_Scrapers!Q1) exceeds grid limits") == "SHEETS_SCHEMA"
