@@ -70,6 +70,25 @@ def _find_existing_gmail_message(service, *, sender: str, recipient: str, idempo
         if not fallback:
             fallback = message_id
     return fallback
+def _find_existing_gmail_message_with_retry(service, *, sender: str, recipient: str, idempotency_key: str) -> str:
+    last_error = None
+    for attempt in range(4):
+        try:
+            return _find_existing_gmail_message(
+                service,
+                sender=sender,
+                recipient=recipient,
+                idempotency_key=idempotency_key,
+            )
+        except Exception as exc:
+            last_error = exc
+            status = getattr(getattr(exc, "resp", None), "status", None)
+            if status not in {429, 500, 502, 503, 504} or attempt == 3:
+                raise
+            time.sleep(min(8.0, 2 ** attempt))
+    raise RuntimeError("gmail_idempotency_lookup_unavailable") from last_error
+
+
 def lane_from(row: dict) -> str:
     return str(row.get("lane") or row.get("Lane") or row.get("source_lane") or "").strip().upper()
 
@@ -152,7 +171,7 @@ class SacrificialEmailExecutor:
             creds = creds.with_subject(sender)
         service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         try:
-            existing_message_id = _find_existing_gmail_message(
+            existing_message_id = _find_existing_gmail_message_with_retry(
                 service, sender=sender, recipient=str(draft["recipient"]).strip(), idempotency_key=key
             )
         except Exception as exc:
@@ -188,6 +207,7 @@ class SacrificialEmailExecutor:
                         "status": "SENT",
                         "semantic_success": "PENDING_DELIVERY",
                         "message_id": message_id,
+                        "recipient": draft.get("recipient", ""),
                         "executed_at": now,
                     })
                     break

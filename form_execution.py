@@ -501,6 +501,7 @@ class PublicContactFormExecutor:
                     "status": "FORM_SENT",
                     "semantic_success": "FORM_CONFIRMED",
                     "message_id": "",
+                    "recipient": "PUBLIC_CONTACT_FORM",
                     "form_url": final_url,
                     "confirmation": confirmation,
                     "executed_at": datetime.now(timezone.utc).isoformat(),
