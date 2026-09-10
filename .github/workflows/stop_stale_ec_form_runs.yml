@@ -23,9 +23,18 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Delete only stale isolated audit services
+      - name: Delete all isolated EC audit services
         run: |
           set -euo pipefail
-          for SERVICE in aone-sacrifice-34489893563 aone-sacrifice-34491032094; do
-            gcloud run services delete "${SERVICE}"               --region="${REGION}"               --project="${PROJECT}"               --quiet || true
+          mapfile -t SERVICES < <(gcloud run services list \
+            --region="${REGION}" \
+            --project="${PROJECT}" \
+            --filter='metadata.name~^aone-sacrifice-' \
+            --format='value(metadata.name)')
+          for SERVICE in "${SERVICES[@]}"; do
+            [ -n "${SERVICE}" ] || continue
+            gcloud run services delete "${SERVICE}" \
+              --region="${REGION}" \
+              --project="${PROJECT}" \
+              --quiet || true
           done
