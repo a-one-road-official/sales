@@ -44,12 +44,31 @@ class LLM:
 
     @staticmethod
     def _json(text: str):
-        text = text.strip()
+        """Parse the first complete JSON value from a model response.
+
+        Gemini can append a short explanation or a closing code fence even when
+        the prompt requests JSON only. Decode one balanced value and ignore
+        trailing model text so stale-draft regeneration remains retryable.
+        """
+        text = str(text or "").strip()
         if text.startswith("```"):
             text = re.sub(r"^```(?:json|python)?\s*", "", text)
             text = re.sub(r"\s*```$", "", text)
-        start = min([i for i in (text.find("["), text.find("{")) if i >= 0], default=0)
-        return json.loads(text[start:])
+        decoder = json.JSONDecoder()
+        starts = sorted(
+            index for index in (text.find("["), text.find("{"))
+            if index >= 0
+        )
+        last_error = None
+        for start in starts:
+            try:
+                value, _ = decoder.raw_decode(text[start:])
+                return value
+            except json.JSONDecodeError as exc:
+                last_error = exc
+        if last_error is not None:
+            raise last_error
+        raise json.JSONDecodeError("No JSON value found", text, 0)
 
     def discover_growth_sources(self, strategy: str = "EXHIBITION", limit: int = 20) -> list[dict]:
         strategy = str(strategy or "EXHIBITION").upper()

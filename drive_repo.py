@@ -8,15 +8,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
 
-class PromptSSOTError(RuntimeError):
-    """Fail-closed error for an unavailable or ambiguous outreach Prompt SSOT."""
-
-    def __init__(self, code: str, detail: str = ""):
-        self.code = str(code).strip() or "PROMPT_SSOT_ERROR"
-        self.detail = str(detail).strip()
-        message = self.code if not self.detail else f"{self.code}:{self.detail}"
-        super().__init__(message)
-
+from prompt_ssot import PromptSSOTError
 
 class DriveRepo:
     """Stores exactly one current adapter file per source.

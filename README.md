@@ -35,6 +35,7 @@ Every 10-company BPO batch must return `attempted=10` and at least five successe
   - Each draft stores `prompt_doc_title`, `prompt_doc_id`, `prompt_modified_time`, and SHA-256 `prompt_hash`.
   - Unsent drafts whose hash differs from the live Prompt are marked `STALE_PROMPT` and automatically regenerated.
   - Send preflight performs a second live-read hash comparison; mismatches block sending and return to regeneration.
+  - Production invokes /prep/tick every five minutes for internal draft/revision processing; the normal deploy workflow keeps external sends disabled.
 - Runtime switch/state: Sheet `Config`
 
 `target_screening_gate` is loaded live for every company. AI/web search may collect factual evidence; Python applies the Doc's G1-G6 rules deterministically. The runtime owns no independent eligibility criteria.

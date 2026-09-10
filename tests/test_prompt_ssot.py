@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from llm import LLM
+
 from drive_repo import DriveRepo, PromptSSOTError
 from outreach_execution import prompt_freshness_preflight
 from prompt_ssot import (
@@ -143,3 +145,8 @@ def test_provenance_contains_all_required_trace_fields():
         "prompt_modified_time",
         "prompt_hash",
     }
+
+
+def test_json_parser_accepts_complete_value_with_trailing_model_text():
+    response = "Here is the requested JSON:\n```json\n{\"subject\":\"Subject\",\"body\":\"Body\"}\n```\nI hope this helps."
+    assert LLM._json(response) == {"subject": "Subject", "body": "Body"}
