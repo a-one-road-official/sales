@@ -114,7 +114,7 @@ async def internal_runtime_guard(request: Request, call_next):
     `/healthz` is intentionally shallow and public. Every stateful/research endpoint,
     including deep health, requires the per-deployment internal token used by
     Scheduler and self-dispatched workers. Customer-facing execution is confined
-    to the isolated EC_SACRIFICE lane.
+    to the explicitly approved BPO or legacy EC_SACRIFICE lane.
     """
     if request.method == "GET" and request.url.path == "/healthz":
         return await call_next(request)
@@ -599,6 +599,7 @@ _OUTBOUND_RUNTIME_KEYS = (
     "OUTREACH_ALLOWED_LANES",
     "OUTREACH_SACRIFICE_LANES",
     "OUTREACH_SACRIFICE_SEND_ENABLED",
+    "OUTREACH_BPO_SEND_ENABLED",
     "OUTREACH_FACTORY_SEND_ENABLED",
     "OUTREACH_SSOT_SEND_ENABLED",
     "OUTREACH_PROMPT_DOC_TITLE",
@@ -630,21 +631,64 @@ def _outbound_runtime_config(lf: LeadFactory) -> dict[str, str]:
     return cfg
 
 
-def _sacrifice_send_enabled() -> bool:
-    """List-only production invariant: customer-facing sends are impossible."""
-    return False
+def _outbound_flag(lane: str) -> str:
+    normalized = lane_from({"lane": lane}) or "BPO"
+    if normalized in {"EC", "RETAIL", "SACRIFICE", "EC_SACRIFICE"}:
+        return "OUTREACH_SACRIFICE_SEND_ENABLED"
+    return f"OUTREACH_{normalized}_SEND_ENABLED"
+
+
+def _outbound_send_enabled(lane: str, cfg: dict[str, str] | None = None) -> bool:
+    values = cfg if cfg is not None else os.environ
+    def value(key: str, default: str = "FALSE") -> object:
+        return values.get(key, os.getenv(key, default))
+    return (
+        _config_truthy(value("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"))
+        and str(value("LEAD_FACTORY_SEND_MODE", "DISABLED")).strip().upper() == "ENABLED"
+        and _config_truthy(value(_outbound_flag(lane)))
+        and _config_truthy(value("LEAD_FACTORY_EXPLICIT_SEND_APPROVAL"))
+    )
+
+
+def _sacrifice_send_enabled(
+    lane: str = "BPO",
+    cfg: dict[str, str] | None = None,
+) -> bool:
+    """Return whether the explicitly approved outbound test lane may send."""
+    return _outbound_send_enabled(lane, cfg)
+
+
+def _outbound_batch_lane(payload: dict | None) -> str:
+    raw = str(
+        (payload or {}).get("lane")
+        or (payload or {}).get("outreach_lane")
+        or (payload or {}).get("source_lane")
+        or ""
+    ).strip()
+    lane = lane_from({"lane": raw}) if raw else "BPO"
+    if lane not in {"BPO", "EC_SACRIFICE"}:
+        raise HTTPException(status_code=400, detail="unsupported_sacrifice_lane")
+    return lane
 
 
 def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict:
     limit = _sacrifice_limit(payload)
+    lane = _outbound_batch_lane(payload)
     lf = get_factory()
     cfg = _outbound_runtime_config(lf)
 
-    # Only the isolated EC/retail runtime may enable this lane.
-    execute_external = _sacrifice_send_enabled() and not bool((payload or {}).get("dry_run", False))
-    cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = "TRUE" if execute_external else "FALSE"
-    cfg["OUTREACH_SACRIFICE_LANES"] = cfg.get(
-        "OUTREACH_SACRIFICE_LANES", "EC,RETAIL,SACRIFICE,EC_SACRIFICE"
+    # The current approved lane is BPO; EC_SACRIFICE remains explicit-only for
+    # historical replay. Both lanes use the same executor and audit path.
+    execute_external = _sacrifice_send_enabled(lane, cfg) and not bool(
+        (payload or {}).get("dry_run", False)
+    )
+    cfg["OUTREACH_ALLOWED_LANES"] = lane
+    cfg["OUTREACH_SACRIFICE_LANES"] = lane
+    cfg["OUTREACH_BPO_SEND_ENABLED"] = (
+        "TRUE" if lane == "BPO" and execute_external else "FALSE"
+    )
+    cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = (
+        "TRUE" if lane == "EC_SACRIFICE" and execute_external else "FALSE"
     )
     batch_id = str((payload or {}).get("batch_id") or "").strip() or None
     raw_batch_slot = (payload or {}).get("batch_slot")
@@ -660,7 +704,7 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
         lf.sheets,
         lf.drive,
         cfg.get("OUTREACH_PROMPT_DOC_TITLE", "outreach_prompt_production_v1"),
-        lane="EC_SACRIFICE",
+        lane=lane,
     ) if execute_external else None
     with _sacrifice_lock:
         result = run_ten_sacrifice_batch(
@@ -672,6 +716,7 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
             execute_external=execute_external,
             batch_id=batch_id,
             batch_slot=batch_slot,
+            lane=lane,
         )
     if execute_external:
         try:
@@ -683,7 +728,7 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
                     if value
                 )
             result["stability"] = SacrificeStability(lf.sheets).record(
-                lane="EC_SACRIFICE",
+                lane=lane,
                 attempted=int(result.get("attempted", 0) or 0),
                 successes=int(result.get("success_count", 0) or 0),
                 critical_errors=critical_errors,
@@ -696,12 +741,13 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
             result["stability_record_error"] = f"{type(exc).__name__}:{exc}"
     result["trigger"] = "SCHEDULER" if scheduled else "DIRECT"
     result["send_enabled"] = execute_external
+    result["lane"] = lane
     return result
 
 
 @app.post("/outreach/execute")
 def execute_outbound(payload: dict):
-    """Execute one prepared draft through the same lane-aware sender used by EC."""
+    """Execute one prepared draft through the shared lane-aware sender."""
     try:
         raw_lane = str(
             payload.get("lane")
@@ -739,9 +785,22 @@ def execute_outbound(payload: dict):
         _fail(exc)
 
 
+@app.post("/outreach/bpo-run")
+def bpo_run(payload: dict):
+    """Run one explicitly approved BPO batch through the shared sender."""
+    try:
+        request_payload = dict(payload or {})
+        request_payload["lane"] = "BPO"
+        return _run_sales_leads_sacrifice(request_payload, scheduled=False)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _fail(exc)
+
+
 @app.post("/outreach/execute-sacrificial")
 def execute_sacrificial(payload: dict):
-    """Compatibility alias for the current isolated sales_leads sacrifice runner."""
+    """Compatibility alias for the isolated outbound batch runner."""
     try:
         return _run_sales_leads_sacrifice(payload, scheduled=False)
     except HTTPException:
@@ -752,7 +811,7 @@ def execute_sacrificial(payload: dict):
 
 @app.post("/outreach/sacrificial-tick")
 def sacrificial_tick(payload: dict):
-    """Compatibility alias for the Scheduler sacrifice lane."""
+    """Compatibility alias for the Scheduler outbound batch lane."""
     try:
         return _run_sales_leads_sacrifice(payload, scheduled=True)
     except HTTPException:
@@ -763,7 +822,7 @@ def sacrificial_tick(payload: dict):
 
 @app.post("/outreach/sales-leads-sacrifice-tick")
 def sales_leads_sacrifice_tick(payload: dict):
-    """Scheduler entrypoint for the isolated EC/retail sacrifice lane."""
+    """Scheduler entrypoint for the isolated outbound batch lane."""
     try:
         return _run_sales_leads_sacrifice(payload, scheduled=True)
     except HTTPException:
@@ -780,7 +839,7 @@ def sales_leads_sacrifice_failure_analysis(payload: dict):
         raise HTTPException(status_code=400, detail="maximum_ten_results")
     return {
         "source": "sales_leads",
-        "lane": "EC_SACRIFICE",
+        "lane": _outbound_batch_lane(payload),
         "production_ssot_touched": False,
         "failure_analysis": classify_batch(results),
         "gate": batch_gate(results),
@@ -789,7 +848,7 @@ def sales_leads_sacrifice_failure_analysis(payload: dict):
 
 @app.post("/outreach/sales-leads-sacrifice-run")
 def sales_leads_sacrifice_run(payload: dict):
-    """Run one bounded EC/retail sacrifice batch."""
+    """Run one bounded BPO (or explicitly requested legacy EC) batch."""
     try:
         return _run_sales_leads_sacrifice(payload, scheduled=False)
     except HTTPException:
