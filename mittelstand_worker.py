@@ -5,6 +5,8 @@ import json
 import uuid
 from datetime import datetime, timezone
 
+from observability import failure_code, record_event
+
 
 class MittelstandWorker:
     """One-company mature-industrial screening with a fresh LLM context per call.
@@ -170,6 +172,17 @@ class MittelstandWorker:
                 gate_version=gate_version,
                 error="",
             )
+        record_event(
+            self.sheets,
+            event_type="PIPELINE_STAGE",
+            reason_code="MITTELSTAND_GATE_COMPLETED",
+            reason_note=(
+                f"gate_version={gate_version};M1={m1};M2={m2};M3={m3};"
+                f"missing_evidence={row['missing_evidence'][:1000]}"
+            ),
+            company_name=original_company, domain=str(row.get("domain") or ""),
+            source_id=lead_id, status=final_result,
+        )
         return row
 
     def process_pending(self, limit: int = 20) -> dict:
@@ -180,18 +193,28 @@ class MittelstandWorker:
                 results.append(self.evaluate_and_persist(company))
             except Exception as exc:
                 lead_id = str(company.get("lead_id", ""))
+                reason = f"{type(exc).__name__}:{exc}"
                 if lead_id:
                     self.sheets.update_raw_screening(
                         lead_id=lead_id,
                         screening_status="ERROR",
                         gate_version="",
-                        error=f"{type(exc).__name__}:{exc}"[:5000],
+                        error=reason[:5000],
                     )
+                record_event(
+                    self.sheets,
+                    event_type="PIPELINE_FAILURE",
+                    reason_code=failure_code(reason),
+                    reason_note=f"stage=MITTELSTAND_GATE;error={reason}",
+                    company_name=str(company.get("company_name") or ""),
+                    domain=str(company.get("domain") or ""),
+                    source_id=lead_id, status="ERROR",
+                )
                 results.append({
                     "lead_id": lead_id,
                     "company_name": company.get("company_name", ""),
                     "final_result": "ERROR",
-                    "error": f"{type(exc).__name__}:{exc}",
+                    "error": reason,
                 })
         return {
             "requested": limit,
