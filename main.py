@@ -627,6 +627,15 @@ _OUTBOUND_RUNTIME_KEYS = (
     "OUTREACH_FACTORY_SEND_ENABLED",
     "OUTREACH_SSOT_SEND_ENABLED",
     "OUTREACH_PROMPT_DOC_TITLE",
+    "OUTREACH_AUTOPILOT_ENABLED",
+    "OUTREACH_SITE_MAX_PAGES",
+    "OUTREACH_AUTOFIX_GENERATION",
+    "OUTREACH_AUTOPILOT_RETRY_DELAY_SECONDS",
+    "OUTREACH_BPO_TARGET_SUCCESS",
+    "OUTREACH_BPO_MAX_ATTEMPTS",
+    "OUTREACH_STABLE_BATCHES_REQUIRED",
+    "OUTREACH_STABLE_BATCH_MIN_SUCCESS",
+    "OUTREACH_CRITICAL_ERROR_RESETS",
 )
 
 _SUPPORTED_OUTBOUND_LANES = {
@@ -700,6 +709,20 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
     lane = _outbound_batch_lane(payload)
     lf = get_factory()
     cfg = _outbound_runtime_config(lf)
+
+    # The worker owns the feedback loop. Carry only bounded, machine-generated
+    # adjustments into the same runner used by the direct BPO endpoint.
+    if (bool((payload or {}).get("_autopilot_managed", False)):
+        policy = dict((payload or {}).get("autopilot_policy") or {})
+        if "site_max_pages" in policy:
+            try:
+                cfg["OUTREACH_SITE_MAX_PAGES"] = str(max(1, min(8, int(policy["site_max_pages"]))))
+            except (TypeError, ValueError):
+                pass
+        if "autofix_generation" in policy:
+            cfg["OUTREACH_AUTOFIX_GENERATION"] = (
+                "TRUE" if _config_truthy(policy["autofix_generation"]) else "FALSE"
+            )
 
     # The current approved lane is BPO; EC_SACRIFICE remains explicit-only for
     # historical replay. Both lanes use the same executor and audit path.
