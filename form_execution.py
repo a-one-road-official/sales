@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
+import time
 
 from playwright.sync_api import sync_playwright
 
@@ -199,10 +200,18 @@ class PublicContactFormExecutor:
     ) -> dict | None:
         if self.sheets is None:
             return None
-        try:
-            rows = self.sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
-        except Exception as exc:
-            raise RuntimeError("form_idempotency_lookup_unavailable") from exc
+        rows = None
+        last_error = None
+        for attempt in range(5):
+            try:
+                rows = self.sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt < 4:
+                    time.sleep(2 * (attempt + 1))
+        if rows is None:
+            raise RuntimeError("form_idempotency_lookup_unavailable") from last_error
         for row in rows:
             if str(row.get("idempotency_key") or "") == idempotency_key:
                 return row

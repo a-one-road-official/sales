@@ -105,6 +105,11 @@ def _attempted_source_rows(sheets) -> set[str]:
     for row in rows:
         if "SACRIFICE" not in str(row.get("lane") or "").upper():
             continue
+        # Failed and unconfirmed attempts are retryable. Only a confirmed send,
+        # confirmed form submission, or an explicit duplicate block consumes a row.
+        status = str(row.get("status") or "").strip().upper()
+        if status not in {"SENT", "FORM_SENT", "DUPLICATE_BLOCKED"}:
+            continue
         source_row = str(row.get("source_row") or "").strip()
         if source_row:
             consumed.add(source_row)
@@ -324,7 +329,11 @@ def run_ten_sacrifice_batch(
                 result["domain_resolution"] = resolved
                 site_url = str(resolved.get("official_website") or "").strip()
 
-            site = inspect_official_site(site_url, max_pages=3)
+            site = inspect_official_site(
+                site_url,
+                max_pages=3,
+                expected_company=str(candidate.get("company_name") or "").strip(),
+            )
             result["website_research"] = site
             context["verified_site"] = site
             result["audit"].update(

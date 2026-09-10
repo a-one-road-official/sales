@@ -209,9 +209,10 @@ class SacrificialEmailExecutor:
         message["from"] = sender
         message["subject"] = str(draft["subject"]).strip()
         message["X-Aone-Idempotency-Key"] = key
-        message["Message-ID"] = f"<{hashlib.sha256(key.encode('utf-8')).hexdigest()}@a1-road.com>"
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
-        result = service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        # Use the delegated mailbox explicitly. Some Workspace tenants reject
+        # userId="me" for service-account delegated sends with a 400 precondition error.
+        result = service.users().messages().send(userId=sender, body={"raw": raw}).execute()
         now = datetime.now(timezone.utc).isoformat()
         self._sent_keys.add(key)
         message_id = str(result.get("id") or "").strip()
