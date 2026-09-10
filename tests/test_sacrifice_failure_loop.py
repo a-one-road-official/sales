@@ -13,8 +13,8 @@ def test_unknown_failure_is_fixture_candidate():
     assert "fixture" in failure.repair
 
 
-def test_batch_requires_ten_and_seven_without_critical_error():
-    results = [{"semantic_success": i < 7, "critical_errors": []} for i in range(10)]
+def test_batch_requires_ten_and_five_without_critical_error():
+    results = [{"semantic_success": i < 5, "critical_errors": []} for i in range(10)]
     assert batch_gate(results)["batch_status"] == "PASS"
     results[0]["critical_errors"] = ["IDENTITY_MAPPING_CORRUPT"]
     assert batch_gate(results)["batch_status"] == "FAIL"
