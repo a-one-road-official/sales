@@ -185,6 +185,17 @@ jobs:
           upsert_job lead-factory-control "4-59/10 * * * *" "${URL}/control/tick"
           upsert_job lead-factory-maktek-full "0 4 1 1 *" "${URL}/maktek/ingest"
 
+          # Updating a paused Scheduler job does not resume it. Explicitly
+          # resume every production lane after updating or creating it.
+          for NAME in \
+            lead-factory-meta lead-factory-autonomy-slo \
+            lead-factory-discover-growth lead-factory-discover-mittelstand \
+            lead-factory-discover-fallback lead-factory-dispatch-growth \
+            lead-factory-dispatch-mittelstand lead-factory-promotion \
+            lead-factory-prep lead-factory-control lead-factory-maktek-full; do
+            gcloud scheduler jobs resume "$NAME" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
+          done
+
       - name: Runtime deep health check
         run: |
           curl --fail-with-body --retry 10 --retry-all-errors --retry-delay 5 \
