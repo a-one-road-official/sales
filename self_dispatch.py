@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
+from datetime import datetime, timezone
 import urllib.request
 
 from task_queue import TaskDispatcher
@@ -52,17 +53,18 @@ def dispatch_lane(factory, lane: str) -> dict:
         else factory.sheets.list_pending_gate(limit=gate_limit)
     )
 
+    # Qualify the existing backlog before adding slower source-crawl work.
     jobs = []
-    for source in sources:
-        jobs.append(("/worker/source", {"source_id": source.source_id}, "source"))
-    for company in domains:
-        lead_id = str(company.get("lead_id", "")).strip()
-        if lead_id:
-            jobs.append(("/worker/domain", {"lead_id": lead_id}, "domain"))
     for company in gates:
         lead_id = str(company.get("lead_id", "")).strip()
         if lead_id:
             jobs.append(("/worker/gate", {"lead_id": lead_id}, "gate"))
+    for company in domains:
+        lead_id = str(company.get("lead_id", "")).strip()
+        if lead_id:
+            jobs.append(("/worker/domain", {"lead_id": lead_id}, "domain"))
+    for source in sources:
+        jobs.append(("/worker/source", {"source_id": source.source_id}, "source"))
 
     queued = {"source": 0, "domain": 0, "gate": 0, "already_queued": 0, "errors": 0}
     errors = []
@@ -71,8 +73,12 @@ def dispatch_lane(factory, lane: str) -> dict:
         nonlocal mode
         if not fallback_jobs:
             return
-        mode = "HTTP_FALLBACK_ASYNC"
-        with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+        mode = "HTTP_FALLBACK_BOUNDED"
+        try:
+            fallback_workers = max(1, min(4, int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_WORKERS", "4") or 4)))
+        except ValueError:
+            fallback_workers = 4
+        with concurrent.futures.ThreadPoolExecutor(max_workers=fallback_workers) as pool:
             futures = [pool.submit(_post_fallback, factory, path, payload) for path, payload, _ in fallback_jobs]
             for future, (path, payload, stage) in zip(futures, fallback_jobs):
                 result = future.result(timeout=535)
@@ -82,11 +88,13 @@ def dispatch_lane(factory, lane: str) -> dict:
                     queued["errors"] += 1
                     errors.append({"stage": stage, "path": path, "error": result.get("error", "fallback_failed")})
 
+    now = datetime.now(timezone.utc)
+    bucket = f"{now:%Y%m%d%H}{(now.minute // 10) * 10:02d}"
     try:
         dispatcher = TaskDispatcher()
         fallback_jobs = []
         for path, payload, stage in jobs:
-            key = f"{lane_key.lower()}:{stage}:{payload.get('source_id') or payload.get('lead_id')}"
+            key = f"{lane_key.lower()}:{stage}:{payload.get('source_id') or payload.get('lead_id')}:{bucket}"
             try:
                 result = dispatcher.enqueue(path, payload, key)
                 if result.get("status") == "ALREADY_QUEUED":

@@ -184,10 +184,11 @@ class QualifiedLeadProductionController:
         existing = self._config()
         now = datetime.now(UTC)
         end = deadline or now.astimezone(JST).replace(hour=23, minute=59, second=59, microsecond=0).astimezone(UTC)
+        if deadline and deadline <= now:
+            raise ValueError("goal_deadline_must_be_future")
 
-        # Deployment is deliberately independent from production progress. The
-        # deploy workflow may call /autonomy/start after a redeploy, so an
-        # already-running goal with the same target must remain untouched.
+        # A normal redeploy preserves an active goal; only an explicit one-time
+        # force_reset starts a fresh accounting window.
         existing_target = int(existing.get(GOAL_KEYS["target"], "0") or 0)
         existing_status = str(existing.get(GOAL_KEYS["status"], "")).upper()
         existing_deadline = _dt(existing.get(GOAL_KEYS["deadline"], ""))

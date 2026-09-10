@@ -30,6 +30,7 @@ _recovery_thread: threading.Thread | None = None
 _recovery_stop = threading.Event()
 _recovery_lock = threading.Lock()
 _sacrifice_lock = threading.Lock()
+_promotion_lock = threading.Lock()
 
 
 def _recovery_interval() -> int:
@@ -249,7 +250,11 @@ def autonomy_start(body: dict):
     try:
         from production_controller import _dt
         deadline = _dt(body.get("deadline")) if body.get("deadline") else None
-        return get_production_controller().start(int(body.get("target", 0)), deadline)
+        return get_production_controller().start(
+            int(body.get("target", 0)),
+            deadline,
+            force_reset=bool(body.get("force_reset", False)),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -429,7 +434,9 @@ def domain_mittelstand():
 @app.post("/promotion/tick")
 def promotion_tick():
     try:
-        return get_factory().promotion_tick()
+        # Serialize candidate read, duplicate check, SSOT append, and ledger write.
+        with _promotion_lock:
+            return get_factory().promotion_tick()
     except Exception as exc:
         _fail(exc)
 
