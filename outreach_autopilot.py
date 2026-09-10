@@ -534,9 +534,32 @@ class BPOAutopilot:
             expected = str(expected_job_id or "").strip()
             actual = str(state.get("job_id") or "").strip()
             if expected and actual and expected != actual:
-                # A fresh deployment gets a new job id. Do not revive an older
-                # worker state after the previous revision has completed or
-                # stalled; close it and let the startup hook create the new job.
+                # Cloud Run can briefly start an older revision after a newer
+                # revision has already written its checkpoint. Job IDs include
+                # the monotonically increasing GitHub run ID, so an older
+                # revision must never stop or spawn alongside a newer job.
+                def _job_generation(value: str) -> int:
+                    match = re.search(r"(\\d+)$", str(value or ""))
+                    return int(match.group(1)) if match else -1
+
+                expected_generation = _job_generation(expected)
+                actual_generation = _job_generation(actual)
+                if (
+                    expected_generation >= 0
+                    and actual_generation >= 0
+                    and actual_generation > expected_generation
+                ):
+                    self._state = state
+                    return {
+                        **self._response(state, accepted=False),
+                        "status": "ACTIVE_NEWER_JOB",
+                        "active": True,
+                        "job_id": actual,
+                        "expected_job_id": expected,
+                    }
+
+                # This revision is newer than the active checkpoint. Close the
+                # old job and let the startup hook create the new one.
                 self._finish(
                     state,
                     "STOPPED",
