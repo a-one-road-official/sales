@@ -295,33 +295,57 @@ def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
     wanted_tokens = tuple(
         _normalise_choice_text(token) for token in wanted if _normalise_choice_text(token)
     )
+
     try:
         el.click(timeout=5000)
-        time.sleep(0.2)
+    except Exception:
+        try:
+            el.click(timeout=5000, force=True)
+        except Exception:
+            try:
+                el.press("ArrowDown")
+            except Exception:
+                pass
+
+    for _ in range(12):
         roots = [
             el.locator("xpath=.."),
             el.locator("xpath=../.."),
             el.locator("xpath=ancestor::*[@data-hsfc-id='DropdownField'][1]"),
         ]
         if context is not None:
-            roots.append(context.locator("[role=listbox]:visible"))
+            roots.extend(
+                [
+                    context.locator("[role=listbox]:visible"),
+                    context.locator("[role=option]:visible"),
+                ]
+            )
         for root in roots:
-            options = root.locator("[role=option], li")
-            for index in range(min(options.count(), 240)):
-                option = options.nth(index)
-                if not option.is_visible():
-                    continue
-                text = str(option.inner_text() or "").strip()
-                haystack = _normalise_choice_text(text)
-                if wanted_tokens and not any(token in haystack for token in wanted_tokens):
-                    continue
-                try:
-                    option.click(timeout=5000)
-                except Exception:
-                    option.click(timeout=5000, force=True)
-                return True, text
-    except Exception:
-        pass
+            try:
+                options = root.locator("[role=option]:visible, li:visible")
+                for index in range(min(options.count(), 240)):
+                    option = options.nth(index)
+                    text = str(option.inner_text() or "").strip()
+                    haystack = _normalise_choice_text(text)
+                    if wanted_tokens and not any(token in haystack for token in wanted_tokens):
+                        continue
+                    try:
+                        option.click(timeout=5000)
+                    except Exception:
+                        try:
+                            option.click(timeout=5000, force=True)
+                        except Exception:
+                            option.evaluate("el => el.click()")
+                    return True, text
+            except Exception:
+                continue
+        try:
+            if context is not None:
+                context.wait_for_timeout(250)
+            else:
+                time.sleep(0.25)
+        except Exception:
+            time.sleep(0.25)
     return False, ""
 
 
@@ -335,20 +359,44 @@ def _select_phone_country(el, context=None) -> tuple[bool, bool]:
         present = picker.count() > 0 and picker.is_visible()
         if not present:
             return False, True
-        picker.click(timeout=5000)
-        roots = [root, el.locator("xpath=ancestor::form[1]")]
-        if context is not None:
-            roots.append(context.locator("[role=listbox]:visible"))
-        for option_root in roots:
-            options = option_root.locator("[role=option], li")
-            for index in range(min(options.count(), 240)):
-                option = options.nth(index)
-                if not option.is_visible():
+        try:
+            picker.click(timeout=5000)
+        except Exception:
+            picker.click(timeout=5000, force=True)
+        for _ in range(12):
+            roots = [root, el.locator("xpath=ancestor::form[1]")]
+            if context is not None:
+                roots.extend(
+                    [
+                        context.locator("[role=listbox]:visible"),
+                        context.locator("[role=option]:visible"),
+                    ]
+                )
+            for option_root in roots:
+                try:
+                    options = option_root.locator("[role=option]:visible, li:visible")
+                    for index in range(min(options.count(), 240)):
+                        option = options.nth(index)
+                        text = str(option.inner_text() or "").strip()
+                        if not re.search(r"\bJapan\b|日本", text, re.I):
+                            continue
+                        try:
+                            option.click(timeout=5000)
+                        except Exception:
+                            try:
+                                option.click(timeout=5000, force=True)
+                            except Exception:
+                                option.evaluate("el => el.click()")
+                        return True, True
+                except Exception:
                     continue
-                text = str(option.inner_text() or "").strip()
-                if re.search(r"\bJapan\b|日本", text, re.I):
-                    option.click(timeout=5000)
-                    return True, True
+            try:
+                if context is not None:
+                    context.wait_for_timeout(250)
+                else:
+                    time.sleep(0.25)
+            except Exception:
+                time.sleep(0.25)
         return True, False
     except Exception:
         return True, False
@@ -747,11 +795,21 @@ class PublicContactFormExecutor:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=True)
                 page = browser.new_page()
-                response = page.goto(form_url, wait_until="domcontentloaded", timeout=30000)
-                if not response or response.status >= 400:
+                try:
+                    response = page.goto(form_url, wait_until="domcontentloaded", timeout=30000)
+                except Exception:
+                    # Some large marketing pages continue loading after the form DOM is
+                    # available. Let form discovery decide whether the page is usable.
+                    response = None
+                    if not _same_host_or_subdomain(page.url, website):
+                        return result_payload(
+                            "FORM_FAILED",
+                            reason="FORM_NAVIGATION_FAILED",
+                        )
+                if response is not None and response.status >= 400:
                     return result_payload(
                         "FORM_FAILED",
-                        reason=f"FORM_HTTP_{response.status if response else 0}",
+                        reason=f"FORM_HTTP_{response.status}",
                     )
                 try:
                     page.wait_for_load_state("networkidle", timeout=5000)
