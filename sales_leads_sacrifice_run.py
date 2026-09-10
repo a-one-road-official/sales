@@ -570,6 +570,11 @@ def run_ten_sacrifice_batch(
                         "recipient_verified": True,
                         "contact_confidence": "FORM",
                     }
+                    if _cfg_truthy(cfg, "OUTREACH_FORM_AUDIT_TEMPLATE_ONLY"):
+                        draft = _verified_site_draft(candidate, site)
+                        prompt_meta = dict(prompt_meta or {})
+                        prompt_meta["draft_strategy"] = "verified_site_form_audit_template"
+                    else:
                     draft, prompt_meta = _draft_with_auto_repair(
                         llm, drive, cfg, context, form_contact, candidate, site, prompt_meta
                     )
