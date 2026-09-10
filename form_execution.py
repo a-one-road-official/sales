@@ -571,13 +571,31 @@ def _visible_step_signature(form) -> tuple:
         signature = []
         for index in range(steps.count()):
             step = steps.nth(index)
-            signature.append(
-                (
-                    index,
-                    bool(step.is_visible()),
-                    str(step.get_attribute("style") or ""),
+            visible = bool(step.is_visible())
+            fields = []
+            controls = []
+            if visible:
+                visible_fields = step.locator("input:not([type=hidden]), textarea, select")
+                for field_index in range(min(visible_fields.count(), 80)):
+                    field = visible_fields.nth(field_index)
+                    if not field.is_visible():
+                        continue
+                    marker = _marker(field, _label_for(field))
+                    fields.append(
+                        (
+                            marker,
+                            (field.get_attribute("type") or "").lower(),
+                            _current_value(field),
+                        )
+                    )
+                visible_controls = step.locator(
+                    "button, input[type=submit], input[type=button], [role=button]"
                 )
-            )
+                for control_index in range(min(visible_controls.count(), 30)):
+                    control = visible_controls.nth(control_index)
+                    if control.is_visible():
+                        controls.append(_control_label(control))
+            signature.append((index, visible, tuple(fields), tuple(controls)))
         return tuple(signature)
     except Exception:
         return ()
@@ -717,7 +735,16 @@ class PublicContactFormExecutor:
                         action_url=action,
                     )
 
+                seen_step_signatures = set()
                 for step_index in range(4):
+                    current_step_signature = _visible_step_signature(form)
+                    if current_step_signature and current_step_signature in seen_step_signatures:
+                        return result_payload(
+                            "FORM_FAILED",
+                            reason="MULTI_STEP_NOT_ADVANCED",
+                        )
+                    if current_step_signature:
+                        seen_step_signatures.add(current_step_signature)
                     fields = form.locator("input:not([type=hidden]), textarea, select")
                     present_keys = set()
                     for index in range(fields.count()):
@@ -801,12 +828,9 @@ class PublicContactFormExecutor:
                         try:
                             if not el.is_visible() or not el.is_enabled():
                                 continue
-                            tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
-                            if tag == "input" and not (
-                                (el.get_attribute("role") or "").lower() == "button"
-                                and el.get_attribute("aria-haspopup")
-                            ):
-                                continue
+                            # HubSpot renders real dropdowns as readonly input[role=combobox].
+                            # Keep those controls; they contain the visible choice list and a hidden
+                            # submission input. The selector above already excludes unrelated inputs.
                             label = _label_for(el)
                             marker = _marker(el, label)
                             key = _field_key(el, label)
