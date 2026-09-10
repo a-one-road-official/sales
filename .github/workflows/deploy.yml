@@ -305,7 +305,7 @@ jobs:
             echo "sacrifice_company_slot=${N}"
             HTTP_CODE="$(
               curl --silent --show-error --fail-with-body \
-                --max-time 180 --retry 4 --retry-all-errors --retry-delay 15 --retry-max-time 360 \
+                --max-time 150 --retry 1 --retry-all-errors --retry-delay 5 --retry-max-time 180 \
                 --write-out '%{http_code}' \
                 -X POST \
                 -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
@@ -363,7 +363,7 @@ jobs:
               echo "sacrifice_success_target_reached=${SUCCESS_COUNT}"
               break
             fi
-            sleep 5
+            sleep 2
           done
           python - <<'PY'
           import json, os

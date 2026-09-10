@@ -292,7 +292,7 @@ def run_ten_sacrifice_batch(
                 result["domain_resolution"] = resolved
                 site_url = str(resolved.get("official_website") or "").strip()
 
-            site = inspect_official_site(site_url)
+            site = inspect_official_site(site_url, max_pages=3)
             result["website_research"] = site
             context["verified_site"] = site
             result["audit"].update(
@@ -302,17 +302,66 @@ def run_ten_sacrifice_batch(
             if site.get("status") != "VERIFIED":
                 result.update(status="FAILED", stage="SITE_RESEARCH", error_message="official_site_not_verified")
             else:
-                research = llm.research_outreach_contact(context)
-                proposed_email = str(research.get("email") or "").strip()
-                email = proposed_email if _email_matches_site(proposed_email, site.get("official_website", site_url), site) else ""
-                rejected_email = proposed_email if proposed_email and not email else ""
-                if not email:
-                    verified_site_emails = [
-                        value
-                        for value in _unique(site.get("emails") or [])
-                        if _email_matches_site(value, site.get("official_website", site_url), site)
-                    ]
-                    email = verified_site_emails[0] if verified_site_emails else ""
+                email = ""
+                proposed_email = ""
+                rejected_email = ""
+                site_emails = [
+                    value
+                    for value in _unique(site.get("emails") or [])
+                    if _email_matches_site(value, site.get("official_website", site_url), site)
+                ]
+                form_links = _unique(list(site.get("contact_links") or []) + list(site.get("forms") or []))
+                if site_emails:
+                    # A first-party address found on the verified site is enough
+                    # to select the recipient; avoid a second web-search round.
+                    email = site_emails[0]
+                    research = {
+                        "contact_name": "",
+                        "title": "commercial team",
+                        "email": email,
+                        "contact_fit": "MEDIUM",
+                        "confidence": "HIGH",
+                        "research_summary": "First-party address found on the verified official site.",
+                        "evidence_urls": _research_urls(site, {}),
+                        "status": "FOUND_WITH_EMAIL",
+                    }
+                else:
+                    research = {
+                        "contact_name": "",
+                        "title": "",
+                        "email": "",
+                        "contact_fit": "",
+                        "confidence": "",
+                        "research_summary": "No first-party address found during site inspection.",
+                        "evidence_urls": _research_urls(site, {}),
+                        "status": "FOUND_NO_EMAIL",
+                    }
+                    # Contact web search is only needed when the verified site
+                    # exposes neither a public form nor a usable first-party email.
+                    if not form_links:
+                        research = llm.research_outreach_contact(context)
+                        proposed_email = str(research.get("email") or "").strip()
+                        email = (
+                            proposed_email
+                            if _email_matches_site(
+                                proposed_email,
+                                site.get("official_website", site_url),
+                                site,
+                            )
+                            else ""
+                        )
+                        rejected_email = proposed_email if proposed_email and not email else ""
+                        if not email:
+                            site_emails = [
+                                value
+                                for value in _unique(site.get("emails") or [])
+                                if _email_matches_site(
+                                    value,
+                                    site.get("official_website", site_url),
+                                    site,
+                                )
+                            ]
+                            email = site_emails[0] if site_emails else ""
                 result["research"] = research
                 result["recipient_evidence"] = {
                     "email": email,
@@ -321,12 +370,12 @@ def run_ten_sacrifice_batch(
                     "confidence": research.get("confidence", ""),
                     "status": research.get("status", ""),
                     "first_party_domain_verified": bool(email),
+                    "public_form_verified": bool(form_links),
                 }
                 result["audit"].update(
                     evidence_urls=_research_urls(site, research),
                     research_confidence=research.get("confidence", ""),
                 )
-                form_links = _unique(list(site.get("contact_links") or []) + list(site.get("forms") or []))
                 if not email and form_links:
                     form_contact = {
                         **research,
