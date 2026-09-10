@@ -1,9 +1,9 @@
-"""Durable, feedback-driven BPO outbound autopilot.
+"""Durable, feedback-driven outbound autopilot for approved non-factory lanes.
 
-One human start command creates a durable job. The worker then executes exactly
-ten candidates per cycle, records every result, adjusts bounded runtime policy,
-and continues until the requested successful-send target, source exhaustion, or
-a hard safety condition is reached.
+A job may be started by the runtime's explicit lane gate. The worker then executes
+exactly ten candidates per cycle, records every result, adjusts bounded runtime
+policy, and continues until the requested successful-send target, source
+exhaustion, or a hard safety condition is reached.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable
 
-from outreach_execution import outbound_lane_send_enabled
+from outreach_execution import lane_from, outbound_lane_send_enabled
 from outreach_stability import SacrificeStability
 from sacrifice_failure_loop import batch_gate, classify_batch
 
@@ -201,7 +201,7 @@ def _adjust_strategy(strategy: dict, failure_counts: dict) -> tuple[dict, list[s
 
 
 class BPOAutopilot:
-    """Run one durable BPO job through the same shared outbound executor."""
+    """Run one durable job through the shared outbound executor."""
 
     def __init__(
         self,
@@ -209,7 +209,12 @@ class BPOAutopilot:
         factory_getter: Callable[[], object],
         config_getter: Callable[[], dict[str, str]],
         batch_runner: Callable[[dict], dict],
+        lane: str = "BPO",
     ):
+        normalized_lane = lane_from({"lane": lane}) or "BPO"
+        if normalized_lane not in {"BPO", "SALES_GTM"}:
+            raise ValueError("unsupported_autopilot_lane")
+        self._lane = normalized_lane
         self._factory_getter = factory_getter
         self._config_getter = config_getter
         self._batch_runner = batch_runner
@@ -239,11 +244,10 @@ class BPOAutopilot:
         rows = sheets._rows_as_dicts(AUTOPILOT_SHEET, "ZZ")
         return [dict(row) for row in rows if isinstance(row, dict)]
 
-    @staticmethod
-    def _row_matches(row: dict, job_id: str) -> bool:
+    def _row_matches(self, row: dict, job_id: str) -> bool:
         return (
             str(row.get("job_id") or "").strip() == str(job_id or "").strip()
-            and str(row.get("lane") or "").strip().upper() == "BPO"
+            and str(row.get("lane") or "").strip().upper() == self._lane
         )
 
     def _latest_job_row(self, job_id: str, sheets=None) -> dict | None:
@@ -264,18 +268,17 @@ class BPOAutopilot:
         rows = self._rows(sheets)
         found = [
             row for row in rows
-            if str(row.get("lane") or "").strip().upper() == "BPO"
+            if str(row.get("lane") or "").strip().upper() == self._lane
             and str(row.get("record_type") or "").strip().upper() == "OUTREACH_AUTOPILOT_JOB"
             and str(row.get("autopilot_status") or "").strip().upper() in ACTIVE_STATUSES
         ]
         return found[-1] if found else None
 
-    @staticmethod
-    def _state_from_row(row: dict) -> dict:
+    def _state_from_row(self, row: dict) -> dict:
         status = str(row.get("autopilot_status") or row.get("status") or "RUNNING").strip().upper()
         return {
             "job_id": str(row.get("job_id") or row.get("batch_id") or "").strip(),
-            "lane": "BPO",
+            "lane": self._lane,
             "batch_size": BATCH_SIZE,
             "target_successes": _int_value(row.get("target_successes"), DEFAULT_TARGET_SUCCESSES, 10, 4000),
             "max_attempts": _int_value(row.get("max_attempts"), DEFAULT_MAX_ATTEMPTS, 10, 4000),
@@ -304,13 +307,12 @@ class BPOAutopilot:
             "completed_at": str(row.get("completed_at") or ""),
         }
 
-    @staticmethod
-    def _response(state: dict, *, accepted: bool = False) -> dict:
+    def _response(self, state: dict, *, accepted: bool = False) -> dict:
         return {
             "status": state.get("status", "UNKNOWN"),
             "accepted": accepted,
             "job_id": state.get("job_id", ""),
-            "lane": "BPO",
+            "lane": self._lane,
             "delivery_mode": "AUTOPILOT_10_BATCH_FEEDBACK_LOOP",
             "batch_size": BATCH_SIZE,
             "target_successes": int(state.get("target_successes", 0) or 0),
@@ -354,7 +356,7 @@ class BPOAutopilot:
             "record_type": "OUTREACH_AUTOPILOT_JOB",
             "job_id": state["job_id"],
             "batch_id": state["job_id"],
-            "lane": "BPO",
+            "lane": self._lane,
             "batch_sequence": state.get("batch_sequence", 0),
             "source_pool_count": state.get("source_pool_count", 0),
             "source_consumed_count": state.get("source_consumed_count", 0),
@@ -417,30 +419,32 @@ class BPOAutopilot:
 
     def start(self, payload: dict | None = None) -> dict:
         payload = dict(payload or {})
-        if str(payload.get("lane") or "BPO").strip().upper() != "BPO":
-            raise ValueError("bpo_autopilot_only_accepts_bpo_lane")
+        requested_lane = lane_from({"lane": payload.get("lane") or self._lane}) or self._lane
+        if requested_lane != self._lane:
+            raise ValueError(f"{self._lane.lower()}_autopilot_only_accepts_{self._lane.lower()}_lane")
         cfg = dict(self._config_getter() or {})
-        if not outbound_lane_send_enabled("BPO", cfg):
+        if not outbound_lane_send_enabled(self._lane, cfg):
             return {
                 "status": "BLOCKED",
                 "accepted": False,
-                "lane": "BPO",
-                "reason": "bpo_outbound_gate_closed",
-                "next_action": "ENABLE_EXPLICIT_BPO_APPROVAL_AND_SEND_MODE",
+                "lane": self._lane,
+                "reason": f"{self._lane.lower()}_outbound_gate_closed",
+                "next_action": f"ENABLE_EXPLICIT_{self._lane}_APPROVAL_AND_SEND_MODE",
             }
 
-        job_id = str(payload.get("job_id") or "").strip() or f"bpo-auto-{uuid.uuid4().hex[:12]}"
+        env_prefix = "OUTREACH_BPO" if self._lane == "BPO" else "OUTREACH_SALES_GTM"
+        job_id = str(payload.get("job_id") or "").strip() or f"{self._lane.lower()}-auto-{uuid.uuid4().hex[:12]}"
         target = _int_value(
-            payload.get("target_successes", os.getenv("OUTREACH_BPO_TARGET_SUCCESS", DEFAULT_TARGET_SUCCESSES)),
+            payload.get("target_successes", os.getenv(f"{env_prefix}_TARGET_SUCCESS", DEFAULT_TARGET_SUCCESSES)),
             DEFAULT_TARGET_SUCCESSES, 10, 4000,
         )
         max_attempts = _int_value(
-            payload.get("max_attempts", os.getenv("OUTREACH_BPO_MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS)),
+            payload.get("max_attempts", os.getenv(f"{env_prefix}_MAX_ATTEMPTS", DEFAULT_MAX_ATTEMPTS)),
             DEFAULT_MAX_ATTEMPTS, target, 4000,
         )
         state = {
             "job_id": job_id,
-            "lane": "BPO",
+            "lane": self._lane,
             "batch_size": BATCH_SIZE,
             "target_successes": target,
             "max_attempts": max_attempts,
@@ -506,13 +510,13 @@ class BPOAutopilot:
 
     def resume_if_active(self) -> dict:
         if os.getenv("OUTREACH_AUTOPILOT_ENABLED", "FALSE").strip().upper() != "TRUE":
-            return {"status": "DISABLED", "lane": "BPO"}
+            return {"status": "DISABLED", "lane": self._lane}
         with self._lock:
             if self._thread and self._thread.is_alive():
                 return self._response(self._state or {}, accepted=False)
             row = self._latest_active_row()
             if not row:
-                return {"status": "IDLE", "lane": "BPO"}
+                return {"status": "IDLE", "lane": self._lane}
             state = self._state_from_row(row)
             self._state = state
             self._spawn_locked(state)
@@ -525,7 +529,7 @@ class BPOAutopilot:
         sheets = self._sheets()
         row = self._latest_job_row(job_id, sheets) if job_id else self._latest_active_row(sheets)
         if not row:
-            return {"status": "NO_JOB", "lane": "BPO", "active": False}
+            return {"status": "NO_JOB", "lane": self._lane, "active": False}
         state = self._state_from_row(row)
         with self._lock:
             self._state = state
@@ -568,10 +572,10 @@ class BPOAutopilot:
                     self._finish(state, "STOPPED", next_action="MANUAL_RESTART_REQUIRED")
                     return
                 cfg = dict(self._config_getter() or {})
-                if not outbound_lane_send_enabled("BPO", cfg):
+                if not outbound_lane_send_enabled(self._lane, cfg):
                     self._finish(
                         state, "BLOCKED",
-                        next_action="ENABLE_EXPLICIT_BPO_APPROVAL_AND_SEND_MODE",
+                        next_action=f"ENABLE_EXPLICIT_{self._lane}_APPROVAL_AND_SEND_MODE",
                         error="bpo_outbound_gate_closed",
                     )
                     return
@@ -579,7 +583,7 @@ class BPOAutopilot:
                     self._finish(state, "COMPLETED_TARGET", next_action="HANDOFF_TO_HUMAN_SALES")
                     return
                 if int(state.get("total_attempts", 0) or 0) >= int(state["max_attempts"]):
-                    self._finish(state, "TARGET_NOT_REACHED", next_action="EXPAND_VERIFIED_BPO_SOURCE")
+                    self._finish(state, "TARGET_NOT_REACHED", next_action=f"EXPAND_VERIFIED_{self._lane}_SOURCE")
                     return
 
                 sequence = int(state.get("batch_sequence", 0) or 0) + 1
@@ -591,7 +595,7 @@ class BPOAutopilot:
                     result = self._batch_runner({
                         "limit": BATCH_SIZE,
                         "batch_id": batch_id,
-                        "lane": "BPO",
+                        "lane": self._lane,
                         "dry_run": False,
                         "_autopilot_managed": True,
                         "autopilot_policy": dict(state.get("strategy") or {}),
@@ -612,7 +616,7 @@ class BPOAutopilot:
                     )
                     return
                 result_lane = str(result.get("lane") or "").strip().upper()
-                if result_lane != "BPO":
+                if result_lane != self._lane:
                     self._finish(
                         state, "PAUSED_SAFETY",
                         next_action="HUMAN_REVIEW_REQUIRED",
@@ -652,7 +656,7 @@ class BPOAutopilot:
 
                 try:
                     stability = SacrificeStability(self._sheets()).record(
-                        lane="BPO",
+                        lane=self._lane,
                         attempted=attempted,
                         successes=successes,
                         critical_errors=critical,
@@ -705,7 +709,7 @@ class BPOAutopilot:
                 if attempted == 0:
                     self._finish(
                         state, "SOURCE_CAPACITY_SHORTFALL",
-                        next_action="EXPAND_VERIFIED_BPO_SOURCE",
+                        next_action=f"EXPAND_VERIFIED_{self._lane}_SOURCE",
                         error=(
                             "no_unconsumed_bpo_candidates;"
                             f"source_pool={state.get('source_pool_count', 0)};"
