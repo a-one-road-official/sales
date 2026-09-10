@@ -7,6 +7,8 @@ import tempfile
 import uuid
 from pathlib import Path
 
+from safety import validate_adapter_code
+
 
 class SandboxError(RuntimeError):
     pass
@@ -24,7 +26,7 @@ print(json.dumps(out, ensure_ascii=False))
 
 
 def _direct_run(code: str, snapshot: dict) -> dict:
-    """Only for unit tests/local CI. Production should use Cloud Run sandbox launcher."""
+    """Run a validated adapter in an isolated temporary process."""
     with tempfile.TemporaryDirectory() as td:
         p = Path(td)
         (p / "adapter.py").write_text(code, encoding="utf-8")
@@ -37,11 +39,21 @@ def _direct_run(code: str, snapshot: dict) -> dict:
         return json.loads(cp.stdout)
 
 
+def _validated_direct_run(code: str, snapshot: dict) -> dict:
+    """Bounded fallback for runtimes where the optional launcher is unavailable."""
+    validate_adapter_code(code)
+    return _direct_run(code, snapshot)
+
+
 def run_adapter(code: str, snapshot: dict) -> dict:
     sandbox_bin = os.getenv("CLOUD_RUN_SANDBOX_BIN", "/usr/local/gcp/bin/sandbox")
     if not os.path.exists(sandbox_bin):
-        if os.getenv("ALLOW_DIRECT_ADAPTER_EXECUTION", "FALSE").upper() == "TRUE":
-            return _direct_run(code, snapshot)
+        fallback_enabled = os.getenv(
+            "LEAD_FACTORY_DIRECT_ADAPTER_FALLBACK_ENABLED", "TRUE"
+        ).upper() == "TRUE"
+        legacy_enabled = os.getenv("ALLOW_DIRECT_ADAPTER_EXECUTION", "FALSE").upper() == "TRUE"
+        if fallback_enabled or legacy_enabled:
+            return _validated_direct_run(code, snapshot)
         raise SandboxError("cloud_run_sandbox_launcher_not_available")
 
     with tempfile.TemporaryDirectory() as td:
