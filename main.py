@@ -459,7 +459,7 @@ def sales_leads_sacrifice_run(payload: dict):
             cfg = dict(cfg)
             cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = "TRUE"
             cfg["OUTREACH_FACTORY_SEND_ENABLED"] = "FALSE"
-        executor = SacrificialEmailExecutor(lf.sheets) if execute_external else None
+        executor = SacrificialEmailExecutor(None) if execute_external else None
         return run_ten_sacrifice_batch(
             llm=lf.llm, drive=lf.drive, cfg=cfg, limit=10,
             executor=executor, execute_external=execute_external,
@@ -487,4 +487,3 @@ def pipeline_tick():
         }
     except Exception as exc:
         _fail(exc)
-
