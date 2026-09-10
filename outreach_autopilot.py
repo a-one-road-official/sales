@@ -266,13 +266,26 @@ class BPOAutopilot:
     def _latest_active_row(self, sheets=None) -> dict | None:
         sheets = sheets or self._sheets()
         rows = self._rows(sheets)
+        # A job ledger is append-only. An old RUNNING checkpoint must not keep
+        # a job alive after a later STOPPED/terminal checkpoint was appended.
+        latest_by_job: dict[str, tuple[int, dict]] = {}
+        for index, row in enumerate(rows):
+            if (
+                str(row.get("lane") or "").strip().upper() != self._lane
+                or str(row.get("record_type") or "").strip().upper()
+                != "OUTREACH_AUTOPILOT_JOB"
+            ):
+                continue
+            job_id = str(row.get("job_id") or row.get("batch_id") or "").strip()
+            if job_id:
+                latest_by_job[job_id] = (index, row)
         found = [
-            row for row in rows
-            if str(row.get("lane") or "").strip().upper() == self._lane
-            and str(row.get("record_type") or "").strip().upper() == "OUTREACH_AUTOPILOT_JOB"
-            and str(row.get("autopilot_status") or "").strip().upper() in ACTIVE_STATUSES
+            pair
+            for pair in latest_by_job.values()
+            if str(pair[1].get("autopilot_status") or "").strip().upper()
+            in ACTIVE_STATUSES
         ]
-        return found[-1] if found else None
+        return max(found, key=lambda pair: pair[0])[1] if found else None
 
     def _state_from_row(self, row: dict) -> dict:
         status = str(row.get("autopilot_status") or row.get("status") or "RUNNING").strip().upper()
