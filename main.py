@@ -712,7 +712,7 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
 
     # The worker owns the feedback loop. Carry only bounded, machine-generated
     # adjustments into the same runner used by the direct BPO endpoint.
-    if (bool((payload or {}).get("_autopilot_managed", False)):
+    if bool((payload or {}).get("_autopilot_managed", False)):
         policy = dict((payload or {}).get("autopilot_policy") or {})
         if "site_max_pages" in policy:
             try:
