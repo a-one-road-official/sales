@@ -47,7 +47,7 @@ class FakeFactory:
 def test_start_persists_goal_and_baseline():
     factory = FakeFactory()
     controller = QualifiedLeadProductionController(factory)
-    status = controller.start(1500, datetime(2026, 9, 8, 14, tzinfo=timezone.utc))
+    status = controller.start(1500, datetime.now(timezone.utc) + timedelta(days=1))
     assert status["target"] == 1500
     assert status["baseline_ssot_count"] == 2
     assert factory.sheets.config["LEAD_FACTORY_GOAL_STATUS"] == "RUNNING"
