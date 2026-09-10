@@ -711,7 +711,7 @@ class BPOAutopilot:
                         state, "SOURCE_CAPACITY_SHORTFALL",
                         next_action=f"EXPAND_VERIFIED_{self._lane}_SOURCE",
                         error=(
-                            "no_unconsumed_bpo_candidates;"
+                            f"no_unconsumed_{self._lane.lower()}_candidates;"
                             f"source_pool={state.get('source_pool_count', 0)};"
                             f"source_consumed={state.get('source_consumed_count', 0)}"
                         ),
