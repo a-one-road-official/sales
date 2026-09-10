@@ -101,6 +101,19 @@ PROTECTED_FACTORY_LANES = {
 }
 
 
+def lane_from(row: dict) -> str:
+    """Return the explicit normalized outreach lane for a row."""
+    data = row if isinstance(row, dict) else {}
+    for key in ("lane", "outreach_lane", "source_lane"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            return "".join(
+                char if char.isalnum() else "_"
+                for char in value.upper()
+            ).strip("_")
+    return ""
+
+
 def _lane_flag(lane: str) -> str:
     normalized = "".join(
         char if char.isalnum() else "_"
@@ -146,16 +159,6 @@ def is_outbound_lane(row: dict, cfg: dict[str, str]) -> bool:
 def is_sacrificial_lane(row: dict, cfg: dict[str, str]) -> bool:
     """Backward-compatible name for the shared lane eligibility check."""
     return is_outbound_lane(row, cfg)
-
-
-    allowed = {
-        item.strip().upper()
-        for item in str(cfg.get("OUTREACH_SACRIFICE_LANES", "EC,RETAIL,SACRIFICE,EC_SACRIFICE") or "").split(",")
-        if item.strip()
-    }
-    lane = lane_from(row)
-    source = str(row.get("source_type") or "").upper()
-    return lane in allowed or any(token in source for token in ("EC", "RETAIL", "SACRIFICE"))
 
 
 def message_hash(row: dict) -> str:
