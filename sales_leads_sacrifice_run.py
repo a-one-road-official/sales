@@ -183,7 +183,7 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
         "lane": "EC_SACRIFICE",
         "attempted": len(results),
         "production_ssot_touched": False,
-        "external_action": "NOT_ATTEMPTED",
+        "external_action": external_action,
         "prompt": {"document_id": prompt_id, "modified_time": prompt_meta.get("modifiedTime", "")},
         "results": results,
         "failure_count": len(failures),
