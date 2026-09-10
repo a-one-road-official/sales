@@ -17,7 +17,12 @@ from self_dispatch import dispatch_lane as self_dispatch_lane
 from settings import SETTINGS
 from strict_factory import StrictLeadFactory as LeadFactory
 from notifier import InternalNotifier
-from outreach_execution import SacrificialEmailExecutor
+from outreach_execution import (
+    OutboundEmailExecutor,
+    lane_from,
+    record_outbound_attempt,
+)
+from outreach_stability import SacrificeStability
 from sacrifice_failure_loop import classify_batch, batch_gate
 from sales_leads_sacrifice_run import run_ten_sacrifice_batch
 from observability import failure_code, record_event
@@ -586,15 +591,58 @@ def _sacrifice_limit(payload: dict | None) -> int:
     return limit
 
 
+_OUTBOUND_RUNTIME_KEYS = (
+    "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE",
+    "LEAD_FACTORY_SEND_MODE",
+    "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL",
+    "LEAD_FACTORY_GMAIL_IMPERSONATE",
+    "OUTREACH_ALLOWED_LANES",
+    "OUTREACH_SACRIFICE_LANES",
+    "OUTREACH_SACRIFICE_SEND_ENABLED",
+    "OUTREACH_FACTORY_SEND_ENABLED",
+    "OUTREACH_SSOT_SEND_ENABLED",
+    "OUTREACH_PROMPT_DOC_TITLE",
+)
+
+_SUPPORTED_OUTBOUND_LANES = {
+    "EC",
+    "RETAIL",
+    "SACRIFICE",
+    "EC_SACRIFICE",
+    "FACTORY",
+    "BPO",
+    "SSOT",
+    "FACTORY_SSOT",
+    "PRODUCTION_SSOT",
+    "MITTELSTAND",
+}
+
+
+def _config_truthy(value: object) -> bool:
+    return str(value or "").strip().upper() in {"TRUE", "1", "YES", "ON"}
+
+
+def _outbound_runtime_config(lf: LeadFactory) -> dict[str, str]:
+    cfg = dict(lf._config())
+    for key in _OUTBOUND_RUNTIME_KEYS:
+        if key in os.environ:
+            cfg[key] = os.environ[key]
+    return cfg
+
+
 def _sacrifice_send_enabled() -> bool:
-    """List-only production invariant: customer-facing sends are impossible."""
-    return False
+    """EC sends require an explicit runtime mode and the external-write interlock."""
+    return (
+        _config_truthy(os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE"))
+        and str(os.getenv("LEAD_FACTORY_SEND_MODE", "DISABLED")).strip().upper() == "ENABLED"
+        and _config_truthy(os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE"))
+    )
 
 
 def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict:
     limit = _sacrifice_limit(payload)
     lf = get_factory()
-    cfg = dict(lf._config())
+    cfg = _outbound_runtime_config(lf)
 
     # Only the isolated EC/retail runtime may enable this lane.
     execute_external = _sacrifice_send_enabled() and not bool((payload or {}).get("dry_run", False))
@@ -612,8 +660,11 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
             raise HTTPException(status_code=400, detail="invalid_sacrifice_batch_slot")
         if batch_slot < 0:
             raise HTTPException(status_code=400, detail="sacrifice_batch_slot_must_be_nonnegative")
-    executor = SacrificialEmailExecutor(
-        lf.sheets, lf.drive, cfg.get("OUTREACH_PROMPT_DOC_TITLE", "outreach_prompt_production_v1")
+    executor = OutboundEmailExecutor(
+        lf.sheets,
+        lf.drive,
+        cfg.get("OUTREACH_PROMPT_DOC_TITLE", "outreach_prompt_production_v1"),
+        lane="EC_SACRIFICE",
     ) if execute_external else None
     with _sacrifice_lock:
         result = run_ten_sacrifice_batch(
@@ -626,9 +677,70 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
             batch_id=batch_id,
             batch_slot=batch_slot,
         )
+    if execute_external:
+        try:
+            critical_errors = []
+            for item in result.get("results", []) or []:
+                critical_errors.extend(
+                    str(value)
+                    for value in (item.get("preflight") or {}).get("critical_errors", [])
+                    if value
+                )
+            result["stability"] = SacrificeStability(lf.sheets).record(
+                lane="EC_SACRIFICE",
+                attempted=int(result.get("attempted", 0) or 0),
+                successes=int(result.get("success_count", 0) or 0),
+                critical_errors=critical_errors,
+                cfg=cfg,
+                batch_id=str(result.get("batch_id") or batch_id or "").strip() or None,
+            )
+        except Exception as exc:
+            # Sends already completed must remain visible even if the batch ledger
+            # is temporarily unavailable.
+            result["stability_record_error"] = f"{type(exc).__name__}:{exc}"
     result["trigger"] = "SCHEDULER" if scheduled else "DIRECT"
     result["send_enabled"] = execute_external
     return result
+
+
+@app.post("/outreach/execute")
+def execute_outbound(payload: dict):
+    """Execute one prepared draft through the same lane-aware sender used by EC."""
+    try:
+        raw_lane = str(
+            payload.get("lane")
+            or payload.get("outreach_lane")
+            or payload.get("source_lane")
+            or ""
+        ).strip()
+        lane = lane_from({"lane": raw_lane})
+        if lane not in _SUPPORTED_OUTBOUND_LANES:
+            raise HTTPException(status_code=400, detail="unsupported_outbound_lane")
+        draft = payload.get("draft")
+        if not isinstance(draft, dict):
+            raise HTTPException(status_code=400, detail="prepared_draft_required")
+        draft = dict(draft)
+        # The route owns the lane identity; payload fields cannot relabel a
+        # protected SSOT/factory row as an EC source.
+        draft["lane"] = lane
+        draft["source_type"] = lane
+        lf = get_factory()
+        cfg = _outbound_runtime_config(lf)
+        executor = OutboundEmailExecutor(
+            lf.sheets,
+            lf.drive,
+            cfg.get("OUTREACH_PROMPT_DOC_TITLE", "outreach_prompt_production_v1"),
+            lane=lane,
+        )
+        result = executor.execute(draft, cfg)
+        if result.get("status") != "SENT":
+            result["audit_log"] = record_outbound_attempt(lf.sheets, draft, result)
+        result["lane"] = lane
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _fail(exc)
 
 
 @app.post("/outreach/execute-sacrificial")
