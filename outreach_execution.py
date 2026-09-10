@@ -32,7 +32,7 @@ def _sheet_rows_with_retry(sheets):
     last_error = None
     for attempt in range(5):
         try:
-            return sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
+            return sheets._rows_as_dicts("LeadFactory_ExecutionLog", "O")
         except Exception as exc:
             last_error = exc
             if attempt < 4:
@@ -163,11 +163,11 @@ class SacrificialEmailExecutor:
         # broad external-write flags and factory-send interlocks are intentionally
         # outside this isolated executor.
         if not _truthy(cfg.get("OUTREACH_SACRIFICE_SEND_ENABLED")):
-            return {"status": "BLOCKED", "reason": "sacrificial_send_disabled"}
+            return {"status": "BLOCKED", "reason": "sacrificial_send_disabled", "recipient": str(draft.get("recipient") or "").strip()}
 
         preflight = semantic_email_preflight(draft, cfg)
         if not preflight["ok"]:
-            return {"status": "BLOCKED_PREFLIGHT", **preflight}
+            return {"status": "BLOCKED_PREFLIGHT", "recipient": str(draft.get("recipient") or "").strip(), **preflight}
 
         prompt_check = prompt_freshness_preflight(draft, self.drive, self.prompt_title)
         if not prompt_check.get("ok"):
@@ -175,7 +175,7 @@ class SacrificialEmailExecutor:
 
         key = f"sacrificial:{draft.get('draft_id','')}:{preflight['message_hash']}"
         if key in self._sent_keys:
-            return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key}
+            return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "recipient": str(draft.get("recipient") or "").strip()}
         sheet_idempotency_error = ""
         try:
             existing = _sheet_rows_with_retry(self.sheets)
@@ -194,11 +194,12 @@ class SacrificialEmailExecutor:
                 return {
                     "status": "DUPLICATE_BLOCKED",
                     "idempotency_key": key,
+                    "recipient": str(draft.get("recipient") or "").strip(),
                     "existing_status": row_status,
                     "existing_message_id": row.get("message_id", ""),
                 }
         if any(str(row.get("idempotency_key") or "") == key for row in existing):
-            return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "existing_status": "SHEET_RECORD"}
+            return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "recipient": str(draft.get("recipient") or "").strip(), "existing_status": "SHEET_RECORD"}
 
         sender = os.getenv("LEAD_FACTORY_GMAIL_IMPERSONATE", "admin@a1-road.com").strip()
         creds, _ = default(scopes=["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/gmail.readonly"])
@@ -219,6 +220,7 @@ class SacrificialEmailExecutor:
                 return {
                     "status": "IDEMPOTENCY_LOOKUP_FAILED",
                     "idempotency_key": key,
+                    "recipient": str(draft.get("recipient") or "").strip(),
                     "reason": gmail_idempotency_error,
                 }
             existing_message_id = ""
@@ -226,6 +228,7 @@ class SacrificialEmailExecutor:
             return {
                 "status": "DUPLICATE_BLOCKED",
                 "idempotency_key": key,
+                "recipient": str(draft.get("recipient") or "").strip(),
                 "existing_message_id": existing_message_id,
             }
         message = MIMEText(str(draft.get("body") or ""), "plain", "utf-8")
@@ -266,6 +269,7 @@ class SacrificialEmailExecutor:
             "status": "SENT",
             "message_id": message_id,
             "idempotency_key": key,
+            "recipient": str(draft.get("recipient") or "").strip(),
             "preflight": preflight,
             "sender": sender,
             "audit_log_written": not bool(audit_log_error),
