@@ -99,13 +99,13 @@ def dispatch_lane(factory, lane: str) -> dict:
             return
         mode = "HTTP_FALLBACK_BOUNDED"
         try:
-            fallback_workers = max(1, min(4, int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_WORKERS", "4") or 4)))
+            fallback_workers = max(1, min(16, int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_WORKERS", "16") or 16)))
         except ValueError:
-            fallback_workers = 4
+            fallback_workers = 16
         try:
-            fallback_budget = max(1, min(4, int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_JOBS", "4") or 4)))
+            fallback_budget = max(1, min(32, int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_JOBS", "32") or 32)))
         except ValueError:
-            fallback_budget = 4
+            fallback_budget = 32
         selected_jobs = _bounded_fallback_jobs(fallback_jobs, fallback_budget)
         deferred = len(fallback_jobs) - len(selected_jobs)
         if deferred:
