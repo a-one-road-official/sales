@@ -589,10 +589,24 @@ def sales_leads_sacrifice_run(payload: dict):
             raise HTTPException(status_code=400, detail="sacrifice_batch_must_be_exactly_ten")
         lf = get_factory()
         cfg = lf._config()
-        execute_external = bool((payload or {}).get("execute_external", False))
+        requested_external = bool((payload or {}).get("execute_external", False))
+        approval_flags = (
+            os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE").upper() == "TRUE"
+            and os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE").upper() == "TRUE"
+            and os.getenv("LEAD_FACTORY_EXPLICIT_SEND_APPROVAL", "FALSE").upper() == "TRUE"
+        )
+        if requested_external and not approval_flags:
+            return {
+                "status": "EXTERNAL_SEND_BLOCKED",
+                "source": "sales_leads",
+                "lane": "EC_SACRIFICE",
+                "production_ssot_touched": False,
+                "external_send": "BLOCKED",
+                "blocked_reason": "explicit_send_approval_and_runtime_flags_required",
+            }
+        execute_external = requested_external and approval_flags
         if execute_external:
             cfg = dict(cfg)
-            cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = "TRUE"
             cfg["OUTREACH_FACTORY_SEND_ENABLED"] = "FALSE"
         executor = SacrificialEmailExecutor(lf.sheets) if execute_external else None
         return run_ten_sacrifice_batch(
