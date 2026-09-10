@@ -75,6 +75,10 @@ AUTOPILOT_COLUMNS = (
     "last_error",
     "next_action",
     "started_at",
+    "source_pool_count",
+    "source_consumed_count",
+    "source_candidates_count",
+    "source_remaining_count",
     "updated_at",
     "completed_at",
 )
@@ -280,6 +284,10 @@ class BPOAutopilot:
             "total_attempts": _int_value(row.get("total_attempts"), 0, 0, 4000),
             "total_successes": _int_value(row.get("total_successes"), 0, 0, 4000),
             "batch_sequence": _int_value(row.get("batch_sequence"), 0, 0, 1000000),
+            "source_pool_count": _int_value(row.get("source_pool_count"), 0, 0, 1000000),
+            "source_consumed_count": _int_value(row.get("source_consumed_count"), 0, 0, 1000000),
+            "source_candidates_count": _int_value(row.get("source_candidates_count"), 0, 0, BATCH_SIZE),
+            "source_remaining_count": _int_value(row.get("source_remaining_count"), 0, 0, 1000000),
             "passing_streak": _int_value(row.get("passing_streak"), 0, 0, 1000000),
             "stable": _truthy(row.get("stable")),
             "status": status,
@@ -310,6 +318,10 @@ class BPOAutopilot:
             "total_attempts": int(state.get("total_attempts", 0) or 0),
             "total_successes": int(state.get("total_successes", 0) or 0),
             "batch_sequence": int(state.get("batch_sequence", 0) or 0),
+            "source_pool_count": int(state.get("source_pool_count", 0) or 0),
+            "source_consumed_count": int(state.get("source_consumed_count", 0) or 0),
+            "source_candidates_count": int(state.get("source_candidates_count", 0) or 0),
+            "source_remaining_count": int(state.get("source_remaining_count", 0) or 0),
             "passing_streak": int(state.get("passing_streak", 0) or 0),
             "stable": bool(state.get("stable")),
             "strategy": dict(state.get("strategy") or {}),
@@ -344,6 +356,10 @@ class BPOAutopilot:
             "batch_id": state["job_id"],
             "lane": "BPO",
             "batch_sequence": state.get("batch_sequence", 0),
+            "source_pool_count": state.get("source_pool_count", 0),
+            "source_consumed_count": state.get("source_consumed_count", 0),
+            "source_candidates_count": state.get("source_candidates_count", 0),
+            "source_remaining_count": state.get("source_remaining_count", 0),
             "autopilot_status": state.get("status", "UNKNOWN"),
             "target_successes": state.get("target_successes", 0),
             "max_attempts": state.get("max_attempts", 0),
@@ -385,6 +401,10 @@ class BPOAutopilot:
             "autopilot_status": "BATCH_RECORDED",
             "attempted": attempted,
             "semantic_success": successes,
+            "source_pool_count": result.get("source_pool_count", 0),
+            "source_consumed_count": result.get("source_consumed_count", 0),
+            "source_candidates_count": result.get("source_candidates_count", attempted),
+            "source_remaining_count": result.get("source_remaining_count", 0),
             "stability_status": "",
             "batch_gate_status": gate.get("batch_status", "FAIL"),
             "failure_analysis": _json(analysis)[:12000],
@@ -597,6 +617,10 @@ class BPOAutopilot:
                 attempted_reported = _int_value(result.get("attempted"), len(rows), 0, 10)
                 attempted = len(rows)
                 successes = sum(1 for row in rows if row.get("semantic_success"))
+                state["source_pool_count"] = _int_value(result.get("source_pool_count"), 0, 0, 1000000)
+                state["source_consumed_count"] = _int_value(result.get("source_consumed_count"), 0, 0, 1000000)
+                state["source_candidates_count"] = _int_value(result.get("source_candidates_count"), attempted, 0, BATCH_SIZE)
+                state["source_remaining_count"] = _int_value(result.get("source_remaining_count"), 0, 0, 1000000)
                 integrity_errors = []
                 if attempted_reported != attempted:
                     integrity_errors.append("BATCH_ATTEMPT_COUNT_MISMATCH")
@@ -676,7 +700,11 @@ class BPOAutopilot:
                     self._finish(
                         state, "SOURCE_CAPACITY_SHORTFALL",
                         next_action="EXPAND_VERIFIED_BPO_SOURCE",
-                        error="no_unconsumed_bpo_candidates",
+                        error=(
+                            "no_unconsumed_bpo_candidates;"
+                            f"source_pool={state.get('source_pool_count', 0)};"
+                            f"source_consumed={state.get('source_consumed_count', 0)}"
+                        ),
                     )
                     return
                 if state["total_successes"] >= state["target_successes"]:
