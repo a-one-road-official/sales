@@ -293,18 +293,6 @@ jobs:
           done
 
 
-      - name: Bootstrap outreach Prompt refresh
-        continue-on-error: true
-        run: |
-          echo "POST /prep/tick (internal outreach Prompt SSOT refresh)"
-          timeout 480 curl --fail-with-body --silent --show-error --retry 2 --retry-all-errors --retry-delay 5 \
-            -X POST \
-            -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
-            -H "Content-Type: application/json" \
-            "${SERVICE_URL}/prep/tick" || \
-            echo "::warning::outreach Prompt refresh deferred; the five-minute scheduler will retry"
-          echo
-
       - name: Bootstrap deterministic MAKTEK raw capture
         continue-on-error: true
         run: |
