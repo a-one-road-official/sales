@@ -561,7 +561,8 @@ def _sacrifice_limit(payload: dict | None) -> int:
 
 
 def _sacrifice_send_enabled() -> bool:
-    return os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE").upper() == "TRUE"
+    # List-only production mode: customer-facing sending is hard-disabled.
+    return False
 
 
 def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict:
