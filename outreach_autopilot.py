@@ -586,7 +586,7 @@ class BPOAutopilot:
                     )
                     return
                 result_lane = str(result.get("lane") or "").strip().upper()
-                if result_lane and result_lane != "BPO":
+                if result_lane != "BPO":
                     self._finish(
                         state, "PAUSED_SAFETY",
                         next_action="HUMAN_REVIEW_REQUIRED",
@@ -659,6 +659,10 @@ class BPOAutopilot:
                     adjustments=adjustments,
                     result=result,
                 )
+                # Checkpoint after every completed ten-item batch. A process or
+                # revision restart can resume from the latest counters instead
+                # of replaying the job from zero.
+                self._persist_state(state)
 
                 if critical:
                     self._finish(
