@@ -350,6 +350,8 @@ def _select_phone_country(el, context=None) -> tuple[bool, bool]:
                     option.click(timeout=5000)
                     return True, True
         return True, False
+    except Exception:
+        return True, False
 
 
 def _current_value(el) -> str:
