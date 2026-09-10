@@ -289,7 +289,8 @@ def _dom_click_matching_option(el, wanted_tokens) -> str:
                     const options = local.concat(global.filter(item => !local.includes(item)));
                     const tokens = (payload || []).map(normalise).filter(Boolean);
                     const candidate = options.find(option => {
-                        if (!visible(option)) return false;
+                        const isLocalOption = local.includes(option);
+                        if (!isLocalOption && !visible(option)) return false;
                         const haystack = normalise(option.innerText || option.textContent || '');
                         return !tokens.length || tokens.some(token => haystack.includes(token));
                     });
