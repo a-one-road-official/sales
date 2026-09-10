@@ -95,7 +95,11 @@ class SheetsRepo:
                     status = getattr(exc.resp, "status", None)
                     if status not in {429, 500, 502, 503, 504} or attempt == 4:
                         raise
-                    time.sleep(min(8.0, 2 ** attempt))
+                    # Sheets' per-user read quota is a one-minute window.
+                    # Short retries only reproduce 429s while concurrent internal
+                    # ticks are active, so let the read retry cross that window.
+                    delay = min(70.0, 15.0 * (attempt + 1)) if status == 429 else min(8.0, 2 ** attempt)
+                    time.sleep(delay)
             return []
 
 
