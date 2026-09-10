@@ -1,4 +1,4 @@
-"""Execute the approved EC/retail sacrifice lane one company at a time."""
+"""Execute one approved outbound lane one company at a time."""
 from __future__ import annotations
 
 import hashlib
@@ -13,7 +13,13 @@ from urllib.parse import urlparse
 
 from outreach_execution import prompt_freshness_preflight, semantic_email_preflight
 from sacrifice_web_research import inspect_official_site
-from sales_leads_sacrifice import _host, load_rows, make_research_context, sacrifice_candidates
+from sales_leads_sacrifice import (
+    _host,
+    load_rows,
+    make_research_context,
+    sacrifice_candidates,
+    source_path_for_lane,
+)
 
 PROMPT_DOC_TITLE = "outreach_prompt_production_v1"
 SENDER_EMAIL = "admin@a1-road.com"
@@ -147,7 +153,7 @@ def _unique(values) -> list[str]:
     return out
 
 
-def _attempted_source_rows(sheets) -> set[str]:
+def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
     if sheets is None:
         raise RuntimeError("sacrifice_attempt_history_unavailable")
     last_error = None
@@ -164,7 +170,11 @@ def _attempted_source_rows(sheets) -> set[str]:
         raise RuntimeError("sacrifice_attempt_history_unavailable") from last_error
     consumed = set()
     for row in rows:
-        if "SACRIFICE" not in str(row.get("lane") or "").upper():
+        row_lane = str(row.get("lane") or "").strip().upper()
+        if lane == "BPO":
+            if row_lane != "BPO":
+                continue
+        elif "SACRIFICE" not in row_lane:
             continue
         # Failed and unconfirmed attempts are retryable. Only a confirmed send,
         # confirmed form submission, or an explicit duplicate block consumes a row.
@@ -245,7 +255,7 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
         "draft_id": f"{run_id}:{source_row}",
         "source_row": source_row,
         "company_name": candidate.get("company_name", ""),
-        "lane": "EC_SACRIFICE",
+        "lane": str(result.get("lane") or candidate.get("sacrifice_lane") or "EC_SACRIFICE").strip().upper(),
         "channel": "FORM" if result.get("stage") == "FORM_EXECUTION" else "EMAIL",
         "status": result.get("status", "FAILED"),
         "semantic_success": result.get("status") in {"SENT", "FORM_SENT"},
@@ -279,7 +289,7 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
 def _audit_base(candidate: dict) -> dict:
     return {
         "source": "sales_leads",
-        "lane": "EC_SACRIFICE",
+        "lane": str(candidate.get("sacrifice_lane") or "EC_SACRIFICE").strip().upper(),
         "source_sheet": candidate.get("source_sheet", "営業リスト_Vendor"),
         "source_row": str(candidate.get("source_row") or ""),
         "company_name": candidate.get("company_name", ""),
@@ -341,15 +351,25 @@ def run_ten_sacrifice_batch(
     limit: int = 10,
     batch_id: str | None = None,
     batch_slot: int | None = None,
+    lane: str = "EC_SACRIFICE",
 ):
     limit = _bounded_limit(limit)
+    normalized_lane = str(lane or "EC_SACRIFICE").strip().upper()
+    if normalized_lane not in {"EC_SACRIFICE", "BPO"}:
+        raise ValueError("unsupported_sacrifice_lane")
     cfg = dict(cfg or {})
     sheets = getattr(executor, "sheets", None)
     batch_token = str(batch_id or uuid.uuid4().hex).strip()
-    run_id = f"sales-leads-sacrifice-{batch_token}"
+    run_id = f"sales-leads-{normalized_lane.lower()}-{batch_token}"
     normalized_slot = None if batch_slot is None else int(batch_slot)
-    rows = load_rows()
-    pool = sacrifice_candidates(rows, limit=max(limit, len(rows)))
+    rows = load_rows(source_path_for_lane(normalized_lane))
+    target_domain = "BPO" if normalized_lane == "BPO" else "EC/リテール"
+    pool = sacrifice_candidates(
+        rows,
+        limit=max(limit, len(rows)),
+        domain=target_domain,
+        lane=normalized_lane,
+    )
     target_names = {
         re.sub(r"[^a-z0-9]+", "", value.strip().lower())
         for value in re.split(r"[|,]", str(os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES") or ""))
@@ -365,7 +385,7 @@ def run_ten_sacrifice_batch(
     consumed = (
         set()
         if assignment_exists
-        else _attempted_source_rows(sheets) if execute_external else set()
+        else _attempted_source_rows(sheets, lane=normalized_lane) if execute_external else set()
     )
     candidates = _batch_candidates(        pool,
         consumed,
@@ -384,7 +404,7 @@ def run_ten_sacrifice_batch(
             "company_name": candidate.get("company_name", ""),
             "source_row": candidate.get("source_row", ""),
             "source": "sales_leads",
-            "lane": "EC_SACRIFICE",
+            "lane": normalized_lane,
             "batch_id": batch_token,
             "batch_slot": normalized_slot,
             "production_ssot_touched": False,
@@ -600,8 +620,8 @@ def run_ten_sacrifice_batch(
                         "subject": draft_subject,
                         "body": draft_body,
                         "company_name": candidate.get("company_name", ""),
-                        "lane": "EC_SACRIFICE",
-                        "source_type": "EC_SACRIFICE",
+                        "lane": normalized_lane,
+                        "source_type": normalized_lane,
                         "verified_website": site.get("official_website", site_url),
                         "source_row": candidate.get("source_row", ""),
                         "draft_id": f"{run_id}:{candidate.get('source_row', '')}",
@@ -708,7 +728,7 @@ def run_ten_sacrifice_batch(
         "batch_id": batch_token,
         "status": "EXHAUSTED" if attempted == 0 else "COMPLETE",
         "source": "sales_leads",
-        "lane": "EC_SACRIFICE",
+        "lane": normalized_lane,
         "attempted": attempted,
         "success_count": success_count,
         "email_success_count": len(email_message_ids),
