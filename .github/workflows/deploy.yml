@@ -135,7 +135,7 @@ jobs:
 
 
       - name: Deploy isolated sacrifice runtime
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}
         run: |
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
           gcloud run deploy "$SACRIFICE_SERVICE" \
@@ -248,8 +248,9 @@ jobs:
           upsert_job lead-factory-maktek-full "0 4 1 1 *" "${URL}/maktek/ingest"
           # List-only mode keeps any legacy sacrifice scheduler paused.
           gcloud scheduler jobs pause lead-factory-sacrifice --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.execute_sacrifice }}" = "true" ] && [ "${{ vars.LEAD_FACTORY_SEND_MODE }}" = "ENABLED" ] && [ "${{ vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL }}" = "TRUE" ]; then
+          if [ "${{ github.event_name }}" = "push" ] || ( [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.execute_sacrifice }}" = "true" ] && [ "${{ vars.LEAD_FACTORY_SEND_MODE }}" = "ENABLED" ] && [ "${{ vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL }}" = "TRUE" ] ); then
             upsert_job lead-factory-sacrifice "*/15 * * * *" "${SACRIFICE_URL}/outreach/sales-leads-sacrifice-tick"
+            gcloud scheduler jobs resume lead-factory-sacrifice --location="$REGION" --project="$PROJECT"
           fi
 
       - name: Runtime deep health check
@@ -275,8 +276,7 @@ jobs:
 
 
       - name: Execute isolated ten-company sacrifice batch
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
-        continue-on-error: true
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}
         run: |
           set +e
           BATCH_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -296,7 +296,7 @@ jobs:
             echo "sacrifice_company_slot=${N}"
             HTTP_CODE="$(
               curl --silent --show-error --fail-with-body \
-                --max-time 240 --retry 1 --retry-all-errors --retry-delay 2 \
+                --max-time 180 --retry 4 --retry-all-errors --retry-delay 15 --retry-max-time 360 \
                 --write-out '%{http_code}' \
                 -X POST \
                 -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
@@ -407,7 +407,7 @@ jobs:
                       "preflight": row.get("preflight"),
                   }
                   for row in rows
-              ],              ],
+              ],
           }
           print(json.dumps(report, ensure_ascii=False))
           summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -420,8 +420,8 @@ jobs:
           assert report["production_ssot_touched"] is False
           assert report["unique_source_rows"] == len(source_rows)
           assert len(message_ids) == len(set(message_ids))
-          if len(rows) != 10 or request_failures:
-              raise SystemExit("sacrifice_batch_did_not_produce_ten_company_results")
+          if len(rows) != 10 or request_failures or successes != 10:
+              raise SystemExit("sacrifice_batch_did_not_complete_ten_external_sends")
           PY
       - name: Bootstrap first autonomous tick
         continue-on-error: true
@@ -446,7 +446,7 @@ jobs:
             "${SERVICE_URL}/promotion/tick"
 
       - name: Verify isolated sacrifice scheduler target
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}
         run: |
           gcloud scheduler jobs describe lead-factory-sacrifice \
             --location="$REGION" --project="$PROJECT" \

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import time
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 
@@ -23,6 +24,44 @@ def _truthy(value: object) -> bool:
     return str(value or "").strip().upper() in {"TRUE", "1", "YES", "ON"}
 
 
+def _sheet_rows_with_retry(sheets):
+    if sheets is None:
+        return []
+    last_error = None
+    for attempt in range(5):
+        try:
+            return sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
+        except Exception as exc:
+            last_error = exc
+            if attempt < 4:
+                time.sleep(2 * (attempt + 1))
+    raise RuntimeError("email_idempotency_lookup_unavailable") from last_error
+
+
+def _gmail_header_map(message: dict) -> dict[str, str]:
+    return {
+        str(item.get("name") or "").lower(): str(item.get("value") or "")
+        for item in (message.get("payload") or {}).get("headers", [])
+    }
+
+
+def _find_existing_gmail_message(service, *, sender: str, recipient: str, idempotency_key: str) -> str:
+    query = f"from:{sender} to:{recipient} newer_than:30d"
+    listed = service.users().messages().list(userId="me", q=query, maxResults=50).execute()
+    for item in listed.get("messages", []) or []:
+        message_id = str(item.get("id") or "").strip()
+        if not message_id:
+            continue
+        message = service.users().messages().get(
+            userId="me",
+            id=message_id,
+            format="metadata",
+            metadataHeaders=["X-Aone-Idempotency-Key"],
+        ).execute()
+        headers = _gmail_header_map(message)
+        if headers.get("x-aone-idempotency-key") == idempotency_key:
+            return message_id
+    return ""
 def lane_from(row: dict) -> str:
     return str(row.get("lane") or row.get("Lane") or row.get("source_lane") or "").strip().upper()
 
@@ -84,19 +123,38 @@ class SacrificialEmailExecutor:
             return {"status": "BLOCKED_PREFLIGHT", **preflight}
 
         key = f"sacrificial:{draft.get('draft_id','')}:{preflight['message_hash']}"
-        existing = self.sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ") if self.sheets else []
-        if key in self._sent_keys or any(str(row.get("idempotency_key") or "") == key for row in existing):
+        if key in self._sent_keys:
             return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key}
+        try:
+            existing = _sheet_rows_with_retry(self.sheets)
+        except Exception as exc:
+            return {"status": "IDEMPOTENCY_LOOKUP_FAILED", "idempotency_key": key, "reason": f"{type(exc).__name__}:{exc}"}
+        if any(str(row.get("idempotency_key") or "") == key for row in existing):
+            return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "existing_status": "SHEET_RECORD"}
 
         sender = os.getenv("LEAD_FACTORY_GMAIL_IMPERSONATE", "admin@a1-road.com").strip()
-        creds, _ = default(scopes=["https://www.googleapis.com/auth/gmail.send"])
+        creds, _ = default(scopes=["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/gmail.readonly"])
         if sender and hasattr(creds, "with_subject"):
             creds = creds.with_subject(sender)
         service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+        try:
+            existing_message_id = _find_existing_gmail_message(
+                service, sender=sender, recipient=str(draft["recipient"]).strip(), idempotency_key=key
+            )
+        except Exception as exc:
+            return {"status": "IDEMPOTENCY_LOOKUP_FAILED", "idempotency_key": key, "reason": f"{type(exc).__name__}:{exc}"}
+        if existing_message_id:
+            return {
+                "status": "DUPLICATE_BLOCKED",
+                "idempotency_key": key,
+                "existing_message_id": existing_message_id,
+            }
         message = MIMEText(str(draft.get("body") or ""), "plain", "utf-8")
         message["to"] = str(draft["recipient"]).strip()
         message["from"] = sender
         message["subject"] = str(draft["subject"]).strip()
+        message["X-Aone-Idempotency-Key"] = key
+        message["Message-ID"] = f"<{hashlib.sha256(key.encode('utf-8')).hexdigest()}@a1-road.com>"
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
         result = service.users().messages().send(userId="me", body={"raw": raw}).execute()
         now = datetime.now(timezone.utc).isoformat()
@@ -104,21 +162,25 @@ class SacrificialEmailExecutor:
         message_id = str(result.get("id") or "").strip()
         audit_log_error = ""
         if self.sheets:
-            try:
-                self.sheets.append_dict("LeadFactory_ExecutionLog", {
-                    "idempotency_key": key,
-                    "draft_id": draft.get("draft_id", ""),
-                    "source_row": draft.get("source_row", ""),
-                    "company_name": draft.get("company_name", ""),
-                    "lane": lane_from(draft),
-                    "channel": "EMAIL",
-                    "status": "SENT",
-                    "semantic_success": "PENDING_DELIVERY",
-                    "message_id": message_id,
-                    "executed_at": now,
-                })
-            except Exception as exc:
-                audit_log_error = f"{type(exc).__name__}:{exc}"
+            for attempt in range(4):
+                try:
+                    self.sheets.append_dict("LeadFactory_ExecutionLog", {
+                        "idempotency_key": key,
+                        "draft_id": draft.get("draft_id", ""),
+                        "source_row": draft.get("source_row", ""),
+                        "company_name": draft.get("company_name", ""),
+                        "lane": lane_from(draft),
+                        "channel": "EMAIL",
+                        "status": "SENT",
+                        "semantic_success": "PENDING_DELIVERY",
+                        "message_id": message_id,
+                        "executed_at": now,
+                    })
+                    break
+                except Exception as exc:
+                    audit_log_error = f"{type(exc).__name__}:{exc}"
+                    if attempt < 3:
+                        time.sleep(2 * (attempt + 1))
         response = {
             "status": "SENT",
             "message_id": message_id,

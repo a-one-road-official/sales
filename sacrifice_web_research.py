@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from sales_leads_sacrifice import _host
 
 EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
-CONTACT_WORDS = ("contact", "inquiry", "enquiry", "sales", "support", "お問い合わせ")
+CONTACT_WORDS = ("contact", "inquiry", "enquiry", "sales", "support", "demo", "get in touch", "talk to sales", "お問い合わせ")
 
 
 def inspect_official_site(url: str, *, max_pages: int = 5) -> dict:

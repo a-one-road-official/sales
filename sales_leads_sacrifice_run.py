@@ -4,19 +4,64 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from outreach_execution import semantic_email_preflight
 from sacrifice_web_research import inspect_official_site
-from sales_leads_sacrifice import load_rows, make_research_context, sacrifice_candidates
+from sales_leads_sacrifice import _host, load_rows, make_research_context, sacrifice_candidates
 
 PROMPT_DOC_ID = "1joNEah7AuIF0-28PmVtgV9TcprEYneHSE5giUIayq5U"
 PROMPT_FALLBACK = """Write one concise English sales email from Kazuma Tamura, founder of A-one road Co., Ltd., Yokohama. Use only verified public evidence about the target. Mention the target's own product terms, one concrete Japan use case, and ask for a 20-30 minute meeting. Include exactly once: https://calendar.app.google/adKEhXC4UWhQXfJp6. Keep the body 90-140 words. Signature exactly: Kazuma Tamura
 A-one road Co., Ltd.
 Yokohama, Japan. Never guess a person or email. Return JSON with subject and body only."""
 SENDER_EMAIL = "admin@a1-road.com"
+
+# The source snapshot contains several shifted/mismatched website cells. These
+# verified first-party domains repair identity before any contact is considered.
+CANONICAL_WEBSITE_HINTS = {
+    "Cybord": "https://cybord.ai",
+    "NewStore": "https://www.newstore.com",
+    "Prisync": "https://prisync.com",
+    "Chord Commerce": "https://chordcommerce.com",
+    "Litmus": "https://www.litmus.com",
+    "YesPlz": "https://yesplz.ai",
+    "Fabrikatör": "https://www.fabrikator.io",
+    "Narvar": "https://corp.narvar.com",
+    "Workato": "https://www.workato.com",
+    "Abnormal AI": "https://abnormal.ai",
+    "Alokai": "https://www.alokai.io",
+}
+
+_PLACEHOLDER_EMAIL_DOMAINS = {
+    "example.com",
+    "company.com",
+    "vendor-portal.com",
+    "test.com",
+}
+
+
+def _email_matches_site(email: str, website: str, site: dict | None = None) -> bool:
+    match = re.fullmatch(r"[A-Z0-9._%+-]+@([A-Z0-9.-]+\.[A-Z]{2,})", str(email or "").strip(), re.I)
+    if not match:
+        return False
+    email_host = match.group(1).lower().removeprefix("www").rstrip(".")
+    if email_host in _PLACEHOLDER_EMAIL_DOMAINS:
+        return False
+    site_host = _host((site or {}).get("official_website") or website)
+    if not site_host:
+        site_host = str((site or {}).get("site_host") or "").lower().removeprefix("www").rstrip(".")
+    if not site_host:
+        return False
+    return bool(
+        email_host == site_host
+        or email_host.endswith("." + site_host)
+        or site_host.endswith("." + email_host)
+    )
 
 
 def _hash(*values: object) -> str:
@@ -43,11 +88,19 @@ def _unique(values) -> list[str]:
 
 def _attempted_source_rows(sheets) -> set[str]:
     if sheets is None:
-        return set()
-    try:
-        rows = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
-    except Exception:
-        return set()
+        raise RuntimeError("sacrifice_attempt_history_unavailable")
+    last_error = None
+    rows = None
+    for attempt in range(5):
+        try:
+            rows = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
+            break
+        except Exception as exc:
+            last_error = exc
+            if attempt < 4:
+                time.sleep(2 * (attempt + 1))
+    if rows is None:
+        raise RuntimeError("sacrifice_attempt_history_unavailable") from last_error
     consumed = set()
     for row in rows:
         if "SACRIFICE" not in str(row.get("lane") or "").upper():
@@ -129,10 +182,17 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
             return
     except Exception:
         pass
-    try:
-        sheets.append_dict("LeadFactory_ExecutionLog", record)
-    except Exception:
-        pass
+    last_error = None
+    for attempt in range(4):
+        try:
+            sheets.append_dict("LeadFactory_ExecutionLog", record)
+            return
+        except Exception as exc:
+            last_error = exc
+            if attempt < 3:
+                time.sleep(2 * (attempt + 1))
+    if last_error:
+        result.setdefault("audit_log_error", f"{type(last_error).__name__}:{last_error}")
 
 
 def _audit_base(candidate: dict) -> dict:
@@ -177,9 +237,14 @@ def run_ten_sacrifice_batch(
     normalized_slot = None if batch_slot is None else int(batch_slot)
     rows = load_rows()
     pool = sacrifice_candidates(rows, limit=max(limit, len(rows)))
-    consumed = _attempted_source_rows(sheets) if execute_external else set()
-    candidates = _batch_candidates(
-        pool,
+    with _BATCH_ASSIGNMENTS_LOCK:
+        assignment_exists = normalized_slot is not None and batch_token in _BATCH_ASSIGNMENTS
+    consumed = (
+        set()
+        if assignment_exists
+        else _attempted_source_rows(sheets) if execute_external else set()
+    )
+    candidates = _batch_candidates(        pool,
         consumed,
         batch_token=batch_token,
         batch_slot=normalized_slot,
@@ -213,8 +278,16 @@ def run_ten_sacrifice_batch(
         context = make_research_context(candidate)
         try:
             evidence = candidate.get("candidate_website_evidence", {})
-            site_url = str(candidate.get("candidate_website") or "").strip()
-            if evidence.get("status") == "MISMATCH_REJECTED":
+            source_site_url = str(candidate.get("candidate_website") or "").strip()
+            canonical_site_url = CANONICAL_WEBSITE_HINTS.get(str(candidate.get("company_name") or "").strip(), "")
+            site_url = canonical_site_url or source_site_url
+            if canonical_site_url:
+                result["domain_resolution"] = {
+                    "status": "VERIFIED_HINT",
+                    "official_website": canonical_site_url,
+                    "source": "first_party_domain_catalog",
+                }
+            elif evidence.get("status") == "MISMATCH_REJECTED":
                 resolved = llm.resolve_company_domain(context) if hasattr(llm, "resolve_company_domain") else {}
                 result["domain_resolution"] = resolved
                 site_url = str(resolved.get("official_website") or "").strip()
@@ -230,15 +303,24 @@ def run_ten_sacrifice_batch(
                 result.update(status="FAILED", stage="SITE_RESEARCH", error_message="official_site_not_verified")
             else:
                 research = llm.research_outreach_contact(context)
-                email = str(research.get("email") or "").strip()
-                if not email and site.get("emails"):
-                    email = str(site["emails"][0]).strip()
+                proposed_email = str(research.get("email") or "").strip()
+                email = proposed_email if _email_matches_site(proposed_email, site.get("official_website", site_url), site) else ""
+                rejected_email = proposed_email if proposed_email and not email else ""
+                if not email:
+                    verified_site_emails = [
+                        value
+                        for value in _unique(site.get("emails") or [])
+                        if _email_matches_site(value, site.get("official_website", site_url), site)
+                    ]
+                    email = verified_site_emails[0] if verified_site_emails else ""
                 result["research"] = research
                 result["recipient_evidence"] = {
                     "email": email,
+                    "rejected_email": rejected_email,
                     "evidence_urls": research.get("evidence_urls", []),
                     "confidence": research.get("confidence", ""),
                     "status": research.get("status", ""),
+                    "first_party_domain_verified": bool(email),
                 }
                 result["audit"].update(
                     evidence_urls=_research_urls(site, research),

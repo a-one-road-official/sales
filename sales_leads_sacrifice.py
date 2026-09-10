@@ -22,7 +22,7 @@ SACRIFICE_DOMAIN = "EC/リテール"
 # manufacturing, industrial software, additive manufacturing, inspection, or
 # factory operations—the exact population the production pipeline targets.
 FACTORY_OR_INDUSTRIAL_NAMES = {
-    "Bambu Lab", "Guidewheel", "Smartex", "Arch Systems", "Augury", "Cognite",
+    "Bambu Lab", "Cybord", "Guidewheel", "Smartex", "Arch Systems", "Augury", "Cognite",
     "m4p material solutions", "PostProcess Technologies", "ProovStation", "nTop(旧nTopology)", "Litmus",
     "6K Additive", "Ai Build", "AM Solutions(Röslerグループ)", "Divergent Technologies",
     "DyeMansion", "Eplus3D", "Fictiv", "Forward AM", "Instrumental", "Kitov.ai",
