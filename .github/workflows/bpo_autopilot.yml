@@ -36,7 +36,8 @@ concurrency:
 
 jobs:
   sales-gtm-autopilot:
-    if: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sales_gtm == true)) && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
+    # Explicit approval remains enforced inside the runtime send gate; startup is automatic on approved workflow pushes.
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sales_gtm == true) }}
     runs-on: ubuntu-latest
       # Actions deploys and observes the worker. Cloud Run continues the job.
     timeout-minutes: 60
