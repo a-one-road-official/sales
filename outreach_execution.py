@@ -94,6 +94,7 @@ def _find_existing_gmail_message_with_retry(service, *, sender: str, recipient: 
 PROTECTED_FACTORY_LANES = {
     "FACTORY",
     "BPO",
+    "SALES_GTM",
     "SSOT",
     "FACTORY_SSOT",
     "PRODUCTION_SSOT",
@@ -107,10 +108,13 @@ def lane_from(row: dict) -> str:
     for key in ("lane", "outreach_lane", "source_lane"):
         value = str(data.get(key) or "").strip()
         if value:
-            return "".join(
+            normalized = "".join(
                 char if char.isalnum() else "_"
                 for char in value.upper()
             ).strip("_")
+            if normalized in {"営業_GTM", "SALES_GTM"}:
+                return "SALES_GTM"
+            return normalized
     return ""
 
 
@@ -121,6 +125,8 @@ def _lane_flag(lane: str) -> str:
     ).strip("_")
     if normalized in {"EC", "RETAIL", "SACRIFICE", "EC_SACRIFICE"}:
         return "OUTREACH_SACRIFICE_SEND_ENABLED"
+    if normalized in {"営業_GTM", "SALES_GTM"}:
+        return "OUTREACH_SALES_GTM_SEND_ENABLED"
     return f"OUTREACH_{normalized}_SEND_ENABLED"
 
 
@@ -152,11 +158,11 @@ def outbound_lane_send_enabled(lane: str, cfg: dict[str, str]) -> bool:
         and str(cfg.get("LEAD_FACTORY_SEND_MODE", "")).strip().upper() == "ENABLED"
         and _cfg_truthy(cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL")
     )
-    if normalized == "BPO":
+    if normalized in {"BPO", "SALES_GTM"}:
         return (
-            "BPO" in allowed
+            normalized in allowed
             and common
-            and _cfg_truthy(cfg, "OUTREACH_BPO_SEND_ENABLED")
+            and _cfg_truthy(cfg, _lane_flag(normalized))
         )
     if normalized == "EC_SACRIFICE":
         target_companies = str(
@@ -379,9 +385,9 @@ class OutboundEmailExecutor:
             cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL"
         ):
             return "explicit_factory_send_approval_required"
-        if lane == "BPO":
+        if lane in {"BPO", "SALES_GTM"}:
             if lane not in allowed:
-                return "bpo_lane_not_allowed"
+                return f"{lane.lower()}_lane_not_allowed"
             return ""
         return "list_only_mode"
 
