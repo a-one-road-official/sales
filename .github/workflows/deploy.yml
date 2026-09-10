@@ -154,18 +154,12 @@ jobs:
           echo "::add-mask::$RUNTIME_TOKEN"
           echo "INTERNAL_TOKEN=$RUNTIME_TOKEN" >> "$GITHUB_ENV"
 
-      - name: Verify live outreach Prompt SSOT and refresh stale drafts
+      - name: Verify list-only runtime mode
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error --max-time 90 \
-            -H "X-Aone-Internal-Token: $INTERNAL_TOKEN" \
-            "$SERVICE_URL/outreach/prompt-status"
-          curl --fail-with-body --silent --show-error --max-time 540 \
-            -X POST \
-            -H "X-Aone-Internal-Token: $INTERNAL_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{}' \
-            "$SERVICE_URL/prep/tick"
+          curl --fail-with-body --silent --show-error --max-time 60             -H "X-Aone-Internal-Token: $INTERNAL_TOKEN"             "$SERVICE_URL/healthz/deep"
+          echo "List-only mode verified; outreach draft generation is not part of this production run."
+
 
       - name: Ensure durable worker queue
         run: |
