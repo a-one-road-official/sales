@@ -539,7 +539,7 @@ class BPOAutopilot:
                 # the monotonically increasing GitHub run ID, so an older
                 # revision must never stop or spawn alongside a newer job.
                 def _job_generation(value: str) -> int:
-                    match = re.search(r"(\\d+)$", str(value or ""))
+                    match = re.search(r"(\d+)$", str(value or ""))
                     return int(match.group(1)) if match else -1
 
                 expected_generation = _job_generation(expected)
