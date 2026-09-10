@@ -17,17 +17,15 @@ class TaskDispatcher:
         self.location = os.getenv("LEAD_FACTORY_TASKS_LOCATION", "asia-northeast1")
         self.queue = os.getenv("LEAD_FACTORY_TASKS_QUEUE", "lead-factory-workers")
         self.service_url = os.getenv("LEAD_FACTORY_SERVICE_URL", "").rstrip("/")
-        self.internal_token = os.getenv("LEAD_FACTORY_INTERNAL_TOKEN", "")
         self.service_account = os.getenv(
             "LEAD_FACTORY_TASKS_SERVICE_ACCOUNT",
             f"aone-lead-factory-deployer@{self.project}.iam.gserviceaccount.com" if self.project else "",
         )
+        self.internal_token = os.getenv("LEAD_FACTORY_INTERNAL_TOKEN", "")
         if not self.project:
             raise RuntimeError("missing_gcp_project")
         if not self.service_url:
             raise RuntimeError("missing_LEAD_FACTORY_SERVICE_URL")
-        if not self.internal_token:
-            raise RuntimeError("missing_LEAD_FACTORY_INTERNAL_TOKEN")
         if not self.service_account:
             raise RuntimeError("missing_task_service_account")
         self.client = tasks_v2.CloudTasksClient(credentials=creds)
@@ -47,13 +45,9 @@ class TaskDispatcher:
             "http_request": {
                 "http_method": tasks_v2.HttpMethod.POST,
                 "url": url,
-                # Cloud Tasks' OIDC token authenticates the caller to Cloud Run,
-                # while the app-level middleware requires this separate token.
-                # Without this header every queued worker receives 401 even when
-                # the task itself was created successfully.
                 "headers": {
                     "Content-Type": "application/json",
-                    "X-Aone-Internal-Token": self.internal_token,
+                    **({"X-Aone-Internal-Token": self.internal_token} if self.internal_token else {}),
                 },
                 "body": json.dumps(payload, ensure_ascii=False).encode("utf-8"),
                 "oidc_token": {
