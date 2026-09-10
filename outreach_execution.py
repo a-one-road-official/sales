@@ -46,8 +46,14 @@ def _gmail_header_map(message: dict) -> dict[str, str]:
 
 
 def _find_existing_gmail_message(service, *, sender: str, recipient: str, idempotency_key: str) -> str:
+    """Return any prior outbound message to this exact recipient.
+
+    The idempotency header protects retries from this worker.  The recipient
+    fallback also protects against older sends that predate that header.
+    """
     query = f"from:{sender} to:{recipient} newer_than:30d"
     listed = service.users().messages().list(userId="me", q=query, maxResults=50).execute()
+    fallback = ""
     for item in listed.get("messages", []) or []:
         message_id = str(item.get("id") or "").strip()
         if not message_id:
@@ -61,7 +67,9 @@ def _find_existing_gmail_message(service, *, sender: str, recipient: str, idempo
         headers = _gmail_header_map(message)
         if headers.get("x-aone-idempotency-key") == idempotency_key:
             return message_id
-    return ""
+        if not fallback:
+            fallback = message_id
+    return fallback
 def lane_from(row: dict) -> str:
     return str(row.get("lane") or row.get("Lane") or row.get("source_lane") or "").strip().upper()
 

@@ -190,15 +190,33 @@ class PublicContactFormExecutor:
     def __init__(self, sheets=None):
         self.sheets = sheets
 
-    def _existing(self, idempotency_key: str) -> dict | None:
+    def _existing(
+        self,
+        idempotency_key: str,
+        *,
+        company_name: str = "",
+        source_row: str = "",
+    ) -> dict | None:
         if self.sheets is None:
             return None
         try:
-            for row in self.sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ"):
-                if str(row.get("idempotency_key") or "") == idempotency_key:
-                    return row
-        except Exception:
-            return None
+            rows = self.sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
+        except Exception as exc:
+            raise RuntimeError("form_idempotency_lookup_unavailable") from exc
+        for row in rows:
+            if str(row.get("idempotency_key") or "") == idempotency_key:
+                return row
+            successful = str(row.get("status") or "").upper() in {"SENT", "FORM_SENT"}
+            if not successful:
+                continue
+            if source_row and str(row.get("source_row") or "").strip() == str(source_row).strip():
+                return row
+            if (
+                company_name
+                and str(row.get("company_name") or "").strip().casefold() == str(company_name).strip().casefold()
+                and str(row.get("channel") or "").upper() == "FORM"
+            ):
+                return row
         return None
 
     def execute(
@@ -245,7 +263,11 @@ class PublicContactFormExecutor:
 
         if not form_url or not _same_host_or_subdomain(form_url, website):
             return result_payload("FORM_FAILED", reason="FORM_HOST_UNVERIFIED")
-        duplicate = self._existing(idempotency_key)
+        duplicate = self._existing(
+            idempotency_key,
+            company_name=company_name,
+            source_row=source_row,
+        )
         if duplicate:
             return result_payload(
                 "DUPLICATE_BLOCKED",
