@@ -44,7 +44,7 @@ class SacrificeStability:
             prior = self._batches()
             streak = 0
             for row in reversed(prior):
-                if str(row.get("lane") or "").upper() not in {"EC", "RETAIL", "SACRIFICE"}:
+                if str(row.get("lane") or "").upper() not in {"EC", "RETAIL", "SACRIFICE", "EC_SACRIFICE"}:
                     continue
                 if str(row.get("stability_status") or "") != "BATCH_PASS":
                     break
