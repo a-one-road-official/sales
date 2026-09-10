@@ -89,7 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           BATCH_ID="${BATCH_ID_INPUT:-ec-${GITHUB_RUN_ID}}"
-          PAYLOAD="$(python -c 'import json,os; print(json.dumps({"limit":10,"batch_id":os.environ["BATCH_ID"],"dry_run":False}))' BATCH_ID="$BATCH_ID")"
+          PAYLOAD="$(BATCH_ID="$BATCH_ID" python -c 'import json,os; print(json.dumps({"limit":10,"batch_id":os.environ["BATCH_ID"],"dry_run":False}))')"
           RESPONSE="$(curl --fail-with-body --silent --show-error --max-time 540             -X POST             -H "X-Aone-Internal-Token: $INTERNAL_TOKEN"             -H "Content-Type: application/json"             -d "$PAYLOAD"             "$SERVICE_URL/outreach/sales-leads-sacrifice-run")"
           printf '%s' "$RESPONSE" > /tmp/ec-batch-response.json
           python -c 'import json; d=json.load(open("/tmp/ec-batch-response.json")); a=int(d.get("attempted",0) or 0); s=int(d.get("success_count",0) or 0); print({"batch_id":d.get("batch_id"),"attempted":a,"success_count":s,"failure_count":d.get("failure_count"),"external_action":d.get("external_action")}); assert a == 10, d; assert s >= 5, d'
