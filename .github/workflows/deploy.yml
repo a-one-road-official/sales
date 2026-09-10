@@ -263,7 +263,7 @@ jobs:
         run: |
           echo "Starting direct recovery execution; this step is independent of ChatGPT session lifetime."
           for ATTEMPT in 1 2 3 4 5 6; do
-            RESPONSE="$(timeout 90 curl --silent --show-error --fail-with-body \
+            RESPONSE="$(timeout 30 curl --silent --show-error --fail-with-body \
               -X POST \
               -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
               -H "Content-Type: application/json" \
@@ -274,7 +274,7 @@ jobs:
               echo "execution_started processed=${PROCESSED}"
               exit 0
             fi
-            sleep 20
+            sleep 10
           done
           echo "::warning::deployment succeeded; direct recovery execution is queued for Scheduler retry"
 
