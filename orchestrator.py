@@ -575,7 +575,7 @@ class LeadFactory:
 
 
 
-    def source_tick(self, run_id: str | None = None, lane: str | None = None) -> dict:
+    def source_tick(self, run_id: str | None = None, lane: str | None = None, limit: int | None = None) -> dict:
         """Crawl a bounded set of registered sources into LeadFactory_Raw.
 
         This is internal-only and can be smoke-tested while the global factory switch is FALSE.
@@ -586,13 +586,13 @@ class LeadFactory:
         if lane_key:
             if lane_key not in {"GROWTH", "MITTELSTAND"}:
                 raise ValueError(f"unsupported_lane:{lane_key}")
-            limit = int(cfg.get("SUPPLY_SOURCE_CRAWL_MAX_PER_TICK", "4") or 4)
+            limit = int(limit if limit is not None else (cfg.get("SUPPLY_SOURCE_CRAWL_MAX_PER_TICK", "4") or 4))
             recrawl = int(cfg.get("SOURCE_RECRAWL_AFTER_MINUTES", "1440") or 1440)
             sources = self.sheets.sources_for_crawl(
                 limit=max(0, limit), lane=lane_key.lower(), recrawl_after_minutes=recrawl
             )
         else:
-            limit = int(cfg.get("SOURCE_CRAWL_MAX_PER_RUN", "20") or 20)
+            limit = int(limit if limit is not None else (cfg.get("SOURCE_CRAWL_MAX_PER_RUN", "20") or 20))
             sources = self.sheets.sources_for_crawl(limit=max(0, limit))
         rid = run_id or f"sources-{uuid.uuid4()}"
         results = []
