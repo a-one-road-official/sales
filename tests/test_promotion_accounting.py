@@ -40,6 +40,12 @@ def test_excel_serial_added_at_is_valid_legacy_data():
     assert is_countable_sales_row(row)
 
 
+def test_locale_formatted_date_added_at_is_valid():
+    row = {"company_name": "Locale Date Co.", "added_at": "2026/08/30"}
+    assert sales_row_schema_error(row) == ""
+    assert is_countable_sales_row(row)
+
+
 def test_new_promotion_requires_gate_and_schema():
     row = {
         "company_name": "Qualified Co.",

@@ -52,9 +52,12 @@ def _parse_datetime(value: str, *, date_only_jst: bool = True) -> datetime | Non
     if serial is not None:
         return serial.astimezone(UTC)
     try:
-        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw) and date_only_jst:
-            return datetime.fromisoformat(raw).replace(tzinfo=JST).astimezone(UTC)
-        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        # Google Sheets may render legacy date cells using the account locale
+        # (for example 2026/08/30) even though the underlying value is valid.
+        normalized = raw.replace("/", "-")
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", normalized) and date_only_jst:
+            return datetime.fromisoformat(normalized).replace(tzinfo=JST).astimezone(UTC)
+        parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=JST)
         return parsed.astimezone(UTC)
