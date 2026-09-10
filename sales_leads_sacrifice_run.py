@@ -11,14 +11,11 @@ import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-from outreach_execution import semantic_email_preflight
+from outreach_execution import prompt_freshness_preflight, semantic_email_preflight
 from sacrifice_web_research import inspect_official_site
 from sales_leads_sacrifice import _host, load_rows, make_research_context, sacrifice_candidates
 
-PROMPT_DOC_ID = "1joNEah7AuIF0-28PmVtgV9TcprEYneHSE5giUIayq5U"
-PROMPT_FALLBACK = """Write one concise English sales email from Kazuma Tamura, founder of A-one road Co., Ltd., Yokohama. Use only verified public evidence about the target. Mention the target's own product terms, one concrete Japan use case, and ask for a 20-30 minute meeting. Include exactly once: https://calendar.app.google/adKEhXC4UWhQXfJp6. Keep the body 90-140 words. Signature exactly: Kazuma Tamura
-A-one road Co., Ltd.
-Yokohama, Japan. Never guess a person or email. Return JSON with subject and body only."""
+PROMPT_DOC_TITLE = "outreach_prompt_production_v1"
 SENDER_EMAIL = "admin@a1-road.com"
 
 # The source snapshot contains several shifted/mismatched website cells. These
@@ -66,6 +63,18 @@ def _email_matches_site(email: str, website: str, site: dict | None = None) -> b
 
 def _hash(*values: object) -> str:
     return hashlib.sha256("\n".join(str(v or "") for v in values).encode("utf-8")).hexdigest()
+
+
+def _draft_from_live_prompt(llm, drive, cfg: dict[str, str], company: dict, contact: dict) -> tuple[dict, dict]:
+    """Read, generate, and re-read until the Prompt revision is stable."""
+    title = str(cfg.get("OUTREACH_PROMPT_DOC_TITLE") or PROMPT_DOC_TITLE).strip()
+    for _ in range(3):
+        prompt, metadata = drive.read_live_prompt_by_title(title)
+        draft = llm.draft_outreach_email(prompt, company, contact)
+        _, latest = drive.read_live_prompt_by_title(title)
+        if latest.get("prompt_hash") == metadata.get("prompt_hash"):
+            return draft, latest
+    raise RuntimeError("PROMPT_CHANGED_DURING_DRAFT")
 
 
 def _bounded_limit(limit: int) -> int:
@@ -288,14 +297,8 @@ def run_ten_sacrifice_batch(
         limit=limit,
     )
 
-    try:
-        prompt, prompt_meta = drive.read_plain_text(
-            str(cfg.get("OUTREACH_PROMPT_DOC_ID") or PROMPT_DOC_ID)
-        )
-        if not prompt.strip():
-            prompt, prompt_meta = PROMPT_FALLBACK, {"source": "fallback"}
-    except Exception:
-        prompt, prompt_meta = PROMPT_FALLBACK, {"source": "fallback"}
+    prompt_title = str(cfg.get("OUTREACH_PROMPT_DOC_TITLE") or PROMPT_DOC_TITLE).strip()
+    prompt, prompt_meta = drive.read_live_prompt_by_title(prompt_title)
 
     results = []
 
@@ -424,10 +427,16 @@ def run_ten_sacrifice_batch(
                         "recipient_verified": True,
                         "contact_confidence": "FORM",
                     }
-                    draft = _verified_site_draft(candidate, site)
+                    draft, prompt_meta = _draft_from_live_prompt(llm, drive, cfg, context, form_contact)
                     form_url = form_links[0]
                     draft_subject = str(draft.get("subject") or "")
                     draft_body = str(draft.get("body") or "")
+                    result["prompt"] = {
+                        "prompt_doc_title": prompt_meta.get("prompt_doc_title", prompt_title),
+                        "prompt_doc_id": prompt_meta.get("prompt_doc_id", ""),
+                        "prompt_modified_time": prompt_meta.get("prompt_modified_time", ""),
+                        "prompt_hash": prompt_meta.get("prompt_hash", ""),
+                    }
                     result["draft"] = draft
                     result["message_hash"] = _hash(SENDER_EMAIL, draft_subject, draft_body)
                     result["audit"].update(
@@ -445,7 +454,10 @@ def run_ten_sacrifice_batch(
                         "form_url": form_url,
                         "idempotency_key": form_key,
                     }
-                    if execute_external:
+                    form_prompt_check = prompt_freshness_preflight({**form_contact, "prompt_hash": prompt_meta.get("prompt_hash", "")}, drive, prompt_title)
+                    if not form_prompt_check.get("ok"):
+                        result.update(status=form_prompt_check.get("status", "STALE_PROMPT"), stage="PROMPT_PREFLIGHT", error_message=form_prompt_check.get("reason", "prompt_not_current"))
+                    elif execute_external:
                         from form_execution import PublicContactFormExecutor
                         form_result = PublicContactFormExecutor(sheets=sheets).execute(
                             form_url=form_url,
@@ -476,7 +488,7 @@ def run_ten_sacrifice_batch(
                         "recipient_verified": True,
                         "contact_confidence": research.get("confidence", "HIGH"),
                     }
-                    draft = _verified_site_draft(candidate, site)
+                    draft, prompt_meta = _draft_from_live_prompt(llm, drive, cfg, context, contact)
                     draft_subject = str(draft.get("subject") or "")
                     draft_body = str(draft.get("body") or "")
                     row = {
@@ -491,6 +503,13 @@ def run_ten_sacrifice_batch(
                         "verified_website": site.get("official_website", site_url),
                         "source_row": candidate.get("source_row", ""),
                         "draft_id": f"{run_id}:{candidate.get('source_row', '')}",
+                        "prompt_hash": prompt_meta.get("prompt_hash", ""),
+                    }
+                    result["prompt"] = {
+                        "prompt_doc_title": prompt_meta.get("prompt_doc_title", prompt_title),
+                        "prompt_doc_id": prompt_meta.get("prompt_doc_id", ""),
+                        "prompt_modified_time": prompt_meta.get("prompt_modified_time", ""),
+                        "prompt_hash": prompt_meta.get("prompt_hash", ""),
                     }
                     result["draft"] = draft
                     result["message_hash"] = _hash(email, draft_subject, draft_body)
@@ -501,7 +520,11 @@ def run_ten_sacrifice_batch(
                         body=draft_body,
                         message_hash=result["message_hash"],
                     )
+                    row["prompt_hash"] = prompt_meta.get("prompt_hash", "")
                     result["preflight"] = semantic_email_preflight(row, cfg)
+                    result["prompt_preflight"] = prompt_freshness_preflight(row, drive, prompt_title)
+                    if not result["prompt_preflight"].get("ok"):
+                        result.update(status=result["prompt_preflight"].get("status", "STALE_PROMPT"), stage="PROMPT_PREFLIGHT", error_message=result["prompt_preflight"].get("reason", "prompt_not_current"))
                     if not result["preflight"].get("ok"):
                         result.update(
                             status="FAILED",
@@ -516,6 +539,17 @@ def run_ten_sacrifice_batch(
                         if executor is None:
                             raise RuntimeError("sacrifice_executor_not_configured")
                         execution = executor.execute(row, cfg)
+                        if execution.get("status") == "STALE_PROMPT":
+                            draft, prompt_meta = _draft_from_live_prompt(llm, drive, cfg, context, contact)
+                            row.update(subject=draft["subject"], body=draft["body"], prompt_hash=prompt_meta.get("prompt_hash", ""))
+                            result["draft"] = draft
+                            result["prompt"] = {
+                                "prompt_doc_title": prompt_meta.get("prompt_doc_title", prompt_title),
+                                "prompt_doc_id": prompt_meta.get("prompt_doc_id", ""),
+                                "prompt_modified_time": prompt_meta.get("prompt_modified_time", ""),
+                                "prompt_hash": prompt_meta.get("prompt_hash", ""),
+                            }
+                            execution = executor.execute(row, cfg)
                         result["execution"] = execution
                         result["external_action"] = execution.get("status", "UNKNOWN")
                         result.update(status=execution.get("status", "UNKNOWN"), stage="EXTERNAL_EXECUTION")
@@ -582,6 +616,11 @@ def run_ten_sacrifice_batch(
             else "FAILED"
         ),
         "production_ssot_touched": False,
-        "prompt": {"document_id": PROMPT_DOC_ID, **prompt_meta},
+        "prompt": {
+            "prompt_doc_title": prompt_meta.get("prompt_doc_title", prompt_title),
+            "prompt_doc_id": prompt_meta.get("prompt_doc_id", ""),
+            "prompt_modified_time": prompt_meta.get("prompt_modified_time", ""),
+            "prompt_hash": prompt_meta.get("prompt_hash", ""),
+        },
         "results": results,
     }
