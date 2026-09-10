@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -74,6 +75,87 @@ def load_rows(path: Path = SOURCE_PATH) -> list[dict]:
     if not isinstance(rows, list):
         raise RuntimeError("sales_leads_sacrifice_source_must_be_list")
     return [row for row in rows if isinstance(row, dict)]
+
+
+_BPO_LIVE_CACHE: list[dict] | None = None
+_BPO_LIVE_CACHE_AT = 0.0
+
+
+def _live_bpo_rows(sheets) -> list[dict]:
+    """Read explicit BPO rows from the existing SSOT when available."""
+    global _BPO_LIVE_CACHE, _BPO_LIVE_CACHE_AT
+    if sheets is None:
+        return []
+    try:
+        ttl = max(10, min(900, int(os.getenv("OUTREACH_BPO_LIVE_CACHE_SECONDS", "120") or 120)))
+    except (TypeError, ValueError):
+        ttl = 120
+    now = time.monotonic()
+    if _BPO_LIVE_CACHE is not None and now - _BPO_LIVE_CACHE_AT < ttl:
+        return [dict(row) for row in _BPO_LIVE_CACHE]
+    try:
+        source_rows = sheets._rows_as_dicts("営業リスト＿Factory/BPO", "ZZ")
+    except Exception:
+        return []
+    normalized = []
+    for row in source_rows:
+        category = str(
+            row.get("Category")
+            or row.get("category")
+            or row.get("domain")
+            or row.get("Domain")
+            or ""
+        ).strip().upper()
+        if not category.startswith("BPO"):
+            continue
+        status = str(row.get("Status") or row.get("status") or "未接触").strip()
+        if status not in {"", "未接触"}:
+            continue
+        company_name = str(row.get("company_name") or row.get("Company") or "").strip()
+        website = str(row.get("website") or row.get("Website") or "").strip()
+        if not company_name or not website:
+            continue
+        normalized.append({
+            "record_origin": "BPO_SHEET_SOURCE",
+            "domain": BPO_DOMAIN,
+            "source_sheet": "営業リスト＿Factory/BPO",
+            "source_sheet_actual": "営業リスト＿Factory/BPO",
+            "source_row": str(row.get("row_number") or row.get("source_row") or "").strip(),
+            "company_name": company_name,
+            "website": website,
+            "email": str(row.get("email") or row.get("Email") or "").strip(),
+            "hq_country": str(row.get("hq_country") or row.get("country") or "").strip(),
+            "what_it_solves": str(
+                row.get("what_it_solves")
+                or row.get("description")
+                or row.get("What it solves")
+                or ""
+            ).strip(),
+            "status": "未接触",
+        })
+    _BPO_LIVE_CACHE = normalized
+    _BPO_LIVE_CACHE_AT = now
+    return [dict(row) for row in normalized]
+
+
+def load_rows_for_lane(lane: str, sheets=None) -> list[dict]:
+    """Load the curated snapshot plus explicit live-SSOT BPO rows."""
+    normalized_lane = str(lane or "").strip().upper()
+    rows = load_rows(source_path_for_lane(normalized_lane))
+    if normalized_lane != "BPO":
+        return rows
+    merged = []
+    seen = set()
+    for row in rows + _live_bpo_rows(sheets):
+        website_key = _host(row.get("website"))
+        company_key = re.sub(r"[^a-z0-9]+", "", str(row.get("company_name") or "").lower())
+        key = website_key or company_key
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        merged.append(row)
+    return merged
 
 
 def is_forbidden_factory_target(row: dict) -> bool:
