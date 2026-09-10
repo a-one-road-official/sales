@@ -12,6 +12,7 @@ jobs:
   cleanup:
     if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Cleanup stale EC form runs') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       REGION: asia-northeast1
@@ -23,17 +24,11 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Delete all isolated EC audit services
+      - name: Delete known isolated EC audit services
         run: |
           set -euo pipefail
-          mapfile -t SERVICES < <(gcloud run services list \
-            --region="${REGION}" \
-            --project="${PROJECT}" \
-            --filter='metadata.name~^aone-sacrifice-' \
-            --format='value(metadata.name)')
-          for SERVICE in "${SERVICES[@]}"; do
-            [ -n "${SERVICE}" ] || continue
-            gcloud run services delete "${SERVICE}" \
+          for SERVICE in aone-sacrifice-34493147628 aone-sacrifice-34489893563 aone-sacrifice-34491032094; do
+            timeout 120s gcloud run services delete "${SERVICE}" \
               --region="${REGION}" \
               --project="${PROJECT}" \
               --quiet || true
