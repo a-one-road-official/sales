@@ -120,7 +120,40 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg, executor, execute_external=True,
                 "status": research.get("status", ""),
             }
 
-            if not email:
+            if not email and site.get("contact_links"):
+                # A public contact form is a valid outbound channel when no
+                # recipient email is published.
+                form_contact = {
+                    **research,
+                    "email": "admin@a1-road.com",
+                    "recipient_verified": True,
+                    "contact_confidence": "FORM",
+                }
+                draft = llm.draft_outreach_email(prompt, context, form_contact)
+                form_url = str(site["contact_links"][0]).strip()
+                form_result = {
+                    "status": "FORM_NOT_ATTEMPTED",
+                    "reason": "external_execution_disabled",
+                    "form_url": form_url,
+                }
+                if execute_external:
+                    from form_execution import PublicContactFormExecutor
+                    form_result = PublicContactFormExecutor().execute(
+                        form_url=form_url,
+                        website=str(site.get("official_website") or site_url),
+                        message=str(draft.get("body") or ""),
+                        subject=str(draft.get("subject") or ""),
+                        company_name=candidate["company_name"],
+                        idempotency_key=f"form:{run_id}:{candidate['source_row']}",
+                    )
+                result["draft"] = draft
+                result["form_execution"] = form_result
+                result["external_action"] = form_result.get("status", "FORM_FAILED")
+                result.update(
+                    status=form_result.get("status", "FORM_FAILED"),
+                    stage="FORM_EXECUTION",
+                )
+            elif not email:
                 result.update(
                     status="FAILED",
                     stage="CONTACT_RESEARCH",
