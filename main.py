@@ -226,7 +226,11 @@ def deep_healthz():
         "factory_enabled": os.getenv("LEAD_FACTORY_ENABLED", "TRUE").upper() == "TRUE",
         "gemini_vertex_ready": bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")),
         "external_write": os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE").upper() == "TRUE",
-        "customer_facing_send": os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE").upper() == "TRUE",
+        "bpo_send": _outbound_send_enabled("BPO"),
+        "factory_send": False,
+        "ssot_send": False,
+        "autopilot_enabled": os.getenv("OUTREACH_AUTOPILOT_ENABLED", "FALSE").upper() == "TRUE",
+        "customer_facing_send": "ENABLED_FOR_BPO" if _outbound_send_enabled("BPO") else "DISABLED",
     }
 
 
@@ -268,7 +272,8 @@ def ops_status():
                 "in_process_recovery": "ACTIVE" if _recovery_thread and _recovery_thread.is_alive() else "STARTING_OR_DISABLED",
                 "deployment_activation": "NON_BLOCKING",
             },
-            "customer_facing_send": "ENABLED_FOR_EC_SACRIFICE" if _sacrifice_send_enabled() else "DISABLED",
+            "customer_facing_send": "ENABLED_FOR_BPO" if _outbound_send_enabled("BPO") else "DISABLED",
+            "bpo_autopilot": get_bpo_autopilot().status(),
         }
     except Exception as exc:
         _fail(exc)
