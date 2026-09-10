@@ -666,7 +666,11 @@ def run_ten_sacrifice_batch(
                     }
                     # Contact web search is only needed when the verified site
                     # exposes neither a public form nor a usable first-party email.
-                    if not form_links and not fast_sales_gtm_mode:
+                    contact_research_enabled = (
+                        _cfg_truthy(cfg, "OUTREACH_FAST_SALES_GTM_CONTACT_RESEARCH")
+                        or (not fast_sales_gtm_mode and not form_links)
+                    )
+                    if not form_links and contact_research_enabled:
                         research = llm.research_outreach_contact(context)
                         proposed_email = str(research.get("email") or "").strip()
                         email = (

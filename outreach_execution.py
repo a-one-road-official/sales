@@ -9,7 +9,11 @@ from email.mime.text import MIMEText
 
 from prompt_ssot import prompt_freshness
 
+import json
+import urllib.parse
+import urllib.request
 from google.auth import default
+from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
 
@@ -24,6 +28,84 @@ CRITICAL_FIELDS = {
 
 def _truthy(value: object) -> bool:
     return str(value or "").strip().upper() in {"TRUE", "1", "YES", "ON"}
+
+
+GMAIL_SCOPES = (
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.readonly",
+)
+
+
+def _gmail_credentials(sender: str):
+    """Return Gmail credentials delegated to the configured outbound mailbox.
+
+    Cloud Run metadata credentials do not expose with_subject even when the
+    runtime service account is allowed to use Workspace domain-wide delegation.
+    In that case, sign a short-lived JWT with IAM Credentials and exchange it
+    for a user token. A fresh token is created per outbound operation, so
+    long-running batches do not depend on a non-refreshing token.
+    """
+    sender = str(sender or "").strip()
+    if not sender:
+        raise RuntimeError("gmail_sender_missing")
+    creds, _ = default(scopes=list(GMAIL_SCOPES))
+    if hasattr(creds, "with_subject"):
+        return creds.with_subject(sender)
+
+    signing_service_account = (
+        str(os.getenv("LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT") or "").strip()
+        or str(os.getenv("LEAD_FACTORY_TASKS_SERVICE_ACCOUNT") or "").strip()
+        or str(getattr(creds, "service_account_email", "") or "").strip()
+    )
+    if not signing_service_account:
+        raise RuntimeError("gmail_delegation_service_account_missing")
+
+    base_creds, _ = default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    now = int(time.time())
+    payload = {
+        "iss": signing_service_account,
+        "sub": sender,
+        "scope": " ".join(GMAIL_SCOPES),
+        "aud": "https://oauth2.googleapis.com/token",
+        "iat": now,
+        "exp": now + 3600,
+    }
+    try:
+        iam = build("iamcredentials", "v1", credentials=base_creds, cache_discovery=False)
+        signed_jwt = str(
+            iam.projects()
+            .serviceAccounts()
+            .signJwt(
+                name=f"projects/-/serviceAccounts/{signing_service_account}",
+                body={"payload": json.dumps(payload)},
+            )
+            .execute()
+            .get("signedJwt")
+            or ""
+        ).strip()
+        if not signed_jwt:
+            raise RuntimeError("gmail_delegation_signed_jwt_empty")
+        request = urllib.request.Request(
+            "https://oauth2.googleapis.com/token",
+            data=urllib.parse.urlencode(
+                {
+                    "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                    "assertion": signed_jwt,
+                }
+            ).encode("ascii"),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            token_payload = json.loads(response.read().decode("utf-8"))
+        token = str(token_payload.get("access_token") or "").strip()
+        if not token:
+            raise RuntimeError("gmail_delegation_access_token_empty")
+        return Credentials(token=token)
+    except Exception as exc:
+        raise RuntimeError(
+            f"gmail_domain_delegation_unavailable:{type(exc).__name__}:{exc}"
+        ) from exc
 
 
 def _sheet_rows_with_retry(sheets):
@@ -447,9 +529,7 @@ class OutboundEmailExecutor:
             return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "lane": lane, "recipient": str(draft.get("recipient") or "").strip(), "existing_status": "SHEET_RECORD"}
 
         sender = os.getenv("LEAD_FACTORY_GMAIL_IMPERSONATE", "admin@a1-road.com").strip()
-        creds, _ = default(scopes=["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/gmail.readonly"])
-        if sender and hasattr(creds, "with_subject"):
-            creds = creds.with_subject(sender)
+        creds = _gmail_credentials(sender)
         service = build("gmail", "v1", credentials=creds, cache_discovery=False)
         gmail_idempotency_error = ""
         try:
