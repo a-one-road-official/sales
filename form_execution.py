@@ -895,7 +895,7 @@ class PublicContactFormExecutor:
                         try:
                             tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
                             if is_custom_dropdown:
-                                selected, selected_text = _select_custom_option(el, key, page)
+                                selected, selected_text = _select_custom_option(el, key, form_context)
                                 if not selected:
                                     item["action"] = (
                                         "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
@@ -916,7 +916,7 @@ class PublicContactFormExecutor:
                                     item["final_value"] = selected_text or _current_value(el)
                             else:
                                 if key == "phone":
-                                    picker_present, phone_country_ok = _select_phone_country(el, page)
+                                    picker_present, phone_country_ok = _select_phone_country(el, form_context)
                                     item["phone_country"] = (
                                         "Japan" if phone_country_ok else
                                         "UNSET" if picker_present else "NOT_AVAILABLE"
@@ -990,7 +990,7 @@ class PublicContactFormExecutor:
                                     missing_required.append(key or marker or f"custom_field_{custom_index}")
                                 field_audit.append(item)
                                 continue
-                            selected, selected_text = _select_custom_option(el, key, page)
+                            selected, selected_text = _select_custom_option(el, key, form_context)
                             if not selected:
                                 item["action"] = (
                                     "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
