@@ -1,4 +1,8 @@
-from outreach_execution import is_sacrificial_lane, semantic_email_preflight
+from outreach_execution import (
+    OutboundEmailExecutor,
+    is_sacrificial_lane,
+    semantic_email_preflight,
+)
 
 
 def _row(**overrides):
@@ -17,6 +21,36 @@ def test_sacrificial_lane_is_explicit_and_factory_is_blocked():
     assert is_sacrificial_lane(_row(), cfg)
     assert not is_sacrificial_lane(_row(lane="GROWTH"), cfg)
     assert not is_sacrificial_lane(_row(lane="MITTELSTAND"), cfg)
+
+
+def test_protected_ssot_cannot_be_relabelled_as_ec():
+    cfg = {"OUTREACH_SACRIFICE_LANES": "EC,RETAIL"}
+    assert not is_sacrificial_lane(
+        _row(lane="SSOT", source_type="EC_SACRIFICE"),
+        cfg,
+    )
+
+
+def test_ssot_requires_its_own_flag_and_explicit_approval():
+    cfg = {
+        "OUTREACH_ALLOWED_LANES": "SSOT",
+        "OUTREACH_SSOT_SEND_ENABLED": "TRUE",
+        "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL": "TRUE",
+    }
+    assert is_sacrificial_lane(_row(lane="SSOT"), cfg)
+
+
+def test_shared_executor_blocks_protected_ssot_without_approval():
+    cfg = {
+        "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE": "TRUE",
+        "LEAD_FACTORY_SEND_MODE": "ENABLED",
+        "OUTREACH_ALLOWED_LANES": "SSOT",
+        "OUTREACH_SSOT_SEND_ENABLED": "TRUE",
+        "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL": "FALSE",
+    }
+    result = OutboundEmailExecutor(lane="SSOT").execute(_row(lane="SSOT"), cfg)
+    assert result["status"] == "BLOCKED"
+    assert result["reason"] == "explicit_factory_send_approval_required"
 
 
 def test_email_url_is_allowed_but_identity_corruption_is_critical():
