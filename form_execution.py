@@ -187,6 +187,91 @@ def _current_value(el) -> str:
         return ""
 
 
+CAPTCHA_WIDGET_SELECTORS = (
+    "iframe[src*='recaptcha']",
+    "iframe[src*='hcaptcha']",
+    "iframe[src*='challenges.cloudflare.com']",
+    ".g-recaptcha",
+    ".h-captcha",
+    "[data-sitekey]",
+    "[data-captcha]",
+    "input[name*='captcha' i]",
+    "textarea[name*='captcha' i]",
+)
+
+
+def _captcha_present(contexts) -> bool:
+    """Detect a visible challenge, not a script or HTML string mention."""
+    for context in contexts:
+        for selector in CAPTCHA_WIDGET_SELECTORS:
+            try:
+                locator = context.locator(selector)
+                for index in range(min(locator.count(), 8)):
+                    if locator.nth(index).is_visible():
+                        return True
+            except Exception:
+                continue
+        try:
+            visible_text = context.locator("body").inner_text(timeout=1500)
+        except Exception:
+            visible_text = ""
+        if re.search(
+            r"i['’]m\s+not\s+a\s+robot|verify\s+(?:that\s+)?you(?:['’]re|\s+are)\s+human|"
+            r"captcha\s+(?:is\s+)?required|complete\s+the\s+captcha|私はロボットではありません",
+            visible_text or "",
+            re.I,
+        ):
+            return True
+    return False
+
+
+def _form_score(form) -> int:
+    try:
+        fields = form.locator("input:not([type=hidden]), textarea, select")
+        visible = 0
+        relevant = 0
+        textareas = 0
+        for index in range(fields.count()):
+            el = fields.nth(index)
+            typ = (el.get_attribute("type") or "text").lower()
+            if typ in {"submit", "button", "file", "checkbox", "radio", "reset", "image"}:
+                continue
+            if not el.is_visible() or not el.is_enabled():
+                continue
+            visible += 1
+            label = _label_for(el)
+            if _field_key(el, label):
+                relevant += 1
+            if (el.evaluate("el => el.tagName.toLowerCase()") or "").lower() == "textarea":
+                textareas += 1
+        submit = form.locator("button[type=submit], input[type=submit], button")
+        submit_visible = sum(
+            1
+            for index in range(min(submit.count(), 8))
+            if submit.nth(index).is_visible() and submit.nth(index).is_enabled()
+        )
+        return relevant * 20 + visible * 3 + textareas * 4 + submit_visible * 5
+    except Exception:
+        return 0
+
+
+def _choose_form(contexts):
+    best = None
+    best_score = -1
+    for context in contexts:
+        try:
+            forms = context.locator("form")
+            for index in range(forms.count()):
+                form = forms.nth(index)
+                score = _form_score(form)
+                if score > best_score:
+                    best = (context, form)
+                    best_score = score
+        except Exception:
+            continue
+    return best
+
+
 class PublicContactFormExecutor:
     def __init__(self, sheets=None):
         self.sheets = sheets
@@ -295,31 +380,18 @@ class PublicContactFormExecutor:
                         "FORM_FAILED",
                         reason=f"FORM_HTTP_{response.status if response else 0}",
                     )
-                page.wait_for_timeout(1000)
-                html_parts = []
-                for frame in [page] + list(page.frames[1:]):
-                    try:
-                        html_parts.append(frame.content())
-                    except Exception:
-                        continue
-                html = "\n".join(html_parts)
-                if CAPTCHA_RE.search(html):
+                try:
+                    page.wait_for_load_state("networkidle", timeout=5000)
+                except Exception:
+                    pass
+                page.wait_for_timeout(2000)
+                contexts = [page] + list(page.frames[1:])
+                if _captcha_present(contexts):
                     return result_payload("FORM_FAILED", reason="CAPTCHA_PRESENT")
-                form_context = page
-                forms = page.locator("form")
-                if forms.count() == 0:
-                    for frame in page.frames[1:]:
-                        try:
-                            frame_forms = frame.locator("form")
-                            if frame_forms.count() > 0:
-                                form_context = frame
-                                forms = frame_forms
-                                break
-                        except Exception:
-                            continue
-                if forms.count() == 0:
+                chosen = _choose_form(contexts)
+                if not chosen:
                     return result_payload("FORM_FAILED", reason="FORM_NOT_FOUND")
-                form = forms.first
+                form_context, form = chosen
                 action = urljoin(page.url, str(form.get_attribute("action") or page.url))
                 if not _same_host_or_subdomain(action, website):
                     return result_payload(
@@ -492,7 +564,7 @@ class PublicContactFormExecutor:
                     except Exception:
                         continue
                 final_html = "\n".join(final_html_parts)
-                if CAPTCHA_RE.search(final_html):
+                if _captcha_present([page] + list(page.frames[1:])):
                     return result_payload(
                         "FORM_FAILED",
                         reason="CAPTCHA_PRESENT_AFTER_SUBMIT",

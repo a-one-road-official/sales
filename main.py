@@ -655,6 +655,12 @@ def _sacrifice_send_enabled(
     cfg: dict[str, str] | None = None,
 ) -> bool:
     """Return whether the explicitly approved outbound test lane may send."""
+    normalized = str(lane or "").strip().upper()
+    if normalized == "EC_SACRIFICE":
+        if not _config_truthy(os.getenv("LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME", "FALSE")):
+            return False
+        if not str(os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES", "")).strip():
+            return False
     return _outbound_send_enabled(lane, cfg)
 
 
