@@ -639,18 +639,8 @@ def _outbound_flag(lane: str) -> str:
 
 
 def _outbound_send_enabled(lane: str, cfg: dict[str, str] | None = None) -> bool:
-    """Require global, mode, lane, and explicit-approval gates before sending."""
-    values = cfg if cfg is not None else os.environ
-
-    def value(key: str, default: str = "FALSE") -> object:
-        return values.get(key, os.getenv(key, default))
-
-    return (
-        _config_truthy(value("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"))
-        and str(value("LEAD_FACTORY_SEND_MODE", "DISABLED")).strip().upper() == "ENABLED"
-        and _config_truthy(value(_outbound_flag(lane)))
-        and _config_truthy(value("LEAD_FACTORY_EXPLICIT_SEND_APPROVAL"))
-    )
+    """Global production interlock: this deployment is list-only."""
+    return False
 
 
 def _sacrifice_send_enabled(
