@@ -472,6 +472,12 @@ class BPOAutopilot:
                 return self._response(self._state, accepted=False)
             sheets = self._sheets()
             self._ensure_schema(sheets)
+            active = self._latest_active_row(sheets)
+            if active:
+                active_state = self._state_from_row(active)
+                self._state = active_state
+                self._spawn_locked(active_state)
+                return self._response(active_state, accepted=False)
             existing = self._latest_job_row(job_id, sheets)
             if existing:
                 existing_state = self._state_from_row(existing)
