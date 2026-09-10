@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
   id-token: write
 
 jobs:
@@ -17,6 +18,23 @@ jobs:
       PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       REGION: asia-northeast1
     steps:
+      - name: Cancel active EC audit workflows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mapfile -t RUN_IDS < <(gh run list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow ec_form_audit_submit_v2.yml \
+            --status in_progress \
+            --limit 100 \
+            --json databaseId \
+            --jq '.[].databaseId')
+          for RUN_ID in "${RUN_IDS[@]}"; do
+            [ -n "${RUN_ID}" ] || continue
+            gh run cancel "${RUN_ID}" --repo "${GITHUB_REPOSITORY}" || true
+          done
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
         with:
@@ -24,7 +42,7 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Delete known isolated EC audit services
+      - name: Delete all isolated EC audit services
         run: |
           set -euo pipefail
           for SERVICE in aone-sacrifice-34493147628 aone-sacrifice-34489893563 aone-sacrifice-34491032094; do
@@ -33,3 +51,15 @@ jobs:
               --project="${PROJECT}" \
               --quiet || true
           done
+          SERVICE_LIST="$(timeout 120s gcloud run services list \
+            --region="${REGION}" \
+            --project="${PROJECT}" \
+            --filter='metadata.name~^aone-sacrifice-' \
+            --format='value(metadata.name)' || true)"
+          while IFS= read -r SERVICE; do
+            [ -n "${SERVICE}" ] || continue
+            timeout 120s gcloud run services delete "${SERVICE}" \
+              --region="${REGION}" \
+              --project="${PROJECT}" \
+              --quiet || true
+          done <<< "${SERVICE_LIST}"
