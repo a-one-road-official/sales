@@ -15,6 +15,8 @@ class InternalNotifier:
         self.recipient = str(recipient or "admin@a1-road.com").strip()
 
     def notify(self, subject: str, body: str) -> dict:
+        if os.getenv("LEAD_FACTORY_INTERNAL_NOTIFY_ENABLED", "FALSE").strip().upper() not in {"1", "TRUE", "YES", "ON"}:
+            return {"status": "DISABLED", "reason": "list_only_mode"}
         if not self.recipient:
             return {"status": "SKIPPED", "reason": "missing_recipient"}
         try:

@@ -192,7 +192,8 @@ class QualifiedLeadProductionController:
         existing_status = str(existing.get(GOAL_KEYS["status"], "")).upper()
         existing_deadline = _dt(existing.get(GOAL_KEYS["deadline"], ""))
         if (
-            existing_target == int(target)
+            not force_reset
+            and existing_target == int(target)
             and existing_status in {"RUNNING", "AT_RISK"}
             and existing_deadline
             and existing_deadline > now

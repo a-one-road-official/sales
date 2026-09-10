@@ -114,5 +114,5 @@ def dispatch_lane(factory, lane: str) -> dict:
         "queued": queued,
         "errors": errors[:100],
         "execution": mode,
-        "customer_facing_send": "SACRIFICE_ONLY",
+        "customer_facing_send": "DISABLED_LIST_ONLY",
     }

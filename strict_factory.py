@@ -645,11 +645,18 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
         return {"status": "COMPLETE", "lane": lane, "inspected": inspected, "added": added, "errors": errors}
 
     def capacity_tick(self, goal_status: dict) -> dict:
-        """Increase exploration/processing while preserving the authoritative Gate."""
+        """Expand discovery only; dispatch schedulers own the worker queue."""
         lane = "MITTELSTAND" if int(goal_status.get("added", 0)) % 2 else "GROWTH"
-        frontier = self.expand_source_frontier(lane, limit=25)
-        supply = super().supply_tick(lane)
-        return {"lane": lane, "frontier": frontier, "supply": supply}
+        try:
+            frontier_limit = max(1, min(25, int(os.getenv("LEAD_FACTORY_SOURCE_FRONTIER_LIMIT", "10") or 10)))
+        except ValueError:
+            frontier_limit = 10
+        frontier = self.expand_source_frontier(lane, limit=frontier_limit)
+        return {
+            "lane": lane,
+            "frontier": frontier,
+            "supply": {"status": "QUEUED_BY_CLOUD_TASKS"},
+        }
 
     def domain_tick(self, lane: str | None = None, limit: int | None = None) -> dict:
         cfg = self._config()

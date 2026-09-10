@@ -92,11 +92,15 @@ jobs:
 
       - name: Grant runtime queue permission
         run: |
+          set -euo pipefail
           gcloud projects add-iam-policy-binding "$PROJECT" \
             --member="serviceAccount:$RUNTIME_SA" \
             --role="roles/cloudtasks.enqueuer" \
-            --condition=None >/dev/null 2>&1 || \
-            echo "Cloud Tasks IAM grant unavailable to deploy identity; runtime fallback lane remains required."
+            --condition=None >/dev/null
+          gcloud projects get-iam-policy "$PROJECT" \
+            --flatten="bindings[].members" \
+            --filter="bindings.members=serviceAccount:$RUNTIME_SA AND bindings.role=roles/cloudtasks.enqueuer" \
+            --format="value(bindings.role)" | grep -qx "roles/cloudtasks.enqueuer"
 
       - name: Configure Docker auth
         run: gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
@@ -185,23 +189,25 @@ jobs:
 
       - name: Ensure durable worker queue
         run: |
-          if gcloud tasks queues describe lead-factory-workers \
+          set -euo pipefail
+          if ! gcloud tasks queues describe lead-factory-workers \
             --location="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
-            gcloud tasks queues update lead-factory-workers \
-              --location="$REGION" --project="$PROJECT" \
-              --max-concurrent-dispatches=500 \
-              --max-attempts=10 \
-              --max-retry-duration=0s
-            echo "TASK_QUEUE=AVAILABLE" >> "$GITHUB_ENV"
-          else
-            echo "Cloud Tasks queue is unavailable to this deploy identity; runtime will use its independent HTTP fallback lane."
-            echo "TASK_QUEUE=UNAVAILABLE" >> "$GITHUB_ENV"
+            gcloud tasks queues create lead-factory-workers \
+              --location="$REGION" --project="$PROJECT"
           fi
+          gcloud tasks queues update lead-factory-workers \
+            --location="$REGION" --project="$PROJECT" \
+            --max-concurrent-dispatches=4 \
+            --max-attempts=20 \
+            --max-retry-duration=0s
+          gcloud tasks queues describe lead-factory-workers \
+            --location="$REGION" --project="$PROJECT" \
+            --format="yaml(state,rateLimits.maxConcurrentDispatches,retryConfig.maxAttempts)"
 
       - name: Configure continuous autonomous schedulers
         run: |
+          set -euo pipefail
           URL="$SERVICE_URL"
-          SACRIFICE_URL="$SACRIFICE_SERVICE_URL"
 
           upsert_job () {
             NAME="$1"
@@ -222,17 +228,14 @@ jobs:
                 --uri="$URI" --http-method=POST --attempt-deadline=540s \
                 --headers="X-Aone-Internal-Token=${TOKEN_VALUE}"
             fi
-            # Updating a paused Scheduler job preserves the paused state.
-            # Resume each production lane explicitly after create/update.
             gcloud scheduler jobs resume "$NAME" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
           }
 
-          for OLD in lead-factory-daily lead-factory-growth-supply lead-factory-mittelstand-supply; do
+          # Keep legacy direct/serial lanes paused; Cloud Tasks is the sole worker fan-out.
+          for OLD in lead-factory-daily lead-factory-growth-supply lead-factory-mittelstand-supply lead-factory-domain-failover lead-factory-recovery lead-factory-source-failover lead-factory-prep; do
             gcloud scheduler jobs pause "$OLD" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
           done
 
-          # Stagger read-heavy control lanes. A simultaneous fan-out exceeds
-          # the Sheets per-user read quota before the workers can make progress.
           upsert_job lead-factory-meta "*/5 * * * *" "${URL}/meta/tick"
           upsert_job lead-factory-autonomy-slo "2-59/5 * * * *" "${URL}/autonomy/tick"
           upsert_job lead-factory-discover-growth "*/5 * * * *" "${URL}/discover/growth"
@@ -240,20 +243,15 @@ jobs:
           upsert_job lead-factory-discover-fallback "4-59/5 * * * *" "${URL}/discover/fallback"
           upsert_job lead-factory-dispatch-growth "*/2 * * * *" "${URL}/dispatch/growth"
           upsert_job lead-factory-dispatch-mittelstand "1-59/2 * * * *" "${URL}/dispatch/mittelstand"
-          # Direct recovery lane bypasses Cloud Tasks and dispatch entirely.
-          upsert_job lead-factory-domain-failover "*/2 * * * *" "${URL}/failover/domain"
-          upsert_job lead-factory-recovery "1-59/3 * * * *" "${URL}/recovery/tick"
-          upsert_job lead-factory-source-failover "2-59/3 * * * *" "${URL}/failover/source"
           upsert_job lead-factory-promotion "1-59/2 * * * *" "${URL}/promotion/tick"
-          upsert_job lead-factory-prep "3-59/5 * * * *" "${URL}/prep/tick"
           upsert_job lead-factory-control "4-59/10 * * * *" "${URL}/control/tick"
           upsert_job lead-factory-maktek-full "0 4 1 1 *" "${URL}/maktek/ingest"
-          # List-only mode keeps any legacy sacrifice scheduler paused.
+
+          # Pause every historical sacrifice job, including run-scoped names.
+          for NAME in $(gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' | sed 's#.*/##' | grep -E '^lead-factory-(approved-sacrifice|sacrifice)(-|$)' || true); do
+            gcloud scheduler jobs pause "$NAME" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
+          done
           gcloud scheduler jobs pause lead-factory-approved-sacrifice-${{ github.run_id }} --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
-          if [ "${{ github.event_name }}" = "push" ] || ( [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.execute_sacrifice }}" = "true" ] && [ "${{ vars.LEAD_FACTORY_SEND_MODE }}" = "ENABLED" ] && [ "${{ vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL }}" = "TRUE" ] ); then
-            upsert_job lead-factory-approved-sacrifice-${{ github.run_id }} "*/15 * * * *" "${SACRIFICE_URL}/outreach/sales-leads-sacrifice-tick" "${SACRIFICE_INTERNAL_TOKEN}"
-            gcloud scheduler jobs resume lead-factory-approved-sacrifice-${{ github.run_id }} --location="$REGION" --project="$PROJECT"
-          fi
 
       - name: Runtime deep health check
         run: |
@@ -266,16 +264,22 @@ jobs:
       - name: Register autonomous production goal
         continue-on-error: true
         run: |
-          echo 'POST /autonomy/start (bounded registration; durable workers continue independently)'
+          echo 'POST /autonomy/start (durable qualified-SSOT goal)'
+          if git log -1 --pretty=%B | grep -q 'START_GOAL_8H'; then
+            DEADLINE="$(date -u -d '+8 hours' +%Y-%m-%dT%H:%M:%SZ)"
+            BODY="{\"target\":1500,\"deadline\":\"${DEADLINE}\",\"force_reset\":true}"
+            echo "Starting fresh eight-hour SSOT accounting window; deadline=${DEADLINE}"
+          else
+            BODY='{"target":1500}'
+          fi
           timeout 120 curl --fail-with-body --silent --show-error --retry 2 --retry-all-errors --retry-delay 5 \
             -X POST \
             -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
             -H "Content-Type: application/json" \
-            -d '{"target":1500}' \
+            -d "${BODY}" \
             "${SERVICE_URL}/autonomy/start" || \
             echo "::warning::goal registration response delayed; persisted goal and autonomous schedulers remain active"
           echo
-
 
       - name: Reassert approved sacrifice send flag
         if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}

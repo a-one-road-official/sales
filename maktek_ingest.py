@@ -208,15 +208,31 @@ class MaktekIngestor:
                 "worker": "deterministic_maktek_ingestor",
                 "checkpoint": "FULL_DIRECTORY_CAPTURED",
             }
-            new_rows.append([row.get(h, "") for h in headers])
+            ordered = [row.get(h, "") for h in headers]
+            mapped = dict(zip(headers, ordered))
+            if (
+                mapped.get("source_name") != SOURCE_NAME
+                or mapped.get("source_type") != "EXHIBITION"
+                or mapped.get("screening_status") != "PENDING"
+                or mapped.get("intake_status") != "NEEDS_DOMAIN"
+                or mapped.get("job_id") != "maktek2026-full-ingest"
+                or mapped.get("run_id") != "maktek2026-full-ingest"
+            ):
+                raise RuntimeError("raw_schema_mapping_guard_failed")
+            new_rows.append(ordered)
         if new_rows:
-            self.sheets.svc.spreadsheets().values().append(
+            operation = lambda: self.sheets.svc.spreadsheets().values().append(
                 spreadsheetId=self.sheets.spreadsheet_id,
                 range="LeadFactory_Raw!A:ZZ",
                 valueInputOption="RAW",
                 insertDataOption="INSERT_ROWS",
                 body={"values": new_rows},
             ).execute()
+            executor = getattr(self.sheets, "_execute_write", None)
+            if callable(executor):
+                executor(operation)
+            else:
+                operation()
         return len(new_rows), skipped
 
     def _upsert_human(self, records: list[dict]) -> tuple[int, int]:

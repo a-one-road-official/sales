@@ -164,141 +164,142 @@ class SheetsRepo:
 
 
     def append_dict_preserving_previous_row_structure(self, sheet: str, row: dict, min_row: int | None = None) -> int:
-        """Write a new human-facing lead into the first empty SSOT row.
+    with self._write_lock:
+            """Write a new human-facing lead into the first empty SSOT row.
 
 
-        Invariants:
-        - Never append at the physical sheet tail merely because formulas exist there.
-        - For the sales SSOT, start at the configured human append anchor and fill downward.
-        - Preserve existing formulas/CRM values in unrelated columns.
-        - Copy only user-entered format + data validation from the nearest prior populated lead row.
-        - Write only fields explicitly present in ``row``.
-        """
-        headers_rows = self.read(f"'{sheet}'!1:1")
-        if not headers_rows:
-            raise RuntimeError(f"missing_header:{sheet}")
-        headers = headers_rows[0]
-        header_index = {str(h): i for i, h in enumerate(headers) if h}
-        cfg = self.get_config()
-        is_human_ssot = sheet == cfg.get("LEAD_FACTORY_HUMAN_SSOT_SHEET", "営業リスト＿Factory/BPO")
-        if is_human_ssot:
-            from promotion_accounting import validate_new_sales_payload
-            validate_new_sales_payload(row, headers)
+            Invariants:
+            - Never append at the physical sheet tail merely because formulas exist there.
+            - For the sales SSOT, start at the configured human append anchor and fill downward.
+            - Preserve existing formulas/CRM values in unrelated columns.
+            - Copy only user-entered format + data validation from the nearest prior populated lead row.
+            - Write only fields explicitly present in ``row``.
+            """
+            headers_rows = self.read(f"'{sheet}'!1:1")
+            if not headers_rows:
+                raise RuntimeError(f"missing_header:{sheet}")
+            headers = headers_rows[0]
+            header_index = {str(h): i for i, h in enumerate(headers) if h}
+            cfg = self.get_config()
+            is_human_ssot = sheet == cfg.get("LEAD_FACTORY_HUMAN_SSOT_SHEET", "営業リスト＿Factory/BPO")
+            if is_human_ssot:
+                from promotion_accounting import validate_new_sales_payload
+                validate_new_sales_payload(row, headers)
 
 
-        cfg = cfg if is_human_ssot else {}
-        if min_row is None:
-            try:
-                min_row = int(cfg.get("LEAD_FACTORY_HUMAN_APPEND_MIN_ROW", "2") or 2)
-            except Exception:
-                min_row = 2
-        min_row = max(2, int(min_row))
+            cfg = cfg if is_human_ssot else {}
+            if min_row is None:
+                try:
+                    min_row = int(cfg.get("LEAD_FACTORY_HUMAN_APPEND_MIN_ROW", "2") or 2)
+                except Exception:
+                    min_row = 2
+            min_row = max(2, int(min_row))
 
 
-        meta = self.svc.spreadsheets().get(
-            spreadsheetId=self.spreadsheet_id,
-            fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))",
-        ).execute()
-        props = None
-        for item in meta.get("sheets", []):
-            p = item.get("properties", {})
-            if p.get("title") == sheet:
-                props = p
-                break
-        if props is None:
-            raise RuntimeError(f"missing_sheet:{sheet}")
-
-
-        sheet_id = int(props["sheetId"])
-        row_count = int(props.get("gridProperties", {}).get("rowCount", 0) or 0)
-        if min_row > row_count:
-            self.svc.spreadsheets().batchUpdate(
+            meta = self.svc.spreadsheets().get(
                 spreadsheetId=self.spreadsheet_id,
-                body={"requests": [{
-                    "appendDimension": {
-                        "sheetId": sheet_id, "dimension": "ROWS", "length": min_row - row_count + 100
-                    }
-                }]},
+                fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))",
             ).execute()
-            row_count = min_row + 99
+            props = None
+            for item in meta.get("sheets", []):
+                p = item.get("properties", {})
+                if p.get("title") == sheet:
+                    props = p
+                    break
+            if props is None:
+                raise RuntimeError(f"missing_sheet:{sheet}")
 
 
-        # Find the first empty company-name cell from the human append anchor downward.
-        scan = self.read(f"'{sheet}'!A{min_row}:A{row_count}")
-        new_row_number = min_row
-        for offset in range(max(0, row_count - min_row + 1)):
-            value = ""
-            if offset < len(scan) and scan[offset]:
-                value = str(scan[offset][0] or "").strip()
-            if not value:
-                new_row_number = min_row + offset
-                break
-        else:
-            new_row_number = row_count + 1
-            self.svc.spreadsheets().batchUpdate(
+            sheet_id = int(props["sheetId"])
+            row_count = int(props.get("gridProperties", {}).get("rowCount", 0) or 0)
+            if min_row > row_count:
+                self.svc.spreadsheets().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body={"requests": [{
+                        "appendDimension": {
+                            "sheetId": sheet_id, "dimension": "ROWS", "length": min_row - row_count + 100
+                        }
+                    }]},
+                ).execute()
+                row_count = min_row + 99
+
+
+            # Find the first empty company-name cell from the human append anchor downward.
+            scan = self.read(f"'{sheet}'!A{min_row}:A{row_count}")
+            new_row_number = min_row
+            for offset in range(max(0, row_count - min_row + 1)):
+                value = ""
+                if offset < len(scan) and scan[offset]:
+                    value = str(scan[offset][0] or "").strip()
+                if not value:
+                    new_row_number = min_row + offset
+                    break
+            else:
+                new_row_number = row_count + 1
+                self.svc.spreadsheets().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body={"requests": [{
+                        "appendDimension": {"sheetId": sheet_id, "dimension": "ROWS", "length": 100}
+                    }]},
+                ).execute()
+
+
+            # Nearest prior populated human lead row is the structure template.
+            prior = self.read(f"'{sheet}'!A1:A{new_row_number - 1}")
+            template_row = 1
+            for idx in range(len(prior) - 1, -1, -1):
+                if prior[idx] and str(prior[idx][0] or "").strip():
+                    template_row = idx + 1
+                    break
+
+
+            last_col = self._column_letter(len(headers))
+            structure = self.svc.spreadsheets().get(
                 spreadsheetId=self.spreadsheet_id,
-                body={"requests": [{
-                    "appendDimension": {"sheetId": sheet_id, "dimension": "ROWS", "length": 100}
-                }]},
+                ranges=[f"'{sheet}'!A{template_row}:{last_col}{template_row}"],
+                includeGridData=True,
+                fields="sheets(data(rowData(values(userEnteredFormat,dataValidation))))",
             ).execute()
-
-
-        # Nearest prior populated human lead row is the structure template.
-        prior = self.read(f"'{sheet}'!A1:A{new_row_number - 1}")
-        template_row = 1
-        for idx in range(len(prior) - 1, -1, -1):
-            if prior[idx] and str(prior[idx][0] or "").strip():
-                template_row = idx + 1
-                break
-
-
-        last_col = self._column_letter(len(headers))
-        structure = self.svc.spreadsheets().get(
-            spreadsheetId=self.spreadsheet_id,
-            ranges=[f"'{sheet}'!A{template_row}:{last_col}{template_row}"],
-            includeGridData=True,
-            fields="sheets(data(rowData(values(userEnteredFormat,dataValidation))))",
-        ).execute()
-        cells = []
-        try:
-            cells = structure["sheets"][0]["data"][0]["rowData"][0].get("values", [])
-        except Exception:
             cells = []
-        if cells:
-            formatted = []
-            for i in range(len(headers)):
-                src = cells[i] if i < len(cells) else {}
-                dst = {}
-                if "userEnteredFormat" in src:
-                    dst["userEnteredFormat"] = src["userEnteredFormat"]
-                if "dataValidation" in src:
-                    dst["dataValidation"] = src["dataValidation"]
-                formatted.append(dst)
-            self.svc.spreadsheets().batchUpdate(
-                spreadsheetId=self.spreadsheet_id,
-                body={"requests": [{
-                    "updateCells": {
-                        "start": {"sheetId": sheet_id, "rowIndex": new_row_number - 1, "columnIndex": 0},
-                        "rows": [{"values": formatted}],
-                        "fields": "userEnteredFormat,dataValidation",
-                    }
-                }]},
-            ).execute()
+            try:
+                cells = structure["sheets"][0]["data"][0]["rowData"][0].get("values", [])
+            except Exception:
+                cells = []
+            if cells:
+                formatted = []
+                for i in range(len(headers)):
+                    src = cells[i] if i < len(cells) else {}
+                    dst = {}
+                    if "userEnteredFormat" in src:
+                        dst["userEnteredFormat"] = src["userEnteredFormat"]
+                    if "dataValidation" in src:
+                        dst["dataValidation"] = src["dataValidation"]
+                    formatted.append(dst)
+                self.svc.spreadsheets().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body={"requests": [{
+                        "updateCells": {
+                            "start": {"sheetId": sheet_id, "rowIndex": new_row_number - 1, "columnIndex": 0},
+                            "rows": [{"values": formatted}],
+                            "fields": "userEnteredFormat,dataValidation",
+                        }
+                    }]},
+                ).execute()
 
 
-        # Only touch explicitly supplied fields; never blank unrelated CRM/formula columns.
-        data = []
-        for key, value in row.items():
-            if key not in header_index:
-                continue
-            col = self._column_letter(header_index[key] + 1)
-            data.append({"range": f"'{sheet}'!{col}{new_row_number}", "values": [[value]]})
-        if data:
-            self.svc.spreadsheets().values().batchUpdate(
-                spreadsheetId=self.spreadsheet_id,
-                body={"valueInputOption": "RAW", "data": data},
-            ).execute()
-        return new_row_number
+            # Only touch explicitly supplied fields; never blank unrelated CRM/formula columns.
+            data = []
+            for key, value in row.items():
+                if key not in header_index:
+                    continue
+                col = self._column_letter(header_index[key] + 1)
+                data.append({"range": f"'{sheet}'!{col}{new_row_number}", "values": [[value]]})
+            if data:
+                self.svc.spreadsheets().values().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body={"valueInputOption": "RAW", "data": data},
+                ).execute()
+            return new_row_number
 
 
     def update_row(self, sheet: str, row_number: int, values: list) -> None:
