@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       execute_sacrifice:
-        description: "Run the isolated non-factory sales_leads ten-company send after deploy"
+        description: "Run the isolated non-factory sales_leads ten-company send only with explicit repository approval"
         required: true
         type: boolean
         default: false
@@ -217,7 +217,7 @@ jobs:
           echo
 
       - name: Execute isolated ten-company sacrifice batch
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
         run: |
           curl --fail-with-body --retry 3 --retry-all-errors --retry-delay 2 \
             -X POST \
