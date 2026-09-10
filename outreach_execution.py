@@ -162,6 +162,17 @@ class SacrificialEmailExecutor:
             # check from running.
             sheet_idempotency_error = f"{type(exc).__name__}:{exc}"
             existing = []
+        recipient = str(draft.get("recipient") or "").strip().casefold()
+        for row in existing:
+            row_recipient = str(row.get("recipient") or "").strip().casefold()
+            row_status = str(row.get("status") or "").strip().upper()
+            if recipient and row_recipient == recipient and row_status in {"SENT", "FORM_SENT"}:
+                return {
+                    "status": "DUPLICATE_BLOCKED",
+                    "idempotency_key": key,
+                    "existing_status": row_status,
+                    "existing_message_id": row.get("message_id", ""),
+                }
         if any(str(row.get("idempotency_key") or "") == key for row in existing):
             return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "existing_status": "SHEET_RECORD"}
 
@@ -170,12 +181,23 @@ class SacrificialEmailExecutor:
         if sender and hasattr(creds, "with_subject"):
             creds = creds.with_subject(sender)
         service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+        gmail_idempotency_error = ""
         try:
             existing_message_id = _find_existing_gmail_message_with_retry(
                 service, sender=sender, recipient=str(draft["recipient"]).strip(), idempotency_key=key
             )
         except Exception as exc:
-            return {"status": "IDEMPOTENCY_LOOKUP_FAILED", "idempotency_key": key, "reason": f"{type(exc).__name__}:{exc}"}
+            gmail_idempotency_error = f"{type(exc).__name__}:{exc}"
+            # If the Sheet was readable, the recipient-level Sheet check above
+            # is the durable fallback. If both stores are unavailable, fail
+            # closed rather than risking a duplicate.
+            if sheet_idempotency_error:
+                return {
+                    "status": "IDEMPOTENCY_LOOKUP_FAILED",
+                    "idempotency_key": key,
+                    "reason": gmail_idempotency_error,
+                }
+            existing_message_id = ""
         if existing_message_id:
             return {
                 "status": "DUPLICATE_BLOCKED",
@@ -223,6 +245,7 @@ class SacrificialEmailExecutor:
             "sender": sender,
             "audit_log_written": not bool(audit_log_error),
             "sheet_idempotency_lookup_error": sheet_idempotency_error,
+            "gmail_idempotency_lookup_error": gmail_idempotency_error,
         }
         if audit_log_error:
             response["audit_log_error"] = audit_log_error
