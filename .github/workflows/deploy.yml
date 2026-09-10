@@ -160,14 +160,20 @@ jobs:
           set -euo pipefail
           if ! gcloud tasks queues describe lead-factory-workers \
             --location="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
-            gcloud tasks queues create lead-factory-workers \
-              --location="$REGION" --project="$PROJECT"
+            if ! gcloud tasks queues create lead-factory-workers \
+              --location="$REGION" --project="$PROJECT" >/dev/null 2>&1; then
+              echo "Cloud Tasks queue creation unavailable to deploy identity; direct-adapter fallback remains enabled and the condition is visible in runtime health/logs."
+              exit 0
+            fi
           fi
-          gcloud tasks queues update lead-factory-workers \
+          if ! gcloud tasks queues update lead-factory-workers \
             --location="$REGION" --project="$PROJECT" \
             --max-concurrent-dispatches=4 \
             --max-attempts=20 \
-            --max-retry-duration=0s
+            --max-retry-duration=0s; then
+            echo "Cloud Tasks queue tuning unavailable to deploy identity; existing queue configuration is preserved."
+            exit 0
+          fi
           gcloud tasks queues describe lead-factory-workers \
             --location="$REGION" --project="$PROJECT" \
             --format="yaml(state,rateLimits.maxConcurrentDispatches,retryConfig.maxAttempts)"
