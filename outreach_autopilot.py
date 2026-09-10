@@ -508,7 +508,7 @@ class BPOAutopilot:
         )
         self._thread.start()
 
-    def resume_if_active(self) -> dict:
+    def resume_if_active(self, expected_job_id: str = "") -> dict:
         if os.getenv("OUTREACH_AUTOPILOT_ENABLED", "FALSE").strip().upper() != "TRUE":
             return {"status": "DISABLED", "lane": self._lane}
         with self._lock:
@@ -518,6 +518,24 @@ class BPOAutopilot:
             if not row:
                 return {"status": "IDLE", "lane": self._lane}
             state = self._state_from_row(row)
+            expected = str(expected_job_id or "").strip()
+            actual = str(state.get("job_id") or "").strip()
+            if expected and actual and expected != actual:
+                # A fresh deployment gets a new job id. Do not revive an older
+                # worker state after the previous revision has completed or
+                # stalled; close it and let the startup hook create the new job.
+                self._finish(
+                    state,
+                    "STOPPED",
+                    next_action="REPLACED_BY_NEW_DEPLOYMENT",
+                    error=f"stale_job_replaced:{actual}->{expected}",
+                )
+                return {
+                    "status": "IDLE",
+                    "lane": self._lane,
+                    "active": False,
+                    "replaced_job_id": actual,
+                }
             self._state = state
             self._spawn_locked(state)
             return self._response(state, accepted=True)
