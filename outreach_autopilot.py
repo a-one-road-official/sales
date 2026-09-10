@@ -398,7 +398,7 @@ class BPOAutopilot:
             "record_type": "OUTREACH_AUTOPILOT_BATCH",
             "job_id": state["job_id"],
             "batch_id": batch_id,
-            "lane": "BPO",
+            "lane": self._lane,
             "batch_sequence": state.get("batch_sequence", 0),
             "autopilot_status": "BATCH_RECORDED",
             "attempted": attempted,
@@ -544,7 +544,7 @@ class BPOAutopilot:
                 row = self._latest_job_row(job_id, self._sheets()) if job_id else self._latest_active_row()
                 state = self._state_from_row(row) if row else None
             if not state:
-                return {"status": "NO_JOB", "lane": "BPO", "active": False}
+                return {"status": "NO_JOB", "lane": self._lane, "active": False}
             self._state = state
             self._stop_event.set()
             state["status"] = "STOP_REQUESTED"
