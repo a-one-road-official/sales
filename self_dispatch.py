@@ -3,13 +3,9 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
-import threading
 import urllib.request
 
 from task_queue import TaskDispatcher
-
-
-_HTTP_FALLBACK_LOCK = threading.Lock()
 
 
 def _post_fallback(factory, path: str, payload: dict) -> dict:
@@ -71,52 +67,20 @@ def dispatch_lane(factory, lane: str) -> dict:
     queued = {"source": 0, "domain": 0, "gate": 0, "already_queued": 0, "errors": 0}
     errors = []
     mode = "CLOUD_TASKS_ASYNC"
-
-    # The HTTP lane is a degradation path for projects where the runtime
-    # identity cannot enqueue Cloud Tasks.  It must remain below the Sheets API
-    # per-user read quota.  The previous hard-coded 32-way fan-out turned one
-    # scheduler tick into hundreds of concurrent full-sheet reads and caused
-    # 429 -> 503 outages, which stopped promotion entirely.
-    fallback_workers = max(
-        1, min(8, int(cfg.get("DISPATCH_HTTP_WORKERS", os.getenv("LEAD_FACTORY_DISPATCH_HTTP_WORKERS", "4")) or 4))
-    )
-    fallback_limits = {
-        "source": max(1, int(cfg.get("FALLBACK_SOURCE_MAX", "1") or 1)),
-        "domain": max(1, int(cfg.get("FALLBACK_DOMAIN_MAX", "6") or 6)),
-        "gate": max(1, int(cfg.get("FALLBACK_GATE_MAX", "6") or 6)),
-    }
-
     def enqueue_http_fallback(fallback_jobs: list[tuple[str, dict, str]]) -> None:
         nonlocal mode
         if not fallback_jobs:
             return
         mode = "HTTP_FALLBACK_ASYNC"
-        # A Cloud Scheduler retry can overlap the previous fallback request on
-        # the same Cloud Run instance. Do not create a second wave of full-sheet
-        # reads while the first wave is still draining.
-        if not _HTTP_FALLBACK_LOCK.acquire(blocking=False):
-            errors.append({"stage": "fallback", "error": "fallback_lane_busy"})
-            return
-        selected = []
-        stage_counts = {"source": 0, "domain": 0, "gate": 0}
-        try:
-            for item in fallback_jobs:
-                stage = item[2]
-                if stage_counts.get(stage, 0) >= fallback_limits.get(stage, 1):
-                    continue
-                selected.append(item)
-                stage_counts[stage] = stage_counts.get(stage, 0) + 1
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(fallback_workers, len(selected) or 1)) as pool:
-                futures = [pool.submit(_post_fallback, factory, path, payload) for path, payload, _ in selected]
-                for future, (path, payload, stage) in zip(futures, selected):
-                    result = future.result(timeout=535)
-                    if result.get("ok"):
-                        queued[stage] += 1
-                    else:
-                        queued["errors"] += 1
-                        errors.append({"stage": stage, "path": path, "error": result.get("error", "fallback_failed")})
-        finally:
-            _HTTP_FALLBACK_LOCK.release()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+            futures = [pool.submit(_post_fallback, factory, path, payload) for path, payload, _ in fallback_jobs]
+            for future, (path, payload, stage) in zip(futures, fallback_jobs):
+                result = future.result(timeout=535)
+                if result.get("ok"):
+                    queued[stage] += 1
+                else:
+                    queued["errors"] += 1
+                    errors.append({"stage": stage, "path": path, "error": result.get("error", "fallback_failed")})
 
     try:
         dispatcher = TaskDispatcher()
@@ -149,8 +113,6 @@ def dispatch_lane(factory, lane: str) -> dict:
         "candidates": {"source": len(sources), "domain": len(domains), "gate": len(gates)},
         "queued": queued,
         "errors": errors[:100],
-        "fallback_limits": fallback_limits,
-        "fallback_workers": fallback_workers,
         "execution": mode,
         "customer_facing_send": "SACRIFICE_ONLY",
     }

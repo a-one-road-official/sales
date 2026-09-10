@@ -3,7 +3,6 @@ from __future__ import annotations
 import hmac
 import os
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import google.auth
 from fastapi import FastAPI, HTTPException, Request
@@ -19,9 +18,7 @@ from notifier import InternalNotifier
 from outreach_execution import SacrificialEmailExecutor
 from outreach_stability import CRITICAL, SacrificeStability
 from sales_leads_sacrifice import load_rows, sacrifice_candidates, make_research_context
-from sacrifice_failure_loop import classify_batch, batch_gate
 from sales_leads_sacrifice_run import run_ten_sacrifice_batch
-from task_queue import TaskDispatcher
 
 
 app = FastAPI(title="A-one Lead Factory", version="0.3.2")
@@ -402,161 +399,17 @@ def sacrificial_tick(payload: dict):
 
 @app.post("/outreach/sales-leads-sacrifice-tick")
 def sales_leads_sacrifice_tick(payload: dict):
-    """Prepare only the attached sales_leads EC sacrifice population.
-
-    This endpoint intentionally does not instantiate SheetsRepo reads for lead data,
-    does not read LeadFactory_MessageDrafts, and does not write any production SSOT
-    sheet. External customer-facing execution remains blocked at this stage.
-    """
-    try:
-        limit = min(10, max(1, int((payload or {}).get("limit", 10))))
-        candidates = sacrifice_candidates(load_rows(), limit=limit)
-        prepared = []
-        for candidate in candidates:
-            item = dict(candidate)
-            item["research_context"] = make_research_context(candidate)
-            item["status"] = "READY_FOR_RESEARCH"
-            prepared.append(item)
-        return {
-            "status": "SACRIFICE_PREP_ONLY",
-            "source": "sales_leads",
-            "lane": "EC_SACRIFICE",
-            "production_ssot_touched": False,
-            "external_send": "BLOCKED",
-            "candidates": prepared,
-        }
-    except Exception as exc:
-        _fail(exc)
-
-
-@app.post("/outreach/sales-leads-sacrifice-failure-analysis")
-def sales_leads_sacrifice_failure_analysis(payload: dict):
-    """Classify one completed ten-company run and decide the next repair action."""
-    results = list((payload or {}).get("results") or [])
-    if len(results) > 10:
-        raise HTTPException(status_code=400, detail="maximum_ten_results")
-    return {
-        "source": "sales_leads",
-        "lane": "EC_SACRIFICE",
-        "production_ssot_touched": False,
-        "failure_analysis": classify_batch(results),
-        "gate": batch_gate(results),
-    }
-
-
-@app.post("/outreach/sales-leads-sacrifice-run")
-def sales_leads_sacrifice_run(payload: dict):
-    """Run one exact ten-company batch on sales_leads only.
-
-    External execution is opt-in per request and hard-scoped to the attached
-    EC/retail sacrifice source. Production SSOT is never touched here.
-    """
+    """Scheduler entrypoint for the isolated exact-ten sacrifice execution lane."""
     try:
         if int((payload or {}).get("limit", 10)) != 10:
             raise HTTPException(status_code=400, detail="sacrifice_batch_must_be_exactly_ten")
         lf = get_factory()
-        cfg = lf._config()
-        execute_external = bool((payload or {}).get("execute_external", False))
-        if execute_external:
-            cfg = dict(cfg)
-            # Open fire is scoped to the isolated sales_leads sacrifice lane.
-            # Never mutate the Factory/SSOT send flag here.
-            cfg["LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"] = "TRUE"
-            cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = "TRUE"
-            cfg["OUTREACH_FACTORY_SEND_ENABLED"] = "FALSE"
-        executor = SacrificialEmailExecutor(None) if execute_external else None
-        return run_ten_sacrifice_batch(
-            llm=lf.llm, drive=lf.drive, cfg=cfg, limit=10,
-            executor=executor, execute_external=execute_external,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        _fail(exc)
-
-
-def _sacrifice_worker(payload: dict) -> dict:
-    """Execute one company only; queue retries must not replay the other nine."""
-    if int(payload.get("limit", 10)) != 10:
-        raise HTTPException(status_code=400, detail="sacrifice_batch_must_be_exactly_ten")
-    index = int(payload.get("candidate_index", -1))
-    run_id = str(payload.get("run_id") or "").strip()
-    if not run_id or index < 0 or index >= 10:
-        raise HTTPException(status_code=400, detail="invalid_sacrifice_worker_payload")
-    lf = get_factory()
-    cfg = dict(lf._config())
-    cfg["LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"] = "TRUE"
-    cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = "TRUE"
-    cfg["OUTREACH_FACTORY_SEND_ENABLED"] = "FALSE"
-    result = run_ten_sacrifice_batch(
-        llm=lf.llm, drive=lf.drive, cfg=cfg, limit=10,
-        candidate_index=index, run_id=run_id,
-        executor=SacrificialEmailExecutor(None), execute_external=True,
-    )
-    result["execution_route"] = "CLOUD_TASK_WORKER"
-    return result
-
-
-@app.post("/outreach/sales-leads-sacrifice-worker")
-def sales_leads_sacrifice_worker(payload: dict):
-    """Cloud Tasks target. A transient exception returns 500 so the task retries."""
-    try:
-        return _sacrifice_worker(payload or {})
-    except HTTPException:
-        raise
-    except Exception as exc:
-        _fail(exc)
-
-
-@app.post("/outreach/sales-leads-sacrifice-trigger")
-def sales_leads_sacrifice_trigger(payload: dict | None = None):
-    """Fan out the exact ten EC/retail candidates without a serial deploy dependency.
-
-    Cloud Tasks is the primary route. If the queue is unavailable, each company is
-    run through an isolated bounded worker in this request and its result is returned;
-    one company failure never aborts the other nine.
-    """
-    payload = payload or {}
-    try:
-        candidates = sacrifice_candidates(load_rows(), limit=10)
-        if len(candidates) != 10:
-            raise RuntimeError(f"sacrifice_source_has_{len(candidates)}_eligible_rows_not_ten")
-        signature = ":".join(str(row.get("source_row") or row.get("company_name")) for row in candidates)
-        run_id = str(payload.get("run_id") or f"sales-leads-sacrifice-{uuid.uuid5(uuid.NAMESPACE_URL, signature)}")
-        task_payloads = [
-            {"limit": 10, "candidate_index": index, "run_id": run_id, "execute_external": True}
-            for index in range(10)
-        ]
-        try:
-            dispatcher = TaskDispatcher()
-            queued = [dispatcher.enqueue("/outreach/sales-leads-sacrifice-worker", item, f"{run_id}:{item['candidate_index']}") for item in task_payloads]
-            return {
-                "status": "DISPATCHED",
-                "run_id": run_id,
-                "route": "CLOUD_TASKS",
-                "attempted": 10,
-                "queued": queued,
-                "production_ssot_touched": False,
-            }
-        except Exception as queue_exc:
-            results = []
-            with ThreadPoolExecutor(max_workers=5, thread_name_prefix="sacrifice") as pool:
-                futures = [pool.submit(_sacrifice_worker, item) for item in task_payloads]
-                for future in as_completed(futures):
-                    try:
-                        results.append(future.result())
-                    except Exception as exc:
-                        results.append({"status": "FAILED", "stage": "FALLBACK_WORKER", "error_message": f"{type(exc).__name__}:{exc}", "production_ssot_touched": False})
-            return {
-                "status": "COMPLETE_WITH_FALLBACK",
-                "run_id": run_id,
-                "route": "DIRECT_PARALLEL_FALLBACK",
-                "queue_error": f"{type(queue_exc).__name__}:{queue_exc}",
-                "attempted": 10,
-                "results": results,
-                "failure_analysis": classify_batch([row for result in results for row in result.get("results", [])]),
-                "production_ssot_touched": False,
-            }
+        cfg = dict(lf._config())
+        cfg["LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"] = "TRUE"
+        cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = "TRUE"
+        cfg["OUTREACH_FACTORY_SEND_ENABLED"] = "FALSE"
+        return run_ten_sacrifice_batch(llm=lf.llm, drive=lf.drive, cfg=cfg,
+                                       executor=SacrificialEmailExecutor(None), execute_external=True, limit=10)
     except Exception as exc:
         _fail(exc)
 
