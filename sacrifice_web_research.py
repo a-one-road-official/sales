@@ -30,7 +30,10 @@ def inspect_official_site(url: str, *, max_pages: int = 5, expected_company: str
             soup = BeautifulSoup(text, "html.parser")
             found = set(EMAIL_RE.findall(text))
             emails.update(found)
-            page_forms = [urljoin(response.url, str(f.get("action") or response.url)) for f in soup.find_all("form")]
+            # Keep the page that contains the form. The form action is
+            # often an API endpoint, which is not a page the browser executor
+            # can fill and submit.
+            page_forms = [response.url] if soup.find_all("form") else []
             forms.extend(page_forms)
             pages.append({"url": response.url, "status_code": response.status_code,
                           "title": soup.title.get_text(strip=True) if soup.title else "",
