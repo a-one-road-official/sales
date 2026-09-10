@@ -229,6 +229,14 @@ def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
             or _source_identity(source_row, row.get("company_name"))
         ).strip()
         if normalized_lane in {"BPO", "SALES_GTM"}:
+            # A new runtime generation must be able to retry failed work after
+            # an execution fix. Successful/ambiguous outcomes remain consumed
+            # so the retry cannot duplicate a message or an uncertain form.
+            retry_failed = str(
+                os.getenv(f"OUTREACH_{normalized_lane}_RETRY_FAILED", "FALSE")
+            ).strip().upper() in {"TRUE", "1", "YES", "ON"}
+            if status in {"FAILED", "FORM_FAILED"} and retry_failed:
+                continue
             if status:
                 consumed.add(source_identity or source_row)
             continue
