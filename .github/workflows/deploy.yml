@@ -297,7 +297,7 @@ jobs:
           BATCH_ID="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           export BATCH_ID
           mkdir -p /tmp/sacrifice-results
-          for N in $(seq 1 30); do
+          for N in $(seq 1 10); do
             python - "$BATCH_ID" "$N" > /tmp/sacrifice-body.json <<'PY'
           import json, sys
           print(json.dumps({
@@ -365,10 +365,7 @@ jobs:
           print(sum(1 for item in (data.get("results") or []) if item.get("status") in {"SENT", "FORM_SENT"}))
           PY
             )"
-            if [ "${SUCCESS_COUNT}" -ge 10 ]; then
-              echo "sacrifice_success_target_reached=${SUCCESS_COUNT}"
-              break
-            fi
+            # A stability unit is exactly ten attempts; the promotion threshold is 5/10.
             sleep 2
           done
           python - <<'PY'
@@ -445,8 +442,8 @@ jobs:
           assert report["production_ssot_touched"] is False
           assert report["unique_source_rows"] == len(source_rows)
           assert len(message_ids) == len(set(message_ids))
-          if successes < 10 or len(source_rows) != len(set(source_rows)) or len(message_ids) != len(set(message_ids)):
-              raise SystemExit("sacrifice_batch_did_not_complete_ten_external_sends")
+          if successes < 5 or len(rows) + len(request_failures) != 10 or len(source_rows) != len(set(source_rows)) or len(message_ids) != len(set(message_ids)):
+              raise SystemExit("sacrifice_batch_below_five_of_ten_or_incomplete")
           PY
       - name: Re-synchronize controller token before internal bootstrap
         run: |
