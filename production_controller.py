@@ -178,7 +178,7 @@ class QualifiedLeadProductionController:
             **throughput,
         }
 
-    def start(self, target: int, deadline: datetime | None = None) -> dict:
+    def start(self, target: int, deadline: datetime | None = None, force_reset: bool = False) -> dict:
         if int(target) <= 0:
             raise ValueError("goal_target_must_be_positive")
         existing = self._config()
