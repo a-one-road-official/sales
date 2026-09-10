@@ -169,8 +169,8 @@ def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
     consumed = set()
     for row in rows:
         row_lane = str(row.get("lane") or "").strip().upper()
-        if lane == "BPO":
-            if row_lane != "BPO":
+        if lane in {"BPO", "SALES_GTM"}:
+            if row_lane != lane:
                 continue
         elif "SACRIFICE" not in row_lane:
             continue
@@ -395,7 +395,7 @@ def run_ten_sacrifice_batch(
 ):
     limit = _bounded_limit(limit)
     normalized_lane = str(lane or "EC_SACRIFICE").strip().upper()
-    if normalized_lane not in {"EC_SACRIFICE", "BPO"}:
+    if normalized_lane not in {"EC_SACRIFICE", "BPO", "SALES_GTM"}:
         raise ValueError("unsupported_sacrifice_lane")
     cfg = dict(cfg or {})
     sheets = getattr(executor, "sheets", None)
@@ -403,7 +403,10 @@ def run_ten_sacrifice_batch(
     run_id = f"sales-leads-{normalized_lane.lower()}-{batch_token}"
     normalized_slot = None if batch_slot is None else int(batch_slot)
     rows = load_rows_for_lane(normalized_lane, sheets=sheets)
-    target_domain = "BPO" if normalized_lane == "BPO" else "EC/リテール"
+    target_domain = {
+        "BPO": "BPO",
+        "SALES_GTM": "営業/GTM",
+    }.get(normalized_lane, "EC/リテール")
     pool = sacrifice_candidates(
         rows,
         limit=max(limit, len(rows)),
