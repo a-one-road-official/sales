@@ -42,16 +42,22 @@ def _result_base(candidate: dict) -> dict:
 
 
 def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, limit: int = 10,
-                            executor=None, execute_external: bool = False) -> dict:
+                            executor=None, execute_external: bool = False,
+                            candidate_index: int | None = None,
+                            run_id: str | None = None) -> dict:
     """Run one ten-company sacrifice batch, optionally executing EC/retail sends."""
     if int(limit) != 10:
         raise ValueError("sacrifice_batch_must_be_exactly_ten")
     cfg = dict(cfg or {})
-    run_id = f"sales-leads-sacrifice-{uuid.uuid4().hex}"
+    run_id = run_id or f"sales-leads-sacrifice-{uuid.uuid4().hex}"
     prompt_id = str(cfg.get("OUTREACH_PROMPT_DOC_ID") or PROMPT_DOC_ID).strip()
     candidates = sacrifice_candidates(load_rows(), limit=10)
     if len(candidates) != 10:
         raise RuntimeError(f"sacrifice_source_has_{len(candidates)}_eligible_rows_not_ten")
+    if candidate_index is not None:
+        if candidate_index < 0 or candidate_index >= len(candidates):
+            raise ValueError("sacrifice_candidate_index_out_of_range")
+        candidates = [candidates[candidate_index]]
 
     # The prompt is required for compliant drafting, but an unavailable prompt
     # must be recorded against every one of the ten rows rather than aborting
@@ -168,6 +174,8 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
         results.append(result)
 
     failures = [row for row in results if row.get("status") == "FAILED"]
+    sent = sum(1 for row in results if row.get("external_action") == "SENT" or row.get("status") == "SENT")
+    external_action = "SENT" if sent == len(results) and sent else "PARTIAL" if sent else "NOT_ATTEMPTED"
     return {
         "run_id": run_id,
         "status": "COMPLETE",
@@ -179,5 +187,7 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
         "prompt": {"document_id": prompt_id, "modified_time": prompt_meta.get("modifiedTime", "")},
         "results": results,
         "failure_count": len(failures),
+        "success_count": sent,
+        "failure_analysis": {"counts": {code: sum(1 for row in failures if row.get("failure", {}).get("code") == code) for code in sorted({row.get("failure", {}).get("code") for row in failures}) if code}},
         "next_action": "READ_ALL_FAILURES_AND_PATCH" if failures else "READY_FOR_EXPLICIT_CANARY_APPROVAL",
     }
