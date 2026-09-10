@@ -319,6 +319,19 @@ def domain_tick():
     except Exception as exc:
         _fail(exc)
 
+@app.post("/failover/domain")
+def failover_domain_tick():
+    """Direct domain-drain lane independent of dispatch and Cloud Tasks.
+
+    This recovery pump uses the same official-site resolver and Gate contract,
+    and never writes to the customer-facing send path.
+    """
+    try:
+        limit = max(1, min(6, int(os.getenv("LEAD_FACTORY_FAILOVER_DOMAIN_BATCH", "2") or 2)))
+        return get_factory().domain_tick(lane="GROWTH", limit=limit)
+    except Exception as exc:
+        _fail(exc)
+
 
 @app.post("/supply/growth")
 def growth_supply_tick():
