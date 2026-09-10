@@ -873,6 +873,15 @@ class PublicContactFormExecutor:
                 browser = playwright.chromium.launch(headless=True)
                 page = browser.new_page()
                 try:
+                    action_timeout_ms = int(
+                        os.getenv("OUTREACH_FORM_ACTION_TIMEOUT_MS", "7000") or 7000
+                    )
+                except (TypeError, ValueError):
+                    action_timeout_ms = 7000
+                action_timeout_ms = max(1000, min(15000, action_timeout_ms))
+                page.set_default_timeout(action_timeout_ms)
+                page.set_default_navigation_timeout(max(30000, action_timeout_ms))
+                try:
                     response = page.goto(form_url, wait_until="domcontentloaded", timeout=30000)
                 except Exception:
                     # Some large marketing pages continue loading after the form DOM is

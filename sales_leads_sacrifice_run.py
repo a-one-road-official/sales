@@ -704,7 +704,12 @@ def run_ten_sacrifice_batch(
                     evidence_urls=_research_urls(site, research),
                     research_confidence=research.get("confidence", ""),
                 )
-                if preferred_form or (not email and form_links):
+                prefer_email_over_form = (
+                    fast_sales_gtm_mode
+                    and _cfg_truthy(cfg, "OUTREACH_FAST_SALES_GTM_EMAIL_FIRST")
+                    and bool(email)
+                )
+                if (preferred_form or (not email and form_links)) and not prefer_email_over_form:
                     form_contact = {
                         **research,
                         "email": SENDER_EMAIL,
