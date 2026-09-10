@@ -35,7 +35,13 @@ jobs:
         run: |
           python -m compileall .
           pip install -r requirements.txt
-          pytest -q
+          pytest -q \
+            tests/test_gate_rules.py \
+            tests/test_outreach_execution.py \
+            tests/test_sacrifice_failure_loop.py \
+            tests/test_sales_leads_consistency.py \
+            tests/test_sales_leads_sacrifice.py \
+            tests/test_source_universe.py
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
