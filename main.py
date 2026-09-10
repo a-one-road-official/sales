@@ -393,17 +393,35 @@ def qualification_pump():
     except ValueError:
         gate_limit = 20
     try:
-        mittelstand_limit = max(1, min(50, int(os.getenv("LEAD_FACTORY_PUMP_MITTELSTAND_GATE_BATCH", "10") or 10)))
+        mittelstand_limit = max(1, min(20, int(os.getenv("LEAD_FACTORY_PUMP_MITTELSTAND_GATE_BATCH", "2") or 2)))
     except ValueError:
-        mittelstand_limit = 10
+        mittelstand_limit = 2
+    try:
+        source_limit = max(0, min(4, int(os.getenv("LEAD_FACTORY_PUMP_SOURCE_BATCH", "1") or 1)))
+    except ValueError:
+        source_limit = 1
 
     result = {"status": "QUALIFICATION_PUMP_COMPLETE", "execution_path": "SERIALIZED_IN_PROCESS"}
     with _recovery_lock:
+        # First drain already-resolved candidates and append them before any slow scraping.
         for key, action in (
-            # Drain already-resolved candidates first so SSOT promotion starts immediately.
             ("growth_gate", lambda: lf.gate_worker.process_pending(limit=gate_limit, lane="GROWTH")),
             ("mittelstand_gate", lambda: lf.mittelstand_worker.process_pending(limit=mittelstand_limit)),
-            # Resolve new domains after the ready queue; the next scheduler tick will gate them.
+        ):
+            try:
+                result[key] = action()
+            except Exception as exc:
+                result[key] = {"status": "ERROR", "error": f"{type(exc).__name__}:{exc}"}
+        with _promotion_lock:
+            try:
+                result["promotion_before_supply"] = lf.promotion_tick()
+            except Exception as exc:
+                result["promotion_before_supply"] = {"status": "ERROR", "error": f"{type(exc).__name__}:{exc}"}
+
+        # Add one middle-market source at a time, then resolve a small domain batch.
+        # This keeps Taiwan/Korea/mittelstand lanes active without parallel sheet writes.
+        for key, action in (
+            ("mittelstand_source", lambda: lf.source_tick(limit=source_limit, lane="MITTELSTAND")),
             ("domain", lambda: lf.domain_tick(limit=domain_limit)),
         ):
             try:
