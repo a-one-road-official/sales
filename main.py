@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from google.cloud import secretmanager
 
 from maktek_ingest import MaktekIngestor
+from drive_repo import PromptSSOTError
 from production_controller import QualifiedLeadProductionController
 from self_dispatch import dispatch_lane as self_dispatch_lane
 from settings import SETTINGS
@@ -550,6 +551,24 @@ def prep_tick():
         _fail(exc)
 
 
+@app.get("/outreach/prompt-status")
+def outreach_prompt_status():
+    try:
+        lf = get_factory()
+        _, metadata = lf.live_outreach_prompt(lf._config())
+        return {
+            "status": "OK",
+            "prompt_doc_title": metadata.get("prompt_doc_title", ""),
+            "prompt_doc_id": metadata.get("prompt_doc_id", ""),
+            "prompt_modified_time": metadata.get("prompt_modified_time", ""),
+            "prompt_hash": metadata.get("prompt_hash", ""),
+        }
+    except PromptSSOTError as exc:
+        raise HTTPException(status_code=503, detail={"code": exc.code, "detail": exc.detail})
+    except Exception as exc:
+        _fail(exc)
+
+
 def _sacrifice_limit(payload: dict | None) -> int:
     try:
         limit = int((payload or {}).get("limit", 10))
@@ -587,7 +606,9 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
             raise HTTPException(status_code=400, detail="invalid_sacrifice_batch_slot")
         if batch_slot < 0:
             raise HTTPException(status_code=400, detail="sacrifice_batch_slot_must_be_nonnegative")
-    executor = SacrificialEmailExecutor(lf.sheets) if execute_external else None
+    executor = SacrificialEmailExecutor(
+            lf.sheets, lf.drive, cfg.get("OUTREACH_PROMPT_DOC_TITLE", "outreach_prompt_production_v1")
+        ) if execute_external else None
     with _sacrifice_lock:
         result = run_ten_sacrifice_batch(
             llm=lf.llm,
