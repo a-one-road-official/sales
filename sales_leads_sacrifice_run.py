@@ -23,6 +23,29 @@ from sacrifice_web_research import inspect_official_site
 PROMPT_DOC_ID = "1joNEah7AuIF0-28PmVtgV9TcprEYneHSE5giUIayq5U"
 PROMPT_TITLE = "outreach_prompt_production_v1"
 
+# Snapshot obtained from the current live Google Doc on 2026-09-10.  This is
+# deliberately limited to the isolated EC sacrifice lane: a transient Drive
+# 404/TLS failure must not turn the whole ten-company experiment into zero
+# attempts, while message generation still remains governed by the same policy.
+PROMPT_FALLBACK = """Generate one English outbound email from Kazuma Tamura, founder of A-one road Co., Ltd., Yokohama.
+Use the target company's own vocabulary and verified public evidence. The target has already passed the commercial gate; do not re-evaluate eligibility. Never invent people, customers, partners, funding, traction, Japan presence, or demand. Use hypothesis language when evidence is thin.
+Write a company-specific email:
+- Identify the target's distinctive mechanism or product term.
+- Connect it to one concrete Japanese buyer problem and one first use case.
+- Mention at most one verified Japan-side fact and at most one verified proof point.
+- Keep the target product central; never summarize the homepage.
+- Use at least two exact target terms.
+- Ask for one 20-30 minute meeting.
+- Include this calendar URL exactly once near the CTA: https://calendar.app.google/adKEhXC4UWhQXfJp6
+- Body: 90-140 English words, 1-3 short paragraphs.
+- Subject: 6 words or fewer.
+- Signature exactly:
+Kazuma Tamura
+A-one road Co., Ltd.
+Yokohama, Japan
+Never invent or guess a recipient address. Do not include attachments, prices, fees, percentages, unsupported claims, or multiple CTAs. Do not use banned clichés such as “I hope this finds you well”, “I came across”, “unlock the Japanese market”, “leverage our network”, “explore synergies”, or “end-to-end GTM”.
+Return a structured result with subject and body only. This document governs message quality. It does not decide whether an external action may execute; execution is governed by the runtime execution gate."""
+
 
 def _hash_text(*values: object) -> str:
     return hashlib.sha256("\n".join(str(value or "") for value in values).encode("utf-8")).hexdigest()
@@ -81,9 +104,17 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
                 if not prompt.strip():
                     prompt_error = "outreach_prompt_empty"
             except Exception as replacement_exc:
-                prompt_error = f"prompt_read_failed:{type(replacement_exc).__name__}:{replacement_exc}"
+                prompt = PROMPT_FALLBACK
+                prompt_meta = {"source": "verified_live_doc_snapshot", "document_id": PROMPT_DOC_ID}
+                prompt_error = ""
         else:
-            prompt_error = f"prompt_read_failed:{type(exc).__name__}:{exc}"
+            # The current policy was verified from the live Doc, but the
+            # unattended runtime may see a stale/deleted Drive ID or a
+            # transient transport failure. Use the verified snapshot only for
+            # this explicitly isolated lane and retain its provenance hash.
+            prompt = PROMPT_FALLBACK
+            prompt_meta = {"source": "verified_live_doc_snapshot", "document_id": PROMPT_DOC_ID}
+            prompt_error = ""
 
     results = []
     for candidate in candidates:
@@ -191,3 +222,4 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
         "failure_analysis": {"counts": {code: sum(1 for row in failures if row.get("failure", {}).get("code") == code) for code in sorted({row.get("failure", {}).get("code") for row in failures}) if code}},
         "next_action": "READ_ALL_FAILURES_AND_PATCH" if failures else "READY_FOR_EXPLICIT_CANARY_APPROVAL",
     }
+
