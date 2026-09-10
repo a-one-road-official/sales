@@ -9,6 +9,8 @@ from email.mime.text import MIMEText
 from google.auth import default
 from googleapiclient.discovery import build
 
+from observability import failure_code, record_event
+
 
 CRITICAL_FIELDS = {
     "recipient",
@@ -83,36 +85,69 @@ class SacrificialEmailExecutor:
             return {"status": "BLOCKED", "reason": "factory_send_flag_must_remain_false"}
         preflight = semantic_email_preflight(draft, cfg)
         if not preflight["ok"]:
+            reason = ",".join(preflight.get("critical_errors") or preflight.get("missing") or ["PREFLIGHT_FAILED"])
+            record_event(
+                self.sheets, event_type="OUTBOUND_FAILED", reason_code=failure_code(reason),
+                reason_note=f"preflight:{reason}", company_name=str(draft.get("company_name") or ""),
+                domain=str(draft.get("domain") or ""), email=str(draft.get("recipient") or ""),
+                source_id=str(draft.get("draft_id") or ""), status="BLOCKED_PREFLIGHT",
+            )
             return {"status": "BLOCKED_PREFLIGHT", **preflight}
 
         key = f"sacrificial:{draft.get('draft_id','')}:{preflight['message_hash']}"
-        existing = self.sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ") if self.sheets else []
-        if key in self._sent_keys or any(str(row.get("idempotency_key") or "") == key for row in existing):
+        existing = self.sheets._rows_as_dicts("SalesControl_Events", "Z") if self.sheets else []
+        sent_keys = getattr(self, "_sent_keys", set())
+        if key in sent_keys or any(
+            str(row.get("source_id") or "") == str(draft.get("draft_id") or "")
+            and str(row.get("event_type") or "").upper() == "OUTBOUND_SENT"
+            for row in existing
+        ):
+            record_event(
+                self.sheets, event_type="OUTBOUND_FAILED", reason_code="DUPLICATE_BLOCKED",
+                reason_note="idempotency key already exists", company_name=str(draft.get("company_name") or ""),
+                domain=str(draft.get("domain") or ""), email=str(draft.get("recipient") or ""),
+                source_id=str(draft.get("draft_id") or ""), status="DUPLICATE_BLOCKED",
+            )
             return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key}
 
+        record_event(
+            self.sheets, event_type="OUTBOUND_ATTEMPTED", reason_code="EMAIL_SEND_ATTEMPT",
+            reason_note="sacrificial lane only; execution flag was explicitly enabled",
+            company_name=str(draft.get("company_name") or ""), domain=str(draft.get("domain") or ""),
+            email=str(draft.get("recipient") or ""), source_id=str(draft.get("draft_id") or ""),
+            status="ATTEMPTED",
+        )
         sender = os.getenv("LEAD_FACTORY_GMAIL_IMPERSONATE", "admin@a1-road.com").strip()
-        creds, _ = default(scopes=["https://www.googleapis.com/auth/gmail.send"])
-        if sender and hasattr(creds, "with_subject"):
-            creds = creds.with_subject(sender)
-        service = build("gmail", "v1", credentials=creds, cache_discovery=False)
-        message = MIMEText(str(draft.get("body") or ""), "plain", "utf-8")
-        message["to"] = str(draft["recipient"]).strip()
-        message["from"] = sender
-        message["subject"] = str(draft["subject"]).strip()
-        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
-        result = service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        try:
+            creds, _ = default(scopes=["https://www.googleapis.com/auth/gmail.send"])
+            if sender and hasattr(creds, "with_subject"):
+                creds = creds.with_subject(sender)
+            service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+            message = MIMEText(str(draft.get("body") or ""), "plain", "utf-8")
+            message["to"] = str(draft["recipient"]).strip()
+            message["from"] = sender
+            message["subject"] = str(draft["subject"]).strip()
+            raw = base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+            result = service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        except Exception as exc:
+            reason = failure_code(exc)
+            record_event(
+                self.sheets, event_type="OUTBOUND_FAILED", reason_code=reason,
+                reason_note=f"email_send:{type(exc).__name__}:{exc}", company_name=str(draft.get("company_name") or ""),
+                domain=str(draft.get("domain") or ""), email=str(draft.get("recipient") or ""),
+                source_id=str(draft.get("draft_id") or ""), status="FAILED",
+            )
+            return {"status": "FAILED", "reason_code": reason, "error": f"{type(exc).__name__}:{exc}"}
+
         now = datetime.now(timezone.utc).isoformat()
-        self._sent_keys.add(key)
-        if self.sheets:
-            self.sheets.append_dict("LeadFactory_ExecutionLog", {
-            "idempotency_key": key,
-            "draft_id": draft.get("draft_id", ""),
-            "company_name": draft.get("company_name", ""),
-            "lane": lane_from(draft),
-            "channel": "EMAIL",
-            "status": "SENT",
-            "semantic_success": "PENDING_DELIVERY",
-            "message_id": result.get("id", ""),
-            "executed_at": now,
-            })
-        return {"status": "SENT", "message_id": result.get("id", ""), "idempotency_key": key, "preflight": preflight}
+        message_id = result.get("id", "")
+        if hasattr(self, "_sent_keys"):
+            self._sent_keys.add(key)
+        record_event(
+            self.sheets, event_type="OUTBOUND_SENT", reason_code="EMAIL_ACCEPTED_BY_GMAIL",
+            reason_note=f"message_id={message_id}; delivery remains pending verification",
+            company_name=str(draft.get("company_name") or ""), domain=str(draft.get("domain") or ""),
+            email=str(draft.get("recipient") or ""), source_id=str(draft.get("draft_id") or ""),
+            status="SENT",
+        )
+        return {"status": "SENT", "message_id": message_id, "idempotency_key": key, "preflight": preflight, "executed_at": now}
