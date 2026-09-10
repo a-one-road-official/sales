@@ -105,14 +105,33 @@ def start_recovery_pump() -> None:
     _recovery_thread.start()
 
 
+def _autopilot_lane() -> str:
+    raw = str(os.getenv("OUTREACH_AUTOPILOT_LANE", "BPO") or "").strip()
+    lane = lane_from({"lane": raw}) if raw else "BPO"
+    if lane not in {"BPO", "SALES_GTM"}:
+        raise RuntimeError(f"unsupported_autopilot_lane:{lane or 'EMPTY'}")
+    return lane
+
+
 @app.on_event("startup")
 def resume_bpo_autopilot() -> None:
     if os.getenv("OUTREACH_AUTOPILOT_ENABLED", "FALSE").upper() != "TRUE":
         return
     try:
-        get_bpo_autopilot().resume_if_active()
+        autopilot = get_bpo_autopilot()
+        resumed = autopilot.resume_if_active()
+        if _config_truthy(os.getenv("OUTREACH_AUTOPILOT_AUTOSTART", "FALSE")) and not resumed.get("active"):
+            lane = _autopilot_lane()
+            job_id = str(os.getenv("OUTREACH_AUTOPILOT_JOB_ID", "") or "").strip()
+            started = autopilot.start({
+                "job_id": job_id or f"{lane.lower()}-auto-runtime",
+                "lane": lane,
+                "stable_batches_required": os.getenv("OUTREACH_STABLE_BATCHES_REQUIRED", "3"),
+                "minimum_successes": os.getenv("OUTREACH_STABLE_BATCH_MIN_SUCCESS", "5"),
+            })
+            print(f"{lane} autopilot auto-start result: {started}", flush=True)
     except Exception as exc:
-        print(f"BPO autopilot resume failed: {type(exc).__name__}:{exc}", flush=True)
+        print(f"Outbound autopilot resume/auto-start failed: {type(exc).__name__}:{exc}", flush=True)
 
 
 @app.on_event("shutdown")
@@ -173,6 +192,7 @@ def get_bpo_autopilot() -> BPOAutopilot:
             factory_getter=get_factory,
             config_getter=lambda: _outbound_runtime_config(get_factory()),
             batch_runner=lambda payload: _run_sales_leads_sacrifice(payload, scheduled=True),
+            lane=_autopilot_lane(),
         )
     return bpo_autopilot
 
@@ -226,11 +246,17 @@ def deep_healthz():
         "factory_enabled": os.getenv("LEAD_FACTORY_ENABLED", "TRUE").upper() == "TRUE",
         "gemini_vertex_ready": bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")),
         "external_write": os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE").upper() == "TRUE",
+        "autopilot_lane": _autopilot_lane(),
         "bpo_send": _outbound_send_enabled("BPO"),
+        "sales_gtm_send": _outbound_send_enabled("SALES_GTM"),
         "factory_send": False,
         "ssot_send": False,
         "autopilot_enabled": os.getenv("OUTREACH_AUTOPILOT_ENABLED", "FALSE").upper() == "TRUE",
-        "customer_facing_send": "ENABLED_FOR_BPO" if _outbound_send_enabled("BPO") else "DISABLED",
+        "customer_facing_send": (
+            f"ENABLED_FOR_{_autopilot_lane()}"
+            if _outbound_send_enabled(_autopilot_lane())
+            else "DISABLED"
+        ),
     }
 
 
@@ -272,7 +298,12 @@ def ops_status():
                 "in_process_recovery": "ACTIVE" if _recovery_thread and _recovery_thread.is_alive() else "STARTING_OR_DISABLED",
                 "deployment_activation": "NON_BLOCKING",
             },
-            "customer_facing_send": "ENABLED_FOR_BPO" if _outbound_send_enabled("BPO") else "DISABLED",
+            "customer_facing_send": (
+                f"ENABLED_FOR_{_autopilot_lane()}"
+                if _outbound_send_enabled(_autopilot_lane())
+                else "DISABLED"
+            ),
+            "autopilot_lane": _autopilot_lane(),
             "bpo_autopilot": get_bpo_autopilot().status(),
         }
     except Exception as exc:
@@ -629,6 +660,7 @@ _OUTBOUND_RUNTIME_KEYS = (
     "OUTREACH_SACRIFICE_LANES",
     "OUTREACH_SACRIFICE_SEND_ENABLED",
     "OUTREACH_BPO_SEND_ENABLED",
+    "OUTREACH_SALES_GTM_SEND_ENABLED",
     "OUTREACH_FACTORY_SEND_ENABLED",
     "OUTREACH_SSOT_SEND_ENABLED",
     "OUTREACH_PROMPT_DOC_TITLE",
@@ -637,11 +669,17 @@ _OUTBOUND_RUNTIME_KEYS = (
     "LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME",
     "OUTREACH_SACRIFICE_TARGET_COMPANIES",
     "OUTREACH_AUTOPILOT_ENABLED",
+    "OUTREACH_AUTOPILOT_AUTOSTART",
+    "OUTREACH_AUTOPILOT_JOB_ID",
+    "OUTREACH_AUTOPILOT_LANE",
     "OUTREACH_SITE_MAX_PAGES",
     "OUTREACH_AUTOFIX_GENERATION",
     "OUTREACH_AUTOPILOT_RETRY_DELAY_SECONDS",
     "OUTREACH_BPO_TARGET_SUCCESS",
     "OUTREACH_BPO_MAX_ATTEMPTS",
+    "OUTREACH_SALES_GTM_TARGET_SUCCESS",
+    "OUTREACH_SALES_GTM_MAX_ATTEMPTS",
+    "OUTREACH_SALES_GTM_LIVE_CACHE_SECONDS",
     "OUTREACH_STABLE_BATCHES_REQUIRED",
     "OUTREACH_STABLE_BATCH_MIN_SUCCESS",
     "OUTREACH_CRITICAL_ERROR_RESETS",
@@ -654,6 +692,7 @@ _SUPPORTED_OUTBOUND_LANES = {
     "EC_SACRIFICE",
     "FACTORY",
     "BPO",
+    "SALES_GTM",
     "SSOT",
     "FACTORY_SSOT",
     "PRODUCTION_SSOT",
@@ -707,7 +746,7 @@ def _outbound_batch_lane(payload: dict | None) -> str:
         or ""
     ).strip()
     lane = lane_from({"lane": raw}) if raw else "BPO"
-    if lane not in {"BPO", "EC_SACRIFICE"}:
+    if lane not in {"BPO", "EC_SACRIFICE", "SALES_GTM"}:
         raise HTTPException(status_code=400, detail="unsupported_sacrifice_lane")
     return lane
 
@@ -749,6 +788,9 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
     )
     cfg["OUTREACH_BPO_SEND_ENABLED"] = (
         "TRUE" if lane == "BPO" and execute_external else "FALSE"
+    )
+    cfg["OUTREACH_SALES_GTM_SEND_ENABLED"] = (
+        "TRUE" if lane == "SALES_GTM" and execute_external else "FALSE"
     )
     cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = (
         "TRUE" if lane == "EC_SACRIFICE" and execute_external else "FALSE"
@@ -885,6 +927,21 @@ def bpo_autopilot_start(payload: dict):
         _fail(exc)
 
 
+@app.post("/outreach/sales-gtm-autopilot/start")
+def sales_gtm_autopilot_start(payload: dict):
+    """Create one durable Sales/GTM job; runtime auto-start uses the same path."""
+    try:
+        request_payload = dict(payload or {})
+        request_payload["lane"] = "SALES_GTM"
+        return get_bpo_autopilot().start(request_payload)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        _fail(exc)
+
+
 @app.get("/outreach/bpo-autopilot/status")
 def bpo_autopilot_status(job_id: str = ""):
     try:
@@ -893,8 +950,25 @@ def bpo_autopilot_status(job_id: str = ""):
         _fail(exc)
 
 
+@app.get("/outreach/sales-gtm-autopilot/status")
+def sales_gtm_autopilot_status(job_id: str = ""):
+    try:
+        return get_bpo_autopilot().status(str(job_id or "").strip())
+    except Exception as exc:
+        _fail(exc)
+
+
 @app.post("/outreach/bpo-autopilot/stop")
 def bpo_autopilot_stop(payload: dict):
+    try:
+        job_id = str((payload or {}).get("job_id") or "").strip()
+        return get_bpo_autopilot().stop(job_id)
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/outreach/sales-gtm-autopilot/stop")
+def sales_gtm_autopilot_stop(payload: dict):
     try:
         job_id = str((payload or {}).get("job_id") or "").strip()
         return get_bpo_autopilot().stop(job_id)
