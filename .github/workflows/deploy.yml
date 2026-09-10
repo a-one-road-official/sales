@@ -432,6 +432,15 @@ jobs:
           if len(rows) != 10 or request_failures or successes != 10:
               raise SystemExit("sacrifice_batch_did_not_complete_ten_external_sends")
           PY
+      - name: Re-synchronize controller token before internal bootstrap
+        run: |
+          RUNTIME_TOKEN="$(gcloud run services describe "$SERVICE" \
+            --region="$REGION" --project="$PROJECT" --format=json | \
+            python -c 'import json,sys; d=json.load(sys.stdin); e=d.get("spec",{}).get("template",{}).get("spec",{}).get("containers",[{}])[0].get("env",[]); print(next((x.get("value","") for x in e if x.get("name")=="LEAD_FACTORY_INTERNAL_TOKEN"), ""))')"
+          test -n "$RUNTIME_TOKEN"
+          echo "::add-mask::$RUNTIME_TOKEN"
+          echo "INTERNAL_TOKEN=$RUNTIME_TOKEN" >> "$GITHUB_ENV"
+
       - name: Bootstrap first autonomous tick
         continue-on-error: true
         run: |
