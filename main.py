@@ -615,3 +615,14 @@ def pipeline_tick():
         lf = get_factory()
         discovery_growth = lf.discover_lane(f"pipeline-growth-{uuid.uuid4()}", "GROWTH")
         discovery_mittel = lf.discover_lane(f"pipeline-mittel-{uuid.uuid4()}", "MITTELSTAND")
+        dispatch_growth_result = self_dispatch_lane(lf, "GROWTH")
+        dispatch_mittel_result = self_dispatch_lane(lf, "MITTELSTAND")
+        return {
+            "status": "DISPATCHED",
+            "discovery_growth": discovery_growth,
+            "discovery_mittelstand": discovery_mittel,
+            "dispatch_growth": dispatch_growth_result,
+            "dispatch_mittelstand": dispatch_mittel_result,
+        }
+    except Exception as exc:
+        _fail(exc)
