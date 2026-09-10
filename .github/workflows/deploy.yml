@@ -15,7 +15,7 @@ permissions:
 
 concurrency:
   group: lead-factory-qualified-ssot-deploy-v3
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
