@@ -47,20 +47,34 @@ SAFETY_STOP_CODES = {
     "FALSE_POSITIVE_SUCCESS",
 }
 AUTOPILOT_COLUMNS = (
+    # Job/batch identity and state fields. _ensure_header is idempotent, so this
+    # works with the pre-existing execution-batch sheet without replacing it.
     "record_type",
     "job_id",
+    "batch_id",
+    "lane",
     "batch_sequence",
     "autopilot_status",
     "target_successes",
     "max_attempts",
     "total_attempts",
     "total_successes",
+    "attempted",
+    "semantic_success",
     "passing_streak",
     "stable",
+    "stability_status",
+    "batch_gate_status",
+    "stable_batches_required",
+    "minimum_successes",
     "strategy",
     "last_failure_codes",
+    "failure_analysis",
+    "failure_codes",
+    "auto_adjustments",
     "last_error",
     "next_action",
+    "started_at",
     "updated_at",
     "completed_at",
 )
@@ -263,10 +277,10 @@ class BPOAutopilot:
             "max_attempts": _int_value(row.get("max_attempts"), DEFAULT_MAX_ATTEMPTS, 10, 4000),
             "stable_batches_required": _int_value(row.get("stable_batches_required"), DEFAULT_STABLE_BATCHES, 1, 20),
             "minimum_successes": _int_value(row.get("minimum_successes"), DEFAULT_MIN_SUCCESS, 5, 10),
-            "total_attempts": max(0, int(row.get("total_attempts") or 0)),
-            "total_successes": max(0, int(row.get("total_successes") or 0)),
-            "batch_sequence": max(0, int(row.get("batch_sequence") or 0)),
-            "passing_streak": max(0, int(row.get("passing_streak") or 0)),
+            "total_attempts": _int_value(row.get("total_attempts"), 0, 0, 4000),
+            "total_successes": _int_value(row.get("total_successes"), 0, 0, 4000),
+            "batch_sequence": _int_value(row.get("batch_sequence"), 0, 0, 1000000),
+            "passing_streak": _int_value(row.get("passing_streak"), 0, 0, 1000000),
             "stable": _truthy(row.get("stable")),
             "status": status,
             "strategy": _json_object(row.get("strategy"), _default_strategy()),
@@ -564,20 +578,46 @@ class BPOAutopilot:
                     )
                     return
 
+                if not isinstance(result, dict):
+                    self._finish(
+                        state, "PAUSED_SAFETY",
+                        next_action="HUMAN_REVIEW_REQUIRED",
+                        error="BATCH_RESULT_NOT_OBJECT",
+                    )
+                    return
+                result_lane = str(result.get("lane") or "").strip().upper()
+                if result_lane and result_lane != "BPO":
+                    self._finish(
+                        state, "PAUSED_SAFETY",
+                        next_action="HUMAN_REVIEW_REQUIRED",
+                        error="NON_SACRIFICIAL_LANE",
+                    )
+                    return
                 rows = _normalized_results(result)
-                attempted = int(result.get("attempted", len(rows)) or 0)
-                successes = int(
-                    result.get("success_count", sum(1 for row in rows if row.get("semantic_success"))) or 0
-                )
+                attempted_reported = _int_value(result.get("attempted"), len(rows), 0, 10)
+                attempted = len(rows)
+                successes = sum(1 for row in rows if row.get("semantic_success"))
+                integrity_errors = []
+                if attempted_reported != attempted:
+                    integrity_errors.append("BATCH_ATTEMPT_COUNT_MISMATCH")
+                try:
+                    reported_successes = int(result.get("success_count", successes) or 0)
+                except (TypeError, ValueError):
+                    reported_successes = successes
+                if reported_successes != successes:
+                    integrity_errors.append("FALSE_POSITIVE_SUCCESS")
                 analysis = classify_batch(rows)
                 gate = batch_gate(rows, required_successes=int(state["minimum_successes"]))
                 codes = _failure_codes(analysis, rows)
+                codes.extend(integrity_errors)
+                codes = sorted(set(codes))
                 strategy, adjustments = _adjust_strategy(
                     state.get("strategy") or {}, analysis.get("failure_counts") or {}
                 )
                 critical = sorted(
                     set(gate.get("critical_errors") or [])
                     | {code for code in codes if code in SAFETY_STOP_CODES}
+                    | set(integrity_errors)
                 )
 
                 try:
