@@ -151,6 +151,46 @@ class SheetsRepo:
 
 
 
+    def ensure_outreach_schema(self) -> None:
+        """Ensure provenance/status columns exist without changing existing draft history."""
+        for sheet, headers in {
+            "LeadFactory_MessageDrafts": (
+                "prompt_doc_title", "prompt_doc_id", "prompt_modified_time",
+                "prompt_hash", "prompt_status", "stale_reason", "regeneration_error",
+            ),
+            "LeadFactory_ApprovalQueue": (
+                "prompt_doc_title", "prompt_doc_id", "prompt_modified_time",
+                "prompt_hash", "prompt_status",
+            ),
+        }.items():
+            for header in headers:
+                self._ensure_header(sheet, header)
+
+
+    def _update_dict_fields(self, sheet: str, row_number: int, changes: dict) -> None:
+        if not changes:
+            return
+        headers_rows = self.read(f"{sheet}!1:1")
+        headers = headers_rows[0] if headers_rows else []
+        for key in changes:
+            if key not in headers:
+                self._ensure_header(sheet, key)
+        headers_rows = self.read(f"{sheet}!1:1")
+        headers = headers_rows[0] if headers_rows else []
+        header_index = {str(header): index for index, header in enumerate(headers) if header}
+        data = []
+        for key, value in changes.items():
+            if key not in header_index:
+                continue
+            col = self._column_letter(header_index[key] + 1)
+            data.append({"range": f"'{sheet}'!{col}{int(row_number)}", "values": [[value]]})
+        if data:
+            self._execute_write(lambda: self.svc.spreadsheets().values().batchUpdate(
+                spreadsheetId=self.spreadsheet_id,
+                body={"valueInputOption": "RAW", "data": data},
+            ).execute())
+
+
     @staticmethod
     def _column_letter(index_1_based: int) -> str:
         n = int(index_1_based)
@@ -1350,6 +1390,35 @@ class SheetsRepo:
             item["row_number"] = row_number
             out.append(item)
         return out
+
+    def outreach_draft_rows(self) -> list[dict]:
+        return self._rows_as_dicts("LeadFactory_MessageDrafts", "ZZ")
+
+    def outreach_queue_rows(self) -> list[dict]:
+        return self._rows_as_dicts("LeadFactory_ApprovalQueue", "ZZ")
+
+    def update_message_draft(self, draft_id: str, changes: dict) -> bool:
+        for row in self.outreach_draft_rows():
+            if str(row.get("draft_id") or "").strip() == str(draft_id or "").strip():
+                self._update_dict_fields("LeadFactory_MessageDrafts", int(row["row_number"]), changes)
+                return True
+        return False
+
+    def update_approval_queue_for_draft(self, draft_id: str, changes: dict) -> bool:
+        for row in self.outreach_queue_rows():
+            if str(row.get("draft_id") or "").strip() == str(draft_id or "").strip():
+                self._update_dict_fields("LeadFactory_ApprovalQueue", int(row["row_number"]), changes)
+                return True
+        return False
+
+    def outreach_candidate_by_key(self, company_key: str) -> dict | None:
+        key = str(company_key or "").strip()
+        if not key:
+            return None
+        for candidate in self.list_promotable_candidates():
+            if str(candidate.get("lead_id") or "").strip() == key:
+                return candidate
+        return None
 
     def outreach_candidates(self, limit: int = 5, lane: str | None = None) -> list[dict]:
         """Qualified, untouched leads that still need an internal send-ready draft."""
