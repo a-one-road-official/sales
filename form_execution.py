@@ -762,9 +762,14 @@ class PublicContactFormExecutor:
                     present_keys = set()
                     for index in range(fields.count()):
                         el = fields.nth(index)
-                        if not el.is_visible() or not el.is_enabled():
-                            continue
                         typ = (el.get_attribute("type") or "text").lower()
+                        role = (el.get_attribute("role") or "").lower()
+                        is_custom_dropdown = (
+                            role in {"combobox", "button"}
+                            and bool(el.get_attribute("aria-haspopup"))
+                        )
+                        if not el.is_visible() or (not el.is_enabled() and not is_custom_dropdown):
+                            continue
                         if typ in {"submit", "button", "file", "checkbox", "radio", "reset", "image"}:
                             continue
                         label = _label_for(el)
@@ -793,11 +798,6 @@ class PublicContactFormExecutor:
 
                         try:
                             tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
-                            role = (el.get_attribute("role") or "").lower()
-                            is_custom_dropdown = (
-                                role in {"combobox", "button"}
-                                and bool(el.get_attribute("aria-haspopup"))
-                            )
                             if is_custom_dropdown:
                                 selected, selected_text = _select_custom_option(el, key)
                                 if not selected:
