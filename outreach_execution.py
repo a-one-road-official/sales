@@ -101,21 +101,32 @@ class SacrificialEmailExecutor:
         result = service.users().messages().send(userId="me", body={"raw": raw}).execute()
         now = datetime.now(timezone.utc).isoformat()
         self._sent_keys.add(key)
+        message_id = str(result.get("id") or "").strip()
+        audit_log_error = ""
         if self.sheets:
-            self.sheets.append_dict("LeadFactory_ExecutionLog", {
-                "idempotency_key": key,
-                "draft_id": draft.get("draft_id", ""),
-                "company_name": draft.get("company_name", ""),
-                "lane": lane_from(draft),
-                "channel": "EMAIL",
-                "status": "SENT",
-                "semantic_success": "PENDING_DELIVERY",
-                "message_id": result.get("id", ""),
-                "executed_at": now,
-            })
-        return {
+            try:
+                self.sheets.append_dict("LeadFactory_ExecutionLog", {
+                    "idempotency_key": key,
+                    "draft_id": draft.get("draft_id", ""),
+                    "source_row": draft.get("source_row", ""),
+                    "company_name": draft.get("company_name", ""),
+                    "lane": lane_from(draft),
+                    "channel": "EMAIL",
+                    "status": "SENT",
+                    "semantic_success": "PENDING_DELIVERY",
+                    "message_id": message_id,
+                    "executed_at": now,
+                })
+            except Exception as exc:
+                audit_log_error = f"{type(exc).__name__}:{exc}"
+        response = {
             "status": "SENT",
-            "message_id": result.get("id", ""),
+            "message_id": message_id,
             "idempotency_key": key,
             "preflight": preflight,
+            "sender": sender,
+            "audit_log_written": not bool(audit_log_error),
         }
+        if audit_log_error:
+            response["audit_log_error"] = audit_log_error
+        return response

@@ -1,7 +1,9 @@
-"""Execute a bounded non-factory EC sacrifice batch."""
+"""Execute the approved EC/retail sacrifice lane one company at a time."""
 from __future__ import annotations
 
 import hashlib
+import json
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -10,11 +12,14 @@ from sacrifice_web_research import inspect_official_site
 from sales_leads_sacrifice import load_rows, make_research_context, sacrifice_candidates
 
 PROMPT_DOC_ID = "1joNEah7AuIF0-28PmVtgV9TcprEYneHSE5giUIayq5U"
-PROMPT_FALLBACK = """Write one concise English sales email from Kazuma Tamura, founder of A-one road Co., Ltd., Yokohama. Use only verified public evidence about the target. Mention the target's own product terms, one concrete Japan use case, and ask for a 20-30 minute meeting. Include exactly once: https://calendar.app.google/adKEhXC4UWhQXfJp6. Keep the body 90-140 words. Signature exactly: Kazuma Tamura\nA-one road Co., Ltd.\nYokohama, Japan. Never guess a person or email. Return JSON with subject and body only."""
+PROMPT_FALLBACK = """Write one concise English sales email from Kazuma Tamura, founder of A-one road Co., Ltd., Yokohama. Use only verified public evidence about the target. Mention the target's own product terms, one concrete Japan use case, and ask for a 20-30 minute meeting. Include exactly once: https://calendar.app.google/adKEhXC4UWhQXfJp6. Keep the body 90-140 words. Signature exactly: Kazuma Tamura
+A-one road Co., Ltd.
+Yokohama, Japan. Never guess a person or email. Return JSON with subject and body only."""
+SENDER_EMAIL = "admin@a1-road.com"
 
 
 def _hash(*values: object) -> str:
-    return hashlib.sha256("\n".join(str(v or "") for v in values).encode()).hexdigest()
+    return hashlib.sha256("\n".join(str(v or "") for v in values).encode("utf-8")).hexdigest()
 
 
 def _bounded_limit(limit: int) -> int:
@@ -24,225 +29,342 @@ def _bounded_limit(limit: int) -> int:
     return value
 
 
+def _unique(values) -> list[str]:
+    seen = set()
+    out = []
+    for value in values or []:
+        value = str(value or "").strip()
+        if value and value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out
+
+
 def _attempted_source_rows(sheets) -> set[str]:
-    """Skip rows already consumed by prior sacrifice runs so the lane keeps moving."""
     if sheets is None:
         return set()
     try:
         rows = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
     except Exception:
         return set()
-    consumed: set[str] = set()
+    consumed = set()
     for row in rows:
-        lane = str(row.get("lane") or "").upper()
-        if "SACRIFICE" not in lane:
+        if "SACRIFICE" not in str(row.get("lane") or "").upper():
             continue
-        draft_id = str(row.get("draft_id") or "").strip()
-        if ":" in draft_id:
-            consumed.add(draft_id.rsplit(":", 1)[-1])
+        source_row = str(row.get("source_row") or "").strip()
+        if source_row:
+            consumed.add(source_row)
+        else:
+            draft_id = str(row.get("draft_id") or "").strip()
+            if ":" in draft_id:
+                consumed.add(draft_id.rsplit(":", 1)[-1])
     return consumed
 
 
-def _record_failed_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> None:
-    """Persist non-sent outcomes so one bad company cannot pin every future batch."""
+def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> None:
     if sheets is None:
         return
-    source_row = str(candidate.get("source_row") or "")
+    source_row = str(candidate.get("source_row") or "").strip()
+    execution = result.get("execution") or {}
+    form_execution = result.get("form_execution") or {}
+    key = str(
+        execution.get("idempotency_key")
+        or form_execution.get("idempotency_key")
+        or f"sacrifice-attempt:{run_id}:{source_row}"
+    )
+    draft = result.get("draft") or {}
+    record = {
+        "idempotency_key": key,
+        "draft_id": f"{run_id}:{source_row}",
+        "source_row": source_row,
+        "company_name": candidate.get("company_name", ""),
+        "lane": "EC_SACRIFICE",
+        "channel": "FORM" if result.get("stage") == "FORM_EXECUTION" else "EMAIL",
+        "status": result.get("status", "FAILED"),
+        "semantic_success": result.get("status") in {"SENT", "FORM_SENT"},
+        "message_id": execution.get("message_id", ""),
+        "subject": draft.get("subject", ""),
+        "body": draft.get("body", ""),
+        "form_url": form_execution.get("form_url", ""),
+        "confirmation": form_execution.get("confirmation", ""),
+        "executed_at": datetime.now(timezone.utc).isoformat(),
+    }
     try:
-        sheets.append_dict("LeadFactory_ExecutionLog", {
-            "idempotency_key": f"sacrifice-attempt:{run_id}:{source_row}",
-            "draft_id": f"{run_id}:{source_row}",
-            "company_name": candidate.get("company_name", ""),
-            "lane": "EC_SACRIFICE",
-            "channel": "EMAIL",
-            "status": result.get("status", "FAILED"),
-            "semantic_success": False,
-            "message_id": "",
-            "executed_at": datetime.now(timezone.utc).isoformat(),
-        })
+        existing = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
+        if any(str(row.get("idempotency_key") or "") == key for row in existing):
+            return
     except Exception:
-        # Logging failure must not abort the remaining batch.
+        pass
+    try:
+        sheets.append_dict("LeadFactory_ExecutionLog", record)
+    except Exception:
         pass
 
 
-def run_ten_sacrifice_batch(*, llm, drive, cfg, executor, execute_external=True, limit=10):
-    limit = _bounded_limit(limit)
+def _audit_base(candidate: dict) -> dict:
+    return {
+        "source": "sales_leads",
+        "lane": "EC_SACRIFICE",
+        "source_sheet": candidate.get("source_sheet", "営業リスト_Vendor"),
+        "source_row": str(candidate.get("source_row") or ""),
+        "company_name": candidate.get("company_name", ""),
+        "official_website": "",
+        "sender": os.getenv("LEAD_FACTORY_GMAIL_IMPERSONATE", SENDER_EMAIL).strip() or SENDER_EMAIL,
+        "recipient": "",
+        "evidence_urls": [],
+        "research_confidence": "",
+    }
 
-    rows = load_rows()
-    pool = sacrifice_candidates(rows, limit=max(limit, len(rows)))
-    consumed = _attempted_source_rows(getattr(executor, "sheets", None)) if execute_external else set()
-    candidates = [c for c in pool if str(c.get("source_row") or "") not in consumed][:limit]
+
+def _research_urls(site: dict, research: dict, form_url: str = "") -> list[str]:
+    return _unique(
+        list(research.get("evidence_urls") or [])
+        + [site.get("official_website"), form_url]
+        + [p.get("url") for p in site.get("pages", []) if isinstance(p, dict)]
+    )
+
+
+def run_ten_sacrifice_batch(
+    *,
+    llm,
+    drive,
+    cfg: dict[str, str] | None = None,
+    executor=None,
+    execute_external: bool = True,
+    limit: int = 10,
+    batch_id: str | None = None,
+):
+    limit = _bounded_limit(limit)
+    cfg = dict(cfg or {})
+    sheets = getattr(executor, "sheets", None)
+    pool = sacrifice_candidates(load_rows(), limit=max(limit, len(load_rows())))
+    consumed = _attempted_source_rows(sheets) if execute_external else set()
+    candidates = [
+        item for item in pool
+        if str(item.get("source_row") or "").strip() not in consumed
+    ][:limit]
 
     try:
-        prompt, prompt_meta = drive.read_plain_text(str(cfg.get("OUTREACH_PROMPT_DOC_ID") or PROMPT_DOC_ID))
+        prompt, prompt_meta = drive.read_plain_text(
+            str(cfg.get("OUTREACH_PROMPT_DOC_ID") or PROMPT_DOC_ID)
+        )
         if not prompt.strip():
-            prompt = PROMPT_FALLBACK
-            prompt_meta = {"source": "fallback"}
+            prompt, prompt_meta = PROMPT_FALLBACK, {"source": "fallback"}
     except Exception:
         prompt, prompt_meta = PROMPT_FALLBACK, {"source": "fallback"}
 
-    run_id = f"sales-leads-sacrifice-{uuid.uuid4().hex}"
+    batch_token = str(batch_id or uuid.uuid4().hex).strip()
+    run_id = f"sales-leads-sacrifice-{batch_token}"
     results = []
 
     for candidate in candidates:
         result = {
-            "company_name": candidate["company_name"],
-            "source_row": candidate["source_row"],
+            "company_name": candidate.get("company_name", ""),
+            "source_row": candidate.get("source_row", ""),
             "source": "sales_leads",
             "lane": "EC_SACRIFICE",
             "production_ssot_touched": False,
             "started_at": datetime.now(timezone.utc).isoformat(),
             "external_action": "NOT_ATTEMPTED",
+            "audit": _audit_base(candidate),
         }
         context = make_research_context(candidate)
         try:
             evidence = candidate.get("candidate_website_evidence", {})
-            site_url = candidate.get("candidate_website", "")
+            site_url = str(candidate.get("candidate_website") or "").strip()
             if evidence.get("status") == "MISMATCH_REJECTED":
                 resolved = llm.resolve_company_domain(context) if hasattr(llm, "resolve_company_domain") else {}
-                site_url = str(resolved.get("official_website") or "").strip()
                 result["domain_resolution"] = resolved
+                site_url = str(resolved.get("official_website") or "").strip()
 
             site = inspect_official_site(site_url)
             result["website_research"] = site
             context["verified_site"] = site
-
-            research = llm.research_outreach_contact(context)
-            email = str(research.get("email") or "").strip()
-            if not email and site.get("emails"):
-                email = site["emails"][0]
-
-            result["research"] = research
-            result["recipient_evidence"] = {
-                "email": email,
-                "evidence_urls": research.get("evidence_urls", []),
-                "confidence": research.get("confidence", ""),
-                "status": research.get("status", ""),
-            }
-
-            if not email and site.get("contact_links"):
-                # A public contact form is a valid outbound channel when no
-                # recipient email is published.
-                form_contact = {
-                    **research,
-                    "email": "admin@a1-road.com",
-                    "recipient_verified": True,
-                    "contact_confidence": "FORM",
-                }
-                draft = llm.draft_outreach_email(prompt, context, form_contact)
-                form_url = str(site["contact_links"][0]).strip()
-                form_result = {
-                    "status": "FORM_NOT_ATTEMPTED",
-                    "reason": "external_execution_disabled",
-                    "form_url": form_url,
-                }
-                if execute_external:
-                    from form_execution import PublicContactFormExecutor
-                    form_result = PublicContactFormExecutor().execute(
-                        form_url=form_url,
-                        website=str(site.get("official_website") or site_url),
-                        message=str(draft.get("body") or ""),
-                        subject=str(draft.get("subject") or ""),
-                        company_name=candidate["company_name"],
-                        idempotency_key=f"form:{run_id}:{candidate['source_row']}",
-                    )
-                result["draft"] = draft
-                result["form_execution"] = form_result
-                result["external_action"] = form_result.get("status", "FORM_FAILED")
-                result.update(
-                    status=form_result.get("status", "FORM_FAILED"),
-                    stage="FORM_EXECUTION",
-                )
-            elif not email:
-                result.update(
-                    status="FAILED",
-                    stage="CONTACT_RESEARCH",
-                    error_message="no_email_channel",
-                    form_candidates=site.get("forms", []),
-                )
+            result["audit"].update(
+                official_website=site.get("official_website", site_url),
+                evidence_urls=_research_urls(site, {}),
+            )
+            if site.get("status") != "VERIFIED":
+                result.update(status="FAILED", stage="SITE_RESEARCH", error_message="official_site_not_verified")
             else:
-                contact = {
-                    **research,
+                research = llm.research_outreach_contact(context)
+                email = str(research.get("email") or "").strip()
+                if not email and site.get("emails"):
+                    email = str(site["emails"][0]).strip()
+                result["research"] = research
+                result["recipient_evidence"] = {
                     "email": email,
-                    "recipient_verified": True,
-                    "contact_confidence": research.get("confidence", "HIGH"),
+                    "evidence_urls": research.get("evidence_urls", []),
+                    "confidence": research.get("confidence", ""),
+                    "status": research.get("status", ""),
                 }
-                draft = llm.draft_outreach_email(prompt, context, contact)
-                row = {
-                    **context,
-                    **contact,
-                    "recipient": email,
-                    "subject": draft["subject"],
-                    "body": draft["body"],
-                    "company_name": candidate["company_name"],
-                    "lane": "EC_SACRIFICE",
-                    "source_type": "EC_SACRIFICE",
-                    "verified_website": site.get("official_website", site_url),
-                    "source_row": candidate["source_row"],
-                    "draft_id": f"{run_id}:{candidate['source_row']}",
-                }
-                result["draft"] = draft
-                result["preflight"] = semantic_email_preflight(row, cfg)
-
-                if not result["preflight"]["ok"]:
+                result["audit"].update(
+                    evidence_urls=_research_urls(site, research),
+                    research_confidence=research.get("confidence", ""),
+                )
+                form_links = _unique(list(site.get("contact_links") or []) + list(site.get("forms") or []))
+                if not email and form_links:
+                    form_contact = {
+                        **research,
+                        "email": SENDER_EMAIL,
+                        "recipient_verified": True,
+                        "contact_confidence": "FORM",
+                    }
+                    draft = llm.draft_outreach_email(prompt, context, form_contact)
+                    form_url = form_links[0]
+                    draft_subject = str(draft.get("subject") or "")
+                    draft_body = str(draft.get("body") or "")
+                    result["draft"] = draft
+                    result["message_hash"] = _hash(SENDER_EMAIL, draft_subject, draft_body)
+                    result["audit"].update(
+                        channel="FORM",
+                        recipient="PUBLIC_CONTACT_FORM",
+                        form_url=form_url,
+                        subject=draft_subject,
+                        body=draft_body,
+                        message_hash=result["message_hash"],
+                    )
+                    form_key = f"form:{run_id}:{candidate.get('source_row', '')}"
+                    form_result = {
+                        "status": "FORM_NOT_ATTEMPTED",
+                        "reason": "external_execution_disabled",
+                        "form_url": form_url,
+                        "idempotency_key": form_key,
+                    }
+                    if execute_external:
+                        from form_execution import PublicContactFormExecutor
+                        form_result = PublicContactFormExecutor(sheets=sheets).execute(
+                            form_url=form_url,
+                            website=str(site.get("official_website") or site_url),
+                            message=draft_body,
+                            subject=draft_subject,
+                            company_name=str(candidate.get("company_name") or ""),
+                            idempotency_key=form_key,
+                            draft_id=f"{run_id}:{candidate.get('source_row', '')}",
+                            source_row=str(candidate.get("source_row") or ""),
+                        )
+                    result["form_execution"] = form_result
+                    result["audit"]["form_execution"] = form_result
+                    result["external_action"] = form_result.get("status", "FORM_FAILED")
+                    result.update(status=form_result.get("status", "FORM_FAILED"), stage="FORM_EXECUTION")
+                elif not email:
                     result.update(
                         status="FAILED",
-                        stage="DRAFT_PREFLIGHT",
-                        error_message=",".join(
-                            result["preflight"]["critical_errors"] or result["preflight"]["missing"]
-                        ),
+                        stage="CONTACT_RESEARCH",
+                        error_message="no_email_or_public_form",
+                        form_candidates=site.get("forms", []),
                     )
-                elif execute_external:
-                    if executor is None:
-                        raise RuntimeError("missing_sacrifice_executor")
-                    execution = executor.execute(row, cfg)
-                    result["execution"] = execution
-                    result["external_action"] = execution.get("status", "UNKNOWN")
-                    result.update(status=execution.get("status", "UNKNOWN"), stage="EXTERNAL_EXECUTION")
+                    result["audit"]["channel"] = "NONE"
                 else:
-                    result.update(status="READY", stage="DRAFT_PREP")
-
+                    contact = {
+                        **research,
+                        "email": email,
+                        "recipient_verified": True,
+                        "contact_confidence": research.get("confidence", "HIGH"),
+                    }
+                    draft = llm.draft_outreach_email(prompt, context, contact)
+                    draft_subject = str(draft.get("subject") or "")
+                    draft_body = str(draft.get("body") or "")
+                    row = {
+                        **context,
+                        **contact,
+                        "recipient": email,
+                        "subject": draft_subject,
+                        "body": draft_body,
+                        "company_name": candidate.get("company_name", ""),
+                        "lane": "EC_SACRIFICE",
+                        "source_type": "EC_SACRIFICE",
+                        "verified_website": site.get("official_website", site_url),
+                        "source_row": candidate.get("source_row", ""),
+                        "draft_id": f"{run_id}:{candidate.get('source_row', '')}",
+                    }
+                    result["draft"] = draft
+                    result["message_hash"] = _hash(email, draft_subject, draft_body)
+                    result["audit"].update(
+                        channel="EMAIL",
+                        recipient=email,
+                        subject=draft_subject,
+                        body=draft_body,
+                        message_hash=result["message_hash"],
+                    )
+                    result["preflight"] = semantic_email_preflight(row, cfg)
+                    if not result["preflight"].get("ok"):
+                        result.update(
+                            status="FAILED",
+                            stage="DRAFT_PREFLIGHT",
+                            error_message=",".join(
+                                result["preflight"].get("critical_errors")
+                                or result["preflight"].get("missing")
+                                or ["preflight_failed"]
+                            ),
+                        )
+                    elif execute_external:
+                        if executor is None:
+                            raise RuntimeError("sacrifice_executor_not_configured")
+                        execution = executor.execute(row, cfg)
+                        result["execution"] = execution
+                        result["external_action"] = execution.get("status", "UNKNOWN")
+                        result.update(status=execution.get("status", "UNKNOWN"), stage="EXTERNAL_EXECUTION")
+                        if result["status"] == "SENT" and not str(execution.get("message_id") or "").strip():
+                            result.update(
+                                status="SENT_UNVERIFIED",
+                                external_action="SENT_UNVERIFIED",
+                                error_message="missing_gmail_message_id",
+                            )
+                    else:
+                        result.update(status="READY", stage="DRAFT_PREP")
         except Exception as exc:
             result.update(
                 status="FAILED",
-                stage="DRAFT_OR_EXECUTION",
+                stage="RESEARCH_DRAFT_OR_EXECUTION",
                 error_message=f"{type(exc).__name__}:{exc}",
             )
 
         result["finished_at"] = datetime.now(timezone.utc).isoformat()
         results.append(result)
-
         if execute_external and result.get("status") != "SENT":
-            _record_failed_attempt(
-                getattr(executor, "sheets", None),
-                run_id=run_id,
-                candidate=candidate,
-                result=result,
-            )
+            _record_attempt(sheets, run_id=run_id, candidate=candidate, result=result)
 
-    sent = sum(
-        1
+    email_message_ids = [
+        str((item.get("execution") or {}).get("message_id") or "").strip()
         for item in results
-        if item.get("external_action") == "SENT" or item.get("status") == "SENT"
-    )
+        if item.get("status") == "SENT"
+        and str((item.get("execution") or {}).get("message_id") or "").strip()
+    ]
+    form_confirmations = [
+        {
+            "company_name": item.get("company_name", ""),
+            "source_row": item.get("source_row", ""),
+            "form_url": (item.get("form_execution") or {}).get("form_url", ""),
+            "confirmation": (item.get("form_execution") or {}).get("confirmation", ""),
+            "confirmation_text": (item.get("form_execution") or {}).get("confirmation_text", ""),
+        }
+        for item in results
+        if item.get("status") == "FORM_SENT"
+    ]
+    success_count = len(email_message_ids) + len(form_confirmations)
     attempted = len(results)
-    exhausted = attempted == 0
-
     return {
         "run_id": run_id,
-        "status": "EXHAUSTED" if exhausted else "COMPLETE",
+        "batch_id": batch_token,
+        "status": "EXHAUSTED" if attempted == 0 else "COMPLETE",
         "source": "sales_leads",
         "lane": "EC_SACRIFICE",
         "attempted": attempted,
-        "success_count": sent,
-        "failure_count": attempted - sent,
+        "success_count": success_count,
+        "email_success_count": len(email_message_ids),
+        "form_success_count": len(form_confirmations),
+        "email_message_ids": email_message_ids,
+        "form_confirmed_count": len(form_confirmations),
+        "form_confirmations": form_confirmations,
+        "failure_count": attempted - success_count,
         "external_action": (
             "NOT_ATTEMPTED"
-            if exhausted or not execute_external
+            if not execute_external or attempted == 0
             else "SENT"
-            if sent == attempted
+            if success_count == attempted
             else "PARTIAL"
-            if sent
+            if success_count
             else "FAILED"
         ),
         "production_ssot_touched": False,

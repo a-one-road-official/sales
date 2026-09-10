@@ -28,6 +28,7 @@ production_controller: QualifiedLeadProductionController | None = None
 _recovery_thread: threading.Thread | None = None
 _recovery_stop = threading.Event()
 _recovery_lock = threading.Lock()
+_sacrifice_lock = threading.Lock()
 
 
 def _recovery_interval() -> int:
@@ -568,24 +569,24 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
     lf = get_factory()
     cfg = dict(lf._config())
 
-    # EC_SACRIFICE is a pre-scoped canary lane.  A single deployment-level
-    # kill switch controls external execution; there is no per-request approval
-    # handshake and no broad external-write flag dependency.
+    # Only the isolated EC/retail runtime may enable this lane.
     execute_external = _sacrifice_send_enabled() and not bool((payload or {}).get("dry_run", False))
     cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = "TRUE" if execute_external else "FALSE"
     cfg["OUTREACH_SACRIFICE_LANES"] = cfg.get(
         "OUTREACH_SACRIFICE_LANES", "EC,RETAIL,SACRIFICE,EC_SACRIFICE"
     )
-
+    batch_id = str((payload or {}).get("batch_id") or "").strip() or None
     executor = SacrificialEmailExecutor(lf.sheets) if execute_external else None
-    result = run_ten_sacrifice_batch(
-        llm=lf.llm,
-        drive=lf.drive,
-        cfg=cfg,
-        limit=limit,
-        executor=executor,
-        execute_external=execute_external,
-    )
+    with _sacrifice_lock:
+        result = run_ten_sacrifice_batch(
+            llm=lf.llm,
+            drive=lf.drive,
+            cfg=cfg,
+            limit=limit,
+            executor=executor,
+            execute_external=execute_external,
+            batch_id=batch_id,
+        )
     result["trigger"] = "SCHEDULER" if scheduled else "DIRECT"
     result["send_enabled"] = execute_external
     return result
