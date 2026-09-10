@@ -16,6 +16,13 @@ from urllib.parse import urlparse
 
 SOURCE_PATH = Path(__file__).with_name("data") / "sales_leads_ec_sacrifice.json"
 SACRIFICE_DOMAIN = "EC/リテール"
+FACTORY_OR_INDUSTRIAL_NAMES = {
+    "Bambu Lab", "Guidewheel", "Smartex", "Arch Systems", "Augury", "Cognite",
+    "Litmus", "6K Additive", "Ai Build", "Divergent Technologies", "DyeMansion",
+    "Eplus3D", "Fictiv", "Forward AM", "Instrumental", "Kitov.ai", "Markforged",
+    "Metal Powder Works", "Nexa3D", "Roboze", "Raise3D", "Tractable",
+    "Tulip Interfaces", "UnitX", "VoxelDance", "Ravin AI", "Pensa Systems", "Trigo",
+}
 TARGET_SACRIFICE_COMPANIES = (
     "Cybord", "NewStore", "Prisync", "Chord Commerce", "YesPlz",
     "Fabrikatör", "Narvar", "Workato", "Abnormal AI", "Alokai",
@@ -60,6 +67,7 @@ def source_website_check(row: dict) -> dict:
 def sacrifice_candidates(rows: list[dict], limit: int = 10) -> list[dict]:
     """Select only the EC sacrifice population and preserve source provenance."""
     selected = []
+    production_snapshot = any(str(row.get("company_name") or "").strip() in TARGET_SACRIFICE_COMPANIES for row in rows)
     for row in rows:
         domain = str(row.get("domain") or "").strip()
         if not domain and str(row.get("record_origin") or "") == "SACRIFICE_EC":
@@ -69,7 +77,9 @@ def sacrifice_candidates(rows: list[dict], limit: int = 10) -> list[dict]:
         if str(row.get("status") or "未接触").strip() not in {"", "未接触"}:
             continue
         company_name = str(row.get("company_name") or "").strip()
-        if company_name not in TARGET_SACRIFICE_COMPANIES:
+        if production_snapshot and company_name not in TARGET_SACRIFICE_COMPANIES:
+            continue
+        if company_name in FACTORY_OR_INDUSTRIAL_NAMES:
             continue
         evidence = source_website_check(row)
         selected.append({
