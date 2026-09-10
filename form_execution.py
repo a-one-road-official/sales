@@ -261,6 +261,50 @@ def _normalise_choice_text(value: str) -> str:
     return re.sub(r"\s+", " ", str(value or "").replace("\\", "")).strip().casefold()
 
 
+def _dom_click_matching_option(el, wanted_tokens) -> str:
+    """Use the form's own DOM event when a rendered option is outside the field subtree."""
+    try:
+        return str(
+            el.evaluate(
+                """(el, payload) => {
+                    const normalise = value => String(value || '')
+                        .replace(/\\\\/g, '')
+                        .replace(/\\s+/g, ' ')
+                        .trim()
+                        .toLowerCase();
+                    const visible = node => {
+                        const style = window.getComputedStyle(node);
+                        const rect = node.getBoundingClientRect();
+                        return style.display !== 'none' &&
+                            style.visibility !== 'hidden' &&
+                            rect.width > 0 &&
+                            rect.height > 0;
+                    };
+                    const field = el.closest('[data-hsfc-id="DropdownField"]') ||
+                        el.closest('.hsfc-PhoneInput') ||
+                        el.parentElement?.parentElement ||
+                        document.body;
+                    const local = Array.from(field.querySelectorAll('[role="option"], li'));
+                    const global = Array.from(document.querySelectorAll('[role="option"], li'));
+                    const options = local.concat(global.filter(item => !local.includes(item)));
+                    const tokens = (payload || []).map(normalise).filter(Boolean);
+                    const candidate = options.find(option => {
+                        if (!visible(option)) return false;
+                        const haystack = normalise(option.innerText || option.textContent || '');
+                        return !tokens.length || tokens.some(token => haystack.includes(token));
+                    });
+                    if (!candidate) return '';
+                    candidate.click();
+                    return String(candidate.innerText || candidate.textContent || '').trim();
+                }""",
+                list(wanted_tokens),
+            )
+            or ""
+        ).strip()
+    except Exception:
+        return ""
+
+
 def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
     """Select a visible option from a HubSpot-style custom dropdown."""
     wanted = {
@@ -339,6 +383,9 @@ def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
                     return True, text
             except Exception:
                 continue
+        direct_text = _dom_click_matching_option(el, wanted_tokens)
+        if direct_text:
+            return True, direct_text
         try:
             if context is not None:
                 context.wait_for_timeout(250)
@@ -390,6 +437,9 @@ def _select_phone_country(el, context=None) -> tuple[bool, bool]:
                         return True, True
                 except Exception:
                     continue
+            direct_text = _dom_click_matching_option(el, ("japan", "日本"))
+            if direct_text:
+                return True, True
             try:
                 if context is not None:
                     context.wait_for_timeout(250)
