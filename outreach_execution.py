@@ -128,6 +128,18 @@ def _cfg_truthy(cfg: dict[str, str], key: str) -> bool:
     return _truthy(cfg.get(key, os.getenv(key, "FALSE")))
 
 
+def outbound_lane_send_enabled(lane: str, cfg: dict[str, str]) -> bool:
+    """Evaluate the shared global/mode/lane/approval send interlock."""
+    return (
+        _cfg_truthy(cfg, "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE")
+        and str(
+            cfg.get("LEAD_FACTORY_SEND_MODE", os.getenv("LEAD_FACTORY_SEND_MODE", "DISABLED"))
+        ).strip().upper() == "ENABLED"
+        and _cfg_truthy(cfg, _lane_flag(lane))
+        and _cfg_truthy(cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL")
+    )
+
+
 def is_outbound_lane(row: dict, cfg: dict[str, str]) -> bool:
     allowed = {
         item.strip().upper()
