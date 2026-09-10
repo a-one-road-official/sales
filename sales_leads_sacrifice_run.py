@@ -135,16 +135,36 @@ def run_ten_sacrifice_batch(*, llm, drive, cfg: dict[str, str] | None = None, li
             elif source_failures:
                 result.update({"status": "FAILED", "stage": "SOURCE_INTEGRITY", "error_message": ",".join(source_failures)})
             else:
-                site = inspect_official_site(result["candidate_website"])
-                result["website_research"] = site
-                research_context = {**result["research_context"], "verified_site": site}
-                if hasattr(llm, "resolve_company_domain") and site.get("status") != "VERIFIED":
+                # A reachable URL is not evidence that it belongs to the named
+                # company.  The source snapshot contains several intentionally
+                # mismatched candidate URLs, so a 200 response must never promote
+                # one of them to an official site.  Resolve the domain first
+                # whenever the source URL lacks a strong name match.
+                evidence_status = str(
+                    result["candidate_website_evidence"].get("status") or ""
+                )
+                research_context = dict(result["research_context"])
+                resolved = {}
+                if hasattr(llm, "resolve_company_domain") and evidence_status != "UNTRUSTED_POSSIBLE_MATCH":
                     resolved = llm.resolve_company_domain(research_context)
                     result["domain_resolution"] = resolved
-                    if resolved.get("official_website"):
-                        site = inspect_official_site(resolved["official_website"])
-                        result["website_research"] = site
-                        research_context["candidate_website"] = site.get("official_website", resolved["official_website"])
+                    official = str(resolved.get("official_website") or "").strip()
+                    if not official:
+                        result.update({
+                            "status": "FAILED",
+                            "stage": "DOMAIN_RESOLUTION",
+                            "error_message": "candidate_url_not_verified_and_official_domain_not_resolved",
+                        })
+                        result["failure"] = classify_failure(result).__dict__
+                        result["finished_at"] = datetime.now(timezone.utc).isoformat()
+                        results.append(result)
+                        continue
+                    research_context["candidate_website"] = official
+                    site = inspect_official_site(official)
+                else:
+                    site = inspect_official_site(result["candidate_website"])
+                result["website_research"] = site
+                research_context["verified_site"] = site
                 research = llm.research_outreach_contact(research_context)
                 result["research"] = research
                 email = str(research.get("email") or "").strip()
