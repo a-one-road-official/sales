@@ -149,7 +149,7 @@ def _attempted_source_rows(sheets) -> set[str]:
     rows = None
     for attempt in range(5):
         try:
-            rows = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
+            rows = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "O")
             break
         except Exception as exc:
             last_error = exc
@@ -221,6 +221,20 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
         or f"sacrifice-attempt:{run_id}:{source_row}"
     )
     draft = result.get("draft") or {}
+    recipient = str(
+        (result.get("audit") or {}).get("recipient")
+        or (result.get("recipient_evidence") or {}).get("email")
+        or execution.get("recipient")
+        or ""
+    ).strip()
+    reason = str(
+        form_execution.get("confirmation")
+        or execution.get("reason")
+        or execution.get("error_message")
+        or result.get("error_message")
+        or result.get("stage")
+        or ""
+    ).strip()
     record = {
         "idempotency_key": key,
         "draft_id": f"{run_id}:{source_row}",
@@ -234,11 +248,12 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
         "subject": draft.get("subject", ""),
         "body": draft.get("body", ""),
         "form_url": form_execution.get("form_url", ""),
-        "confirmation": form_execution.get("confirmation", ""),
+        "confirmation": reason,
+        "recipient": recipient,
         "executed_at": datetime.now(timezone.utc).isoformat(),
     }
     try:
-        existing = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
+        existing = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "O")
         if any(str(row.get("idempotency_key") or "") == key for row in existing):
             return
     except Exception:
@@ -411,6 +426,13 @@ def run_ten_sacrifice_batch(
                     for value in _unique(site.get("emails") or [])
                     if _email_matches_site(value, site.get("official_website", site_url), site)
                 ]
+                candidate_email = str(candidate.get("candidate_email") or "").strip()
+                if candidate_email and _email_matches_site(
+                    candidate_email,
+                    site.get("official_website", site_url),
+                    site,
+                ):
+                    site_emails = _unique([candidate_email] + site_emails)
                 form_links = _unique(list(site.get("contact_links") or []) + list(site.get("forms") or []))
                 preferred_form = _preferred_form_url(
                     str(candidate.get("company_name") or "").strip(),
