@@ -17,8 +17,6 @@ from settings import SETTINGS
 from strict_factory import StrictLeadFactory as LeadFactory
 from notifier import InternalNotifier
 from outreach_execution import SacrificialEmailExecutor
-from outreach_stability import CRITICAL, SacrificeStability
-from sales_leads_sacrifice import load_rows, sacrifice_candidates, make_research_context
 from sacrifice_failure_loop import classify_batch, batch_gate
 from sales_leads_sacrifice_run import run_ten_sacrifice_batch
 from observability import failure_code, record_event
@@ -107,7 +105,8 @@ async def internal_runtime_guard(request: Request, call_next):
 
     `/healthz` is intentionally shallow and public. Every stateful/research endpoint,
     including deep health, requires the per-deployment internal token used by
-    Scheduler and self-dispatched workers. Customer-facing execution remains absent.
+    Scheduler and self-dispatched workers. Customer-facing execution is confined
+    to the isolated EC_SACRIFICE lane.
     """
     if request.method == "GET" and request.url.path == "/healthz":
         return await call_next(request)
@@ -157,16 +156,16 @@ def get_production_controller() -> QualifiedLeadProductionController:
 
 def _fail(exc: Exception):
     error = f"{type(exc).__name__}:{exc}"
-    # Every internal endpoint failure is operationally visible to admin.
-    # Customer-facing send paths do not exist in this runtime.
+    # Every endpoint failure is operationally visible to admin. A failure may occur
+    # after earlier items in the same sacrifice batch have already been sent.
     try:
         recipient = os.getenv("LEAD_FACTORY_AUTONOMY_NOTIFY_EMAIL", "admin@a1-road.com")
         InternalNotifier(recipient).notify(
             subject="A-one Lead Factory internal error",
             body=(
-                "An internal autonomous endpoint failed and will remain eligible for retry/repair.\n\n"
+                "An autonomous endpoint failed and will remain eligible for retry/repair.\n\n"
                 f"error={error[:5000]}\n"
-                "Customer-facing sending was not executed."
+                "Inspect LeadFactory_ExecutionLog for any completed external actions before retrying."
             ),
         )
     except Exception:
