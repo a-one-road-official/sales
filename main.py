@@ -46,11 +46,17 @@ def _run_recovery_pump() -> None:
     except ValueError:
         initial_delay = 20
     _recovery_stop.wait(initial_delay)
+    recovery_stage = "SOURCE"
     while not _recovery_stop.is_set():
         if os.getenv("LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED", "TRUE").upper() == "TRUE":
             try:
                 with _recovery_lock:
-                    result = get_factory().domain_tick(limit=1)
+                    current_stage = recovery_stage
+                    if current_stage == "SOURCE":
+                        result = get_factory().source_tick(limit=1)
+                    else:
+                        result = get_factory().domain_tick(limit=1)
+                    recovery_stage = "DOMAIN" if current_stage == "SOURCE" else "SOURCE"
                 processed = int(result.get("processed", 0) or 0)
                 errors = int(result.get("errors", 0) or 0)
                 if processed or errors:
@@ -58,7 +64,10 @@ def _run_recovery_pump() -> None:
                         get_factory().sheets,
                         event_type="SUPERVISOR_TICK",
                         reason_code="RECOVERY_PROGRESS" if not errors else "RECOVERY_PARTIAL_FAILURE",
-                        reason_note=f"processed={processed};resolved={result.get('resolved', 0)};errors={errors}",
+                        reason_note=(
+                            f"stage={current_stage};processed={processed};new_raw={result.get('new_raw', 0)};"
+                            f"resolved={result.get('resolved', 0)};errors={errors}"
+                        ),
                         status="COMPLETE_WITH_ERRORS" if errors else "COMPLETE",
                     )
             except Exception as exc:
@@ -421,6 +430,16 @@ def failover_domain_tick():
         _fail(exc)
 
 
+@app.post("/failover/source")
+def failover_source_tick():
+    """Direct source-crawl lane independent of dispatch, Cloud Tasks and deploy."""
+    try:
+        with _recovery_lock:
+            return get_factory().source_tick(limit=1)
+    except Exception as exc:
+        _fail(exc)
+
+
 @app.post("/recovery/tick")
 def recovery_tick():
     """Manual recovery trigger sharing the supervisor's bounded lock."""
@@ -596,14 +615,3 @@ def pipeline_tick():
         lf = get_factory()
         discovery_growth = lf.discover_lane(f"pipeline-growth-{uuid.uuid4()}", "GROWTH")
         discovery_mittel = lf.discover_lane(f"pipeline-mittel-{uuid.uuid4()}", "MITTELSTAND")
-        dispatch_growth_result = self_dispatch_lane(lf, "GROWTH")
-        dispatch_mittel_result = self_dispatch_lane(lf, "MITTELSTAND")
-        return {
-            "status": "DISPATCHED",
-            "discovery_growth": discovery_growth,
-            "discovery_mittelstand": discovery_mittel,
-            "dispatch_growth": dispatch_growth_result,
-            "dispatch_mittelstand": dispatch_mittel_result,
-        }
-    except Exception as exc:
-        _fail(exc)
