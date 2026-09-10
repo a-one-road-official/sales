@@ -9,18 +9,32 @@ verified before a contact or message can become send-ready.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from urllib.parse import urlparse
 
 
-SOURCE_PATH = Path(__file__).with_name("data") / "sales_leads_ec_sacrifice.json"
+_DATA_DIR = Path(__file__).with_name("data")
+_LEGACY_SOURCE_PATH = _DATA_DIR / "sales_leads_ec_sacrifice.json"
+SOURCE_PATH = Path(os.getenv(
+    "LEAD_FACTORY_SACRIFICE_SOURCE_PATH",
+    str(_DATA_DIR / "sales_leads_ec_sacrifice_verified.json"),
+))
+if not SOURCE_PATH.exists():
+    SOURCE_PATH = _LEGACY_SOURCE_PATH
 SACRIFICE_DOMAIN = "EC/リテール"
 
 # The workbook's category label is not authoritative. These companies are
 # deliberately kept out of the sacrifice lane because their actual business is
 # manufacturing, industrial software, additive manufacturing, inspection, or
 # factory operations—the exact population the production pipeline targets.
+FACTORY_OR_INDUSTRIAL_MARKERS = (
+    "FACTORY", "BPO", "SSOT", "MANUFACTUR", "INDUSTRIAL",
+    "ADDITIVE", "MACHINE TOOL", "SHIPBUILD", "PRODUCTION LINE",
+    "製造", "工場", "造船",
+)
+
 FACTORY_OR_INDUSTRIAL_NAMES = {
     "Bambu Lab", "Cybord", "Guidewheel", "Smartex", "Arch Systems", "Augury", "Cognite",
     "m4p material solutions", "PostProcess Technologies", "ProovStation", "nTop(旧nTopology)", "Litmus",
@@ -53,6 +67,19 @@ def load_rows(path: Path = SOURCE_PATH) -> list[dict]:
     return [row for row in rows if isinstance(row, dict)]
 
 
+def is_forbidden_factory_target(row: dict) -> bool:
+    """Hard-stop factory, BPO, SSOT, and manufacturing targets."""
+    fields = (
+        row.get("record_origin"),
+        row.get("source_sheet"),
+        row.get("domain"),
+        row.get("company_name"),
+        row.get("what_it_solves"),
+    )
+    haystack = " ".join(str(value or "") for value in fields).upper()
+    return any(marker in haystack for marker in FACTORY_OR_INDUSTRIAL_MARKERS)
+
+
 def source_website_check(row: dict) -> dict:
     """Return evidence status; never treats the workbook URL as verified."""
     company_tokens = _tokens(row.get("company_name"))
@@ -82,7 +109,7 @@ def sacrifice_candidates(rows: list[dict], limit: int = 10) -> list[dict]:
             continue
         evidence = source_website_check(row)
         company_name = str(row.get("company_name") or "").strip()
-        if company_name in FACTORY_OR_INDUSTRIAL_NAMES:
+        if company_name in FACTORY_OR_INDUSTRIAL_NAMES or is_forbidden_factory_target(row):
             continue
         selected.append({
             "sacrifice_lane": "EC_SACRIFICE",
@@ -94,6 +121,7 @@ def sacrifice_candidates(rows: list[dict], limit: int = 10) -> list[dict]:
             "country": str(row.get("hq_country") or "").strip(),
             "company_description": str(row.get("what_it_solves") or "").strip(),
             "candidate_website": str(row.get("website") or "").strip(),
+            "candidate_email": str(row.get("email") or "").strip(),
             "candidate_website_evidence": evidence,
             "status": "RESEARCH_REQUIRED",
             "sacrifice_eligibility": "NON_FACTORY_TEST_COMPANY",
@@ -111,6 +139,7 @@ def make_research_context(candidate: dict) -> dict:
         "description": candidate["company_description"],
         "candidate_website": candidate["candidate_website"],
         "candidate_website_evidence": candidate["candidate_website_evidence"],
+        "candidate_email": candidate.get("candidate_email", ""),
         "source_lane": "EC_SACRIFICE",
         "source_record": f"sales_leads:{candidate['source_sheet']}:{candidate['source_row']}",
         "instruction": "Verify official company website and contact evidence independently. Never trust the candidate URL without evidence.",
