@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 
 from browser_fetch import TrustedBrowserFetcher
-from drive_repo import DriveRepo
+from drive_repo import DriveRepo, PromptSSOTError
 from gate_worker import GateWorker
 from llm import LLM
 from meta import MetaSupervisor
@@ -23,6 +23,7 @@ from sheets_repo import SheetsRepo
 from tester import run_s1_to_s7
 from notifier import InternalNotifier
 from outreach_execution import is_sacrificial_lane
+from prompt_ssot import is_unsent_draft, prompt_provenance
 from observability import failure_code, record_event
 
 
@@ -802,18 +803,156 @@ class LeadFactory:
             "results": results,
         }
 
+    def live_outreach_prompt(self, cfg: dict[str, str] | None = None) -> tuple[str, dict]:
+        """Resolve and read the unique Native Google Doc on every call."""
+        config = cfg if cfg is not None else self._config()
+        title = str(config.get("OUTREACH_PROMPT_DOC_TITLE") or self.s.outreach_prompt_doc_title or "").strip()
+        prompt_text, metadata = self.drive.read_live_prompt_by_title(title)
+        provenance = prompt_provenance(title, metadata, prompt_text)
+        metadata.update(provenance)
+        return prompt_text, metadata
+
+    def _draft_with_fresh_prompt(self, company: dict, contact: dict, cfg: dict[str, str]) -> tuple[dict, dict]:
+        """Generate only after a live read and retry if the Prompt changes mid-generation."""
+        for _ in range(3):
+            production_prompt, provenance = self.live_outreach_prompt(cfg)
+            draft = self.llm.draft_outreach_email(production_prompt, company, contact)
+            _, latest = self.live_outreach_prompt(cfg)
+            if latest.get("prompt_hash") == provenance.get("prompt_hash"):
+                return draft, latest
+        raise PromptSSOTError("PROMPT_CHANGED_DURING_DRAFT")
+
+    @staticmethod
+    def _fallback_outreach_company(row: dict) -> dict:
+        company_key = str(row.get("company_key") or "").strip()
+        domain = str(row.get("domain") or "").strip()
+        website = str(row.get("website") or "").strip()
+        if not website and "." in (domain or company_key):
+            website = f"https://{domain or company_key}".replace("https://https://", "https://")
+        return {
+            "lead_id": company_key,
+            "company_name": str(row.get("company_name") or company_key),
+            "domain": domain or company_key,
+            "website": website,
+            "source_type": str(row.get("lane") or "").strip(),
+            "research_sources": str(row.get("research_basis") or "").strip(),
+        }
+
+    @staticmethod
+    def _fallback_outreach_contact(row: dict) -> dict:
+        return {
+            "contact_id": str(row.get("contact_id") or "").strip(),
+            "company_key": str(row.get("company_key") or "").strip(),
+            "company_name": str(row.get("company_name") or "").strip(),
+            "contact_name": str(row.get("recipient_name") or "").strip(),
+            "email": str(row.get("recipient") or "").strip(),
+            "title": str(row.get("title") or "").strip(),
+            "evidence_urls": str(row.get("research_basis") or "").strip(),
+        }
+
+    def _refresh_stale_outreach_drafts(self, live_provenance: dict, cfg: dict[str, str]) -> dict:
+        """Mark and regenerate every unsent draft created from an old/missing Prompt hash."""
+        self.sheets.ensure_outreach_schema()
+        queue_by_draft = {
+            str(row.get("draft_id") or "").strip(): row
+            for row in self.sheets.outreach_queue_rows()
+            if str(row.get("draft_id") or "").strip()
+        }
+        stale = regenerated = failed = 0
+        for row in self.sheets.outreach_draft_rows():
+            draft_id = str(row.get("draft_id") or "").strip()
+            if not draft_id or not is_unsent_draft(row, queue_by_draft.get(draft_id)):
+                continue
+            if str(row.get("prompt_hash") or "").strip() == str(live_provenance.get("prompt_hash") or "").strip():
+                continue
+            stale += 1
+            old_state = str(row.get("state") or "").strip()
+            self.sheets.update_message_draft(
+                draft_id,
+                {
+                    "state": "STALE_PROMPT",
+                    "prompt_status": "STALE_PROMPT",
+                    "stale_reason": "live_prompt_hash_mismatch_or_missing",
+                    "regeneration_error": "",
+                },
+            )
+            self.sheets.update_approval_queue_for_draft(
+                draft_id,
+                {
+                    "state": "STALE_PROMPT",
+                    "prompt_status": "STALE_PROMPT",
+                },
+            )
+            try:
+                company = self.sheets.outreach_candidate_by_key(str(row.get("company_key") or ""))
+                company = company or self._fallback_outreach_company(row)
+                contact = self.sheets.latest_contact(str(row.get("company_key") or ""))
+                contact = contact or self._fallback_outreach_contact(row)
+                draft, provenance = self._draft_with_fresh_prompt(company, contact, cfg)
+                recipient = str(contact.get("email") or row.get("recipient") or "").strip()
+                if not recipient:
+                    next_state = "BLOCKED_NEEDS_RECIPIENT"
+                elif old_state == "READY_SACRIFICIAL_EXECUTION":
+                    next_state = old_state
+                else:
+                    next_state = "READY_HUMAN_APPROVAL"
+                common = {
+                    "subject": draft["subject"],
+                    "body": draft["body"],
+                    "recipient": recipient,
+                    "prompt_version": f"gdoc:{provenance.get('prompt_modified_time','')}",
+                    "prompt_doc_title": provenance["prompt_doc_title"],
+                    "prompt_doc_id": provenance["prompt_doc_id"],
+                    "prompt_modified_time": provenance["prompt_modified_time"],
+                    "prompt_hash": provenance["prompt_hash"],
+                    "prompt_status": "CURRENT",
+                    "stale_reason": "",
+                    "regeneration_error": "",
+                    "state": next_state,
+                }
+                self.sheets.update_message_draft(draft_id, common)
+                self.sheets.update_approval_queue_for_draft(
+                    draft_id,
+                    {
+                        "recipient": recipient,
+                        "subject": draft["subject"],
+                        "state": next_state,
+                        "prompt_doc_title": provenance["prompt_doc_title"],
+                        "prompt_doc_id": provenance["prompt_doc_id"],
+                        "prompt_modified_time": provenance["prompt_modified_time"],
+                        "prompt_hash": provenance["prompt_hash"],
+                        "prompt_status": "CURRENT",
+                    },
+                )
+                regenerated += 1
+            except Exception as exc:
+                failed += 1
+                self.sheets.update_message_draft(
+                    draft_id,
+                    {
+                        "state": "STALE_PROMPT",
+                        "prompt_status": "STALE_PROMPT",
+                        "regeneration_error": f"{type(exc).__name__}:{exc}"[:5000],
+                    },
+                )
+                self.sheets.update_approval_queue_for_draft(
+                    draft_id,
+                    {
+                        "state": "STALE_PROMPT",
+                        "prompt_status": "STALE_PROMPT",
+                    },
+                )
+        return {"stale": stale, "regenerated": regenerated, "failed": failed}
+
     def outreach_ready_tick(self, lane: str | None = None) -> dict:
-        """Internal-only Contact Research -> Message Draft -> Human Approval Queue. No send API exists in this path."""
+        """Live Prompt SSOT -> Contact Research -> Draft -> Human Approval Queue."""
         cfg = self._config()
         if cfg.get("OUTREACH_READY_ENABLED", "TRUE").upper() != "TRUE":
             return {"status": "DISABLED", "reason": "Config.OUTREACH_READY_ENABLED is FALSE"}
-        prompt_doc_id = cfg.get("OUTREACH_PROMPT_DOC_ID", "1joNEah7AuIF0-28PmVtgV9TcprEYneHSE5giUIayq5U").strip()
-        if not prompt_doc_id:
-            return {"status": "DISABLED", "reason": "missing OUTREACH_PROMPT_DOC_ID"}
         limit = int(cfg.get("OUTREACH_READY_MAX_PER_TICK", "2") or 2)
-        production_prompt, prompt_meta = self.drive.read_plain_text(prompt_doc_id)
-        if not production_prompt.strip():
-            raise RuntimeError("outreach_prompt_empty")
+        self.sheets.ensure_outreach_schema()
+        _, live_provenance = self.live_outreach_prompt(cfg)
+        stale_summary = self._refresh_stale_outreach_drafts(live_provenance, cfg)
         candidates = self.sheets.outreach_candidates(limit=limit, lane=lane)
         results = []
         for company in candidates:
@@ -831,7 +970,7 @@ class LeadFactory:
                 contact = self.sheets.latest_contact(company_key)
                 if not contact:
                     researched = self.llm.research_outreach_contact(company)
-                    contact_id = f"contact-{uuid.uuid4().hex}"
+                    contact_id = f"contact-{uuid.uuid4()}"
                     evidence = researched.get("evidence_urls", [])
                     evidence_text = " | ".join(str(x) for x in evidence) if isinstance(evidence, list) else str(evidence or "")
                     contact = {
@@ -845,7 +984,7 @@ class LeadFactory:
                         "status": researched.get("status", ""),
                     }
                     self.sheets.append_contact_research(contact)
-                draft = self.llm.draft_outreach_email(production_prompt, company, contact)
+                draft, prompt_meta = self._draft_with_fresh_prompt(company, contact, cfg)
                 recipient = str(contact.get("email") or "").strip()
                 if not company_lane:
                     source_type = str(company.get("source_type") or "").upper()
@@ -854,26 +993,39 @@ class LeadFactory:
                 sacrificial = bool(recipient and is_sacrificial_lane(execution_row, cfg))
                 state = ("READY_SACRIFICIAL_EXECUTION" if sacrificial else "READY_HUMAN_APPROVAL" if recipient else "BLOCKED_NEEDS_RECIPIENT")
                 now = datetime.now(timezone.utc).isoformat()
-                draft_id = f"draft-{uuid.uuid4().hex}"
+                draft_id = f"draft-{uuid.uuid4()}"
                 self.sheets.append_message_draft({
                     "draft_id": draft_id, "company_key": company_key, "contact_id": contact.get("contact_id", ""),
                     "company_name": company_name, "recipient": recipient, "lane": company_lane,
                     "recipient_name": contact.get("contact_name", ""), "subject": draft["subject"], "body": draft["body"],
                     "research_basis": str(company.get("research_sources") or company.get("G1_evidence") or company.get("M1_evidence") or ""),
-                    "prompt_version": f"gdoc:{prompt_meta.get('modifiedTime','')}", "generated_at": now,
+                    "prompt_version": f"gdoc:{prompt_meta.get('prompt_modified_time','')}",
+                    "prompt_doc_title": prompt_meta["prompt_doc_title"],
+                    "prompt_doc_id": prompt_meta["prompt_doc_id"],
+                    "prompt_modified_time": prompt_meta["prompt_modified_time"],
+                    "prompt_hash": prompt_meta["prompt_hash"],
+                    "prompt_status": "CURRENT",
+                    "stale_reason": "",
+                    "regeneration_error": "",
+                    "generated_at": now,
                     "state": state, "customer_facing": "TRUE", "execution_allowed": "TRUE" if sacrificial and cfg.get("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE").upper() == "TRUE" else "FALSE",
                 })
-                queue_id = f"queue-{uuid.uuid4().hex}"
+                queue_id = f"queue-{uuid.uuid4()}"
                 self.sheets.append_approval_queue({
                     "queue_id": queue_id, "created_at": now, "company_key": company_key, "action_type": "EMAIL_SEND",
                     "recipient": recipient, "subject": draft["subject"], "draft_id": draft_id, "state": state,
                     "requires_human_approval": "FALSE" if sacrificial else "TRUE", "approved_at": now if sacrificial else "", "approved_by": "SYSTEM_SACRIFICE" if sacrificial else "",
                     "executed_at": "", "execution_result": "", "guardrail": "A_ONE_BEN_HITL",
+                    "prompt_doc_title": prompt_meta["prompt_doc_title"],
+                    "prompt_doc_id": prompt_meta["prompt_doc_id"],
+                    "prompt_modified_time": prompt_meta["prompt_modified_time"],
+                    "prompt_hash": prompt_meta["prompt_hash"],
+                    "prompt_status": "CURRENT",
                 })
-                result = {"company_key": company_key, "company_name": company_name, "state": state}
+                result = {"company_key": company_key, "company_name": company_name, "state": state, "prompt_hash": prompt_meta["prompt_hash"]}
                 record_event(
                     self.sheets, event_type="PIPELINE_STAGE", reason_code="OUTREACH_READY",
-                    reason_note=f"recipient_found={bool(recipient)};draft_id={draft_id};lane={company_lane}",
+                    reason_note=f"recipient_found={bool(recipient)};draft_id={draft_id};lane={company_lane};prompt_hash={prompt_meta['prompt_hash']}",
                     company_name=company_name, domain=str(company.get("domain") or contact.get("domain") or ""),
                     email=recipient, source_id=company_key, status=state,
                 )
@@ -891,7 +1043,13 @@ class LeadFactory:
                     "company_key": company_key, "company_name": company_name,
                     "state": "FAILED", "reason_code": code, "error": reason[:5000],
                 })
-        return {"status": "COMPLETE", "processed": len(results), "results": results}
+        return {
+            "status": "COMPLETE",
+            "processed": len(results),
+            "results": results,
+            "prompt": live_provenance,
+            "stale_drafts": stale_summary,
+        }
 
 
     def _autonomy_guard(self, lane: str) -> dict | None:

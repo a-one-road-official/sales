@@ -7,6 +7,8 @@ import time
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 
+from prompt_ssot import prompt_freshness
+
 from google.auth import default
 from googleapiclient.discovery import build
 
@@ -109,6 +111,22 @@ def message_hash(row: dict) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def prompt_freshness_preflight(draft: dict, drive, prompt_title: str = "") -> dict:
+    """Read the live Prompt immediately before any external send."""
+    if drive is None:
+        return {
+            "ok": False,
+            "status": "PROMPT_LIVE_READ_UNAVAILABLE",
+            "reason": "drive_repository_required_for_send_preflight",
+        }
+    title = str(prompt_title or os.getenv("OUTREACH_PROMPT_DOC_TITLE", "outreach_prompt_production_v1")).strip()
+    _, metadata = drive.read_live_prompt_by_title(title)
+    return prompt_freshness(
+        draft.get("prompt_hash") or draft.get("prompt_version_hash"),
+        metadata.get("prompt_hash"),
+    )
+
+
 def semantic_email_preflight(row: dict, cfg: dict[str, str]) -> dict:
     """Minimal hard preflight for the isolated sacrifice lane."""
     missing = [key for key in CRITICAL_FIELDS if not str(row.get(key) or "").strip()]
@@ -134,8 +152,10 @@ def semantic_email_preflight(row: dict, cfg: dict[str, str]) -> dict:
 class SacrificialEmailExecutor:
     """Actual email execution for the isolated EC/retail canary."""
 
-    def __init__(self, sheets=None):
+    def __init__(self, sheets=None, drive=None, prompt_title: str = ""):
         self.sheets = sheets
+        self.drive = drive
+        self.prompt_title = str(prompt_title or "").strip()
         self._sent_keys: set[str] = set()
 
     def execute(self, draft: dict, cfg: dict[str, str]) -> dict:
@@ -148,6 +168,10 @@ class SacrificialEmailExecutor:
         preflight = semantic_email_preflight(draft, cfg)
         if not preflight["ok"]:
             return {"status": "BLOCKED_PREFLIGHT", **preflight}
+
+        prompt_check = prompt_freshness_preflight(draft, self.drive, self.prompt_title)
+        if not prompt_check.get("ok"):
+            return {"status": prompt_check.get("status", "STALE_PROMPT"), "prompt_preflight": prompt_check}
 
         key = f"sacrificial:{draft.get('draft_id','')}:{preflight['message_hash']}"
         if key in self._sent_keys:

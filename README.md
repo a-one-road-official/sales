@@ -21,7 +21,12 @@ The human control plane is ChatGPT / ChatGPT Work. GitHub is the code SSOT, Goog
 - Code/deployment: GitHub `a-one-road-official/sales` / `main`
 - Human sales SSOT: `営業リスト 最新版連携用` -> `営業リスト＿Factory/BPO`
 - Selection **and discovery** policy: Google Doc `target_screening_gate`
-- Outreach copy policy: Google Doc `outreach_prompt_production_v1`
+- Outreach copy SSOT: the unique Native Google Doc titled `outreach_prompt_production_v1`
+  - Document ID is resolved by exact-title lookup at runtime; humans never synchronize IDs.
+  - Every draft generation performs a live Drive read; changing the Doc requires no redeploy.
+  - Each draft stores `prompt_doc_title`, `prompt_doc_id`, `prompt_modified_time`, and SHA-256 `prompt_hash`.
+  - Unsent drafts whose hash differs from the live Prompt are marked `STALE_PROMPT` and automatically regenerated.
+  - Send preflight performs a second live-read hash comparison; mismatches block sending and return to regeneration.
 - Runtime switch/state: Sheet `Config`
 
 `target_screening_gate` is loaded live for every company. AI/web search may collect factual evidence; Python applies the Doc's G1-G6 rules deterministically. The runtime owns no independent eligibility criteria.

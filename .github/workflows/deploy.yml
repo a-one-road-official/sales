@@ -140,7 +140,7 @@ jobs:
 
 
       - name: Deploy isolated sacrifice runtime
-        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE') }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_sacrifice == true && vars.LEAD_FACTORY_SEND_MODE == 'ENABLED' && vars.LEAD_FACTORY_EXPLICIT_SEND_APPROVAL == 'TRUE' }}
         run: |
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
           gcloud run deploy "$SACRIFICE_SERVICE" \
