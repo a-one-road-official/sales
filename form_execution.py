@@ -296,10 +296,27 @@ class PublicContactFormExecutor:
                         reason=f"FORM_HTTP_{response.status if response else 0}",
                     )
                 page.wait_for_timeout(1000)
-                html = page.content()
+                html_parts = []
+                for frame in [page] + list(page.frames[1:]):
+                    try:
+                        html_parts.append(frame.content())
+                    except Exception:
+                        continue
+                html = "\n".join(html_parts)
                 if CAPTCHA_RE.search(html):
                     return result_payload("FORM_FAILED", reason="CAPTCHA_PRESENT")
+                form_context = page
                 forms = page.locator("form")
+                if forms.count() == 0:
+                    for frame in page.frames[1:]:
+                        try:
+                            frame_forms = frame.locator("form")
+                            if frame_forms.count() > 0:
+                                form_context = frame
+                                forms = frame_forms
+                                break
+                        except Exception:
+                            continue
                 if forms.count() == 0:
                     return result_payload("FORM_FAILED", reason="FORM_NOT_FOUND")
                 form = forms.first
@@ -468,17 +485,26 @@ class PublicContactFormExecutor:
                     pass
                 page.wait_for_timeout(1500)
                 final_url = page.url
-                final_html = page.content()
+                final_html_parts = []
+                for frame in [page] + list(page.frames[1:]):
+                    try:
+                        final_html_parts.append(frame.content())
+                    except Exception:
+                        continue
+                final_html = "\n".join(final_html_parts)
                 if CAPTCHA_RE.search(final_html):
                     return result_payload(
                         "FORM_FAILED",
                         reason="CAPTCHA_PRESENT_AFTER_SUBMIT",
                         form_url=final_url,
                     )
-                try:
-                    visible_text = page.locator("body").inner_text(timeout=5000)
-                except Exception:
-                    visible_text = ""
+                visible_parts = []
+                for frame in [page, form_context]:
+                    try:
+                        visible_parts.append(frame.locator("body").inner_text(timeout=5000))
+                    except Exception:
+                        continue
+                visible_text = "\n".join(dict.fromKeys(part for part in visible_parts if part))
                 success_match = SUCCESS_RE.search(visible_text or "")
                 url_changed = (
                     final_url != form_url
@@ -509,6 +535,8 @@ class PublicContactFormExecutor:
                     "status": "FORM_SENT",
                     "semantic_success": "FORM_CONFIRMED",
                     "message_id": "",
+                    "subject": subject,
+                    "body": message,
                     "recipient": "PUBLIC_CONTACT_FORM",
                     "form_url": final_url,
                     "confirmation": confirmation,

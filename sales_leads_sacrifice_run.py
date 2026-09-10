@@ -32,7 +32,54 @@ CANONICAL_WEBSITE_HINTS = {
     "Workato": "https://www.workato.com",
     "Abnormal AI": "https://abnormal.ai",
     "Alokai": "https://www.alokai.io",
+    "Plytix": "https://www.plytix.com",
+    "RetailNext": "https://retailnext.net",
 }
+
+# Campaign-configured official forms. The allowlist is supplied by the
+# deployment environment so the next batch can be changed without code edits.
+FORM_URL_HINTS = {
+    "Abnormal AI": "https://abnormal.ai/risk",
+    "ChannelEngine": "https://www.channelengine.com/contact-us",
+    "CommerceIQ": "https://www.commerceiq.ai/contact-us",
+    "commercetools": "https://commercetools.com/contact-us",
+    "Fit Analytics": "https://fitanalytics.com/contact",
+    "Narvar": "https://corp.narvar.com/request-a-demo",
+    "Tapcart": "https://www.tapcart.com/demo",
+    "Workato": "https://www.workato.com/editions/sales",
+    "RetailNext": "https://retailnext.net/about/contact-us",
+    "Plytix": "https://www.plytix.com/contact/",
+}
+
+FORM_PATH_MARKERS = (
+    "contact", "contact-us", "get-in-touch", "request", "demo", "sales",
+    "inquiry", "enquiry", "talk-to", "reach-us",
+)
+
+
+def _preferred_form_url(company_name: str, website: str, links: list[str]) -> str:
+    company = str(company_name or "").strip()
+    hint = FORM_URL_HINTS.get(company, "")
+    root_host = _host(website)
+    if hint and root_host and (
+        _host(hint) == root_host or _host(hint).endswith("." + root_host)
+    ):
+        return hint
+    candidates = []
+    for value in _unique(links):
+        if not root_host:
+            continue
+        host = _host(value)
+        if host != root_host and not host.endswith("." + root_host):
+            continue
+        path = urlparse(value).path.lower()
+        score = sum(3 for marker in FORM_PATH_MARKERS if marker in path)
+        score -= sum(2 for marker in ("newsletter", "subscribe", "login", "signup") if marker in path)
+        score -= sum(1 for marker in ("pricing", "features", "product", "platform") if marker in path)
+        if score > 0:
+            candidates.append((score, value))
+    return max(candidates, default=(0, ""))[1]
+
 
 _PLACEHOLDER_EMAIL_DOMAINS = {
     "example.com",
@@ -283,6 +330,16 @@ def run_ten_sacrifice_batch(
     normalized_slot = None if batch_slot is None else int(batch_slot)
     rows = load_rows()
     pool = sacrifice_candidates(rows, limit=max(limit, len(rows)))
+    target_names = {
+        re.sub(r"[^a-z0-9]+", "", value.strip().lower())
+        for value in re.split(r"[|,]", str(os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES") or ""))
+        if value.strip()
+    }
+    if target_names:
+        pool = [
+            item for item in pool
+            if re.sub(r"[^a-z0-9]+", "", str(item.get("company_name") or "").lower()) in target_names
+        ]
     with _BATCH_ASSIGNMENTS_LOCK:
         assignment_exists = normalized_slot is not None and batch_token in _BATCH_ASSIGNMENTS
     consumed = (
@@ -355,6 +412,15 @@ def run_ten_sacrifice_batch(
                     if _email_matches_site(value, site.get("official_website", site_url), site)
                 ]
                 form_links = _unique(list(site.get("contact_links") or []) + list(site.get("forms") or []))
+                preferred_form = _preferred_form_url(
+                    str(candidate.get("company_name") or "").strip(),
+                    str(site.get("official_website") or site_url),
+                    form_links,
+                )
+                if preferred_form:
+                    form_links = [preferred_form] + [
+                        value for value in form_links if value != preferred_form
+                    ]
                 if site_emails:
                     # A first-party address found on the verified site is enough
                     # to select the recipient; avoid a second web-search round.
@@ -420,7 +486,7 @@ def run_ten_sacrifice_batch(
                     evidence_urls=_research_urls(site, research),
                     research_confidence=research.get("confidence", ""),
                 )
-                if not email and form_links:
+                if preferred_form or (not email and form_links):
                     form_contact = {
                         **research,
                         "email": SENDER_EMAIL,
