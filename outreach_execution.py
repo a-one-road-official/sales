@@ -129,15 +129,8 @@ def _cfg_truthy(cfg: dict[str, str], key: str) -> bool:
 
 
 def outbound_lane_send_enabled(lane: str, cfg: dict[str, str]) -> bool:
-    """Evaluate the shared global/mode/lane/approval send interlock."""
-    return (
-        _cfg_truthy(cfg, "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE")
-        and str(
-            cfg.get("LEAD_FACTORY_SEND_MODE", os.getenv("LEAD_FACTORY_SEND_MODE", "DISABLED"))
-        ).strip().upper() == "ENABLED"
-        and _cfg_truthy(cfg, _lane_flag(lane))
-        and _cfg_truthy(cfg, "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL")
-    )
+    """Global production interlock: outbound customer-facing actions are disabled."""
+    return False
 
 
 def is_outbound_lane(row: dict, cfg: dict[str, str]) -> bool:
@@ -305,6 +298,9 @@ class OutboundEmailExecutor:
         self._sent_keys: set[str] = set()
 
     def _send_block_reason(self, draft: dict, cfg: dict[str, str]) -> str:
+        # Production is explicitly list-only. Keep this guard inside the shared
+        # executor so no route or workflow configuration can bypass it.
+        return "list_only_mode"
         lane = lane_from(draft) or self.lane
         if not _cfg_truthy(cfg, "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"):
             return "external_write_disabled"
