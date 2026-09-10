@@ -214,7 +214,6 @@ class PublicContactFormExecutor:
             if (
                 company_name
                 and str(row.get("company_name") or "").strip().casefold() == str(company_name).strip().casefold()
-                and str(row.get("channel") or "").upper() == "FORM"
             ):
                 return row
         return None
