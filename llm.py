@@ -450,7 +450,7 @@ Return ONLY JSON: {{"subject":"", "body":""}}.
 
 AUTHORITATIVE OUTREACH PROMPT:
 ---
-{production_prompt[:50000]}
+{production_prompt}
 ---
 
 COMPANY CONTEXT:
