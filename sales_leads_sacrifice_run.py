@@ -807,10 +807,21 @@ def run_ten_sacrifice_batch(
         if execute_external and result.get("status") != "SENT":
             _record_attempt(sheets, run_id=run_id, candidate=candidate, result=result)
 
-    source_consumed_count = len(consumed)
-    source_remaining_count = max(
-        0,
-        len(pool) - len(consumed) - len(candidates),
+    # Keep the batch ledger truthful: operational lanes consume every row
+    # attempted in this batch, while the legacy EC lane consumes only its
+    # confirmed/terminal records.
+    consumed_after = set(consumed)
+    if normalized_lane in {"BPO", "SALES_GTM"}:
+        consumed_after.update(
+            str(item.get("source_row") or "").strip()
+            for item in candidates
+            if str(item.get("source_row") or "").strip()
+        )
+    source_consumed_count = len(consumed_after)
+    source_remaining_count = sum(
+        1
+        for item in pool
+        if str(item.get("source_row") or "").strip() not in consumed_after
     )
     email_message_ids = [
         str((item.get("execution") or {}).get("message_id") or "").strip()
