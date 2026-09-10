@@ -346,30 +346,48 @@ def _research_urls(site: dict, research: dict, form_url: str = "") -> list[str]:
 def _verified_site_draft(candidate: dict, site: dict) -> dict:
     """Create a bounded test message from verified site evidence without an LLM wait."""
     company = str(candidate.get("company_name") or "").strip()
+    lane = str(candidate.get("sacrifice_lane") or "").strip().upper()
     titles = [
         str(page.get("title") or "").strip()
         for page in site.get("pages", [])
         if isinstance(page, dict) and str(page.get("title") or "").strip()
     ]
     reference = titles[0] if titles else str(candidate.get("company_description") or "").strip()
-    reference = re.sub(r"\s+", " ", reference).strip(" -|:")
+    reference = re.sub(r"\\s+", " ", reference).strip(" -|:")
     if not reference:
-        reference = "your commerce product"
+        reference = "your product and go-to-market work"
     reference = reference[:120]
+    if lane == "SALES_GTM":
+        proposition = (
+            "A-one road helps international software companies build Japan GTM through "
+            "customer discovery, partner development, and qualified first conversations "
+            "with Japanese buyers."
+        )
+    elif lane == "BPO":
+        proposition = (
+            "A-one road helps international BPO and business-services providers develop "
+            "Japan opportunities through customer discovery, partner development, and "
+            "qualified first conversations."
+        )
+    else:
+        proposition = (
+            "A-one road helps international software companies validate Japan through "
+            "customer discovery, partner development, and first conversations with "
+            "Japanese retailers and e-commerce operators."
+        )
     subject = f"Japan market opportunity for {company}"
     body = (
-        f"Hi {company} team,\n\n"
+        f"Hi {company} team,\\n\\n"
         "I’m Kazuma Tamura, Founder & CEO of A-one road in Japan. "
-        f"I’ve been reviewing the product information published on your official website, including “{reference}”.\n\n"
-        "A-one road helps international software companies validate Japan through "
-        "customer discovery, partner development, and first conversations with Japanese "
-        "retailers and e-commerce operators. I’d like to explore whether a focused Japan "
-        "conversation could be useful for your current priorities.\n\n"
+        f"I’ve been reviewing the product information published on your official website, including “{reference}”.\\n\\n"
+        f"{proposition}\\n\\n"
+        "I’d like to explore whether a focused Japan conversation could be useful for "
+        "your current priorities.\\n\\n"
         "Would you be open to a 20–30 minute conversation? "
-        "If so, you can choose a time here: https://calendar.app.google/adKEhXC4UWhQXfJp6\n\n"
-        "Best,\n"
-        "Kazuma Tamura\n"
-        "A-one road Co., Ltd.\n"
+        "If so, you can choose a time here: https://calendar.app.google/adKEhXC4UWhQXfJp6\\n\\n"
+        "Best,\\n"
+        "Kazuma Tamura\\n"
+        "A-one road Co., Ltd.\\n"
         "Yokohama, Japan"
     )
     return {"subject": subject, "body": body, "draft_source": "verified_site_template"}
