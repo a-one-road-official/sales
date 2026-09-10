@@ -101,6 +101,15 @@ jobs:
       - name: Configure Docker auth
         run: gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
 
+      - name: Grant runtime Gmail delegation signing permission
+        run: |
+          set -euo pipefail
+          gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
+            --member="serviceAccount:$RUNTIME_SA" \
+            --role="roles/iam.serviceAccountTokenCreator" \
+            --project="$PROJECT" \
+            --quiet
+
       - name: Build and push the shared application image
         run: |
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
