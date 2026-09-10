@@ -216,6 +216,36 @@ def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
         consumed.add(source_row)
     return consumed
 
+
+def _explicit_retry_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
+    """Allow a named repair retry only for an unconfirmed, non-successful attempt."""
+    requested = {
+        value.strip()
+        for value in re.split(
+            r"[|,]",
+            str(os.getenv("OUTREACH_SACRIFICE_RETRY_SOURCE_ROWS") or ""),
+        )
+        if value.strip()
+    }
+    if not requested or sheets is None or lane != "EC_SACRIFICE":
+        return set()
+    try:
+        rows = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "O")
+    except Exception:
+        return set()
+    eligible = set()
+    for row in rows:
+        source_row = str(row.get("source_row") or "").strip()
+        status = str(row.get("status") or "").strip().upper()
+        confirmation = str(row.get("confirmation") or "").strip()
+        if (
+            source_row in requested
+            and status not in {"SENT", "FORM_SENT"}
+            and re.search(r"SUBMISSION_ATTEMPTED", confirmation, re.I)
+        ):
+            eligible.add(source_row)
+    return eligible
+
 _BATCH_ASSIGNMENTS: dict[str, list[dict]] = {}
 _BATCH_ASSIGNMENTS_LOCK = threading.Lock()
 
@@ -469,6 +499,8 @@ def run_ten_sacrifice_batch(
         if assignment_exists
         else _attempted_source_rows(sheets, lane=normalized_lane) if execute_external else set()
     )
+    if execute_external:
+        consumed -= _explicit_retry_source_rows(sheets, lane=normalized_lane)
     candidates = _batch_candidates(        pool,
         consumed,
         batch_token=batch_token,

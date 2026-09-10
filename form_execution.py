@@ -6,6 +6,7 @@ ambiguous required mapping before clicking submit.
 """
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
@@ -83,6 +84,11 @@ def _label_for(el) -> str:
                             if (label.htmlFor === id) return (label.innerText || '').trim();
                         }
                     }
+                    const labelledBy = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+                    if (labelledBy.length) {
+                        const labelled = labelledBy.map(id => document.getElementById(id)).filter(Boolean);
+                        if (labelled.length) return labelled.map(node => (node.innerText || '').trim()).join(' ').trim();
+                    }
                     const parent = el.closest('label');
                     if (parent) return (parent.innerText || '').trim();
                     const wrapper = el.parentElement;
@@ -104,6 +110,8 @@ def _marker(el, label: str) -> str:
                 el.get_attribute("id"),
                 el.get_attribute("placeholder"),
                 el.get_attribute("aria-label"),
+                el.get_attribute("aria-labelledby"),
+                el.get_attribute("role"),
                 label,
             ],
         )
@@ -116,6 +124,18 @@ def _field_key(el, label: str) -> str:
     tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
     if typ == "email" or re.search(r"\b(e[- ]?mail|email)\b", marker):
         return "email"
+    if re.search(r"gmv[_ -]?range|annual\s+revenue|年商", marker):
+        return "revenue"
+    if re.search(r"monthly[_ -]?(?:website[_ -]?)?traffic|website\s+traffic|月間.*(?:traffic|アクセス)", marker):
+        return "monthly_traffic"
+    if re.search(r"ecommerce[_ -]?platform|e-commerce\s+platform|\bplatform\b", marker):
+        return "platform"
+    if re.search(r"reason[_ -]?for[_ -]?contact|looking\s+to\s+talk|相談先|問い合わせ先", marker):
+        return "reason"
+    if re.search(r"how[_ -]?did[_ -]?you[_ -]?learn|how\s+did\s+you\s+learn|流入元|知ったきっかけ", marker):
+        return "discovery_source"
+    if re.search(r"category[_ -]?|main\s+category|商品カテゴリ|カテゴリー", marker):
+        return "category"
     if re.search(r"\b(subject|件名)\b", marker):
         return "subject"
     if tag == "textarea" or re.search(
@@ -168,6 +188,18 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
         return "Founder & CEO"
     if key == "industry":
         return "Retail"
+    if key == "reason":
+        return "A product expert"
+    if key == "discovery_source":
+        return "Found you online"
+    if key == "category":
+        return "Other"
+    if key == "revenue":
+        return os.getenv("OUTREACH_FORM_ANNUAL_REVENUE") or None
+    if key == "monthly_traffic":
+        return os.getenv("OUTREACH_FORM_MONTHLY_TRAFFIC") or None
+    if key == "platform":
+        return os.getenv("OUTREACH_FORM_ECOMMERCE_PLATFORM") or "Other"
     if key == "name":
         return "Kazuma Tamura"
     if key == "first_name":
@@ -200,6 +232,10 @@ def _select_option(el, key: str) -> tuple[bool, str]:
         "country": ("japan", "日本", "jp"),
         "state": ("kanagawa", "神奈川"),
         "industry": ("retail", "consumer"),
+        "reason": ("product expert", "sales"),
+        "discovery_source": ("found you online", "online marketing"),
+        "category": ("other",),
+        "platform": ("other",),
         "role": ("founder", "ceo", "chief executive", "代表", "経営", "owner"),
     }.get(key, ())
     try:
@@ -219,6 +255,67 @@ def _select_option(el, key: str) -> tuple[bool, str]:
     except Exception:
         return False, ""
     return False, ""
+
+
+def _select_custom_option(el, key: str) -> tuple[bool, str]:
+    """Select a visible option from a HubSpot-style custom dropdown."""
+    wanted = {
+        "country": ("japan", "日本"),
+        "reason": ("product expert", "sales"),
+        "discovery_source": ("found you online", "online marketing"),
+        "category": ("other",),
+        "platform": ("other",),
+    }.get(key, ())
+    if key == "revenue":
+        configured = str(os.getenv("OUTREACH_FORM_ANNUAL_REVENUE") or "").strip().lower()
+        wanted = (configured,) if configured else ()
+    if key == "monthly_traffic":
+        configured = str(os.getenv("OUTREACH_FORM_MONTHLY_TRAFFIC") or "").strip().lower()
+        wanted = (configured,) if configured else ()
+    try:
+        el.click(timeout=5000)
+        time.sleep(0.2)
+        roots = [el.locator("xpath=.."), el.locator("xpath=../..")]
+        for root in roots:
+            options = root.locator("[role=option], li")
+            for index in range(min(options.count(), 160)):
+                option = options.nth(index)
+                if not option.is_visible() or not option.is_enabled():
+                    continue
+                text = str(option.inner_text() or "").strip()
+                haystack = text.lower()
+                if wanted and not any(token and token in haystack for token in wanted):
+                    continue
+                option.click(timeout=5000)
+                return True, text
+    except Exception:
+        pass
+    return False, ""
+
+
+def _select_phone_country(el) -> tuple[bool, bool]:
+    """Set Japan in a phone widget when the site exposes a country picker."""
+    try:
+        root = el.locator(
+            "xpath=ancestor::*[contains(@class, 'PhoneInput')][1]"
+        )
+        picker = root.locator("[class*='PhoneInput__FlagAndCaret']")
+        present = picker.count() > 0 and picker.is_visible()
+        if not present:
+            return False, True
+        picker.click(timeout=5000)
+        options = root.locator("[role=option], li")
+        for index in range(min(options.count(), 240)):
+            option = options.nth(index)
+            if not option.is_visible() or not option.is_enabled():
+                continue
+            text = str(option.inner_text() or "").strip()
+            if re.search(r"\bJapan\b|日本", text, re.I):
+                option.click(timeout=5000)
+                return True, True
+        return True, False
+    except Exception:
+        return True, False
 
 
 def _current_value(el) -> str:
@@ -601,169 +698,283 @@ class PublicContactFormExecutor:
                         action_url=action,
                     )
 
-                fields = form.locator("input:not([type=hidden]), textarea, select")
-                present_keys = set()
-                for index in range(fields.count()):
-                    el = fields.nth(index)
-                    if not el.is_visible() or not el.is_enabled():
-                        continue
-                    typ = (el.get_attribute("type") or "text").lower()
-                    if typ in {"submit", "button", "file", "checkbox", "radio", "reset", "image"}:
-                        continue
-                    label = _label_for(el)
-                    marker = _marker(el, label)
-                    key = _field_key(el, label)
-                    required = _required(el)
-                    item = {
-                        "index": index,
-                        "key": key or "unknown",
-                        "marker": marker,
-                        "label": label,
-                        "type": typ,
-                        "required": required,
-                        "action": "NOT_FILLED",
-                        "final_value": "",
-                    }
-                    if key:
-                        present_keys.add(key)
-                    value = _value_for(key, marker, subject=subject, message=message)
-                    if value is None:
-                        item["action"] = "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
-                        if required:
-                            missing_required.append(key or marker or f"field_{index}")
-                        field_audit.append(item)
-                        continue
-
-                    try:
-                        tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
-                        if typ in {"select-one", "select-multiple"} or tag == "select":
-                            selected, selected_text = _select_option(el, key)
-                            if not selected:
-                                item["action"] = "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
-                                if required:
-                                    missing_required.append(key or marker or f"field_{index}")
-                            else:
-                                item["action"] = "SELECTED"
-                                item["final_value"] = selected_text or _current_value(el)
-                        else:
-                            el.fill(value)
-                            item["action"] = "FILLED"
-                            item["final_value"] = _current_value(el) or value
-                    except Exception as exc:
-                        item["action"] = "FILL_ERROR"
-                        item["error"] = f"{type(exc).__name__}:{exc}"
-                        if required:
-                            missing_required.append(key or marker or f"field_{index}")
-                    field_audit.append(item)
-
-                for key in CORE_FIELDS:
-                    if key in present_keys and not any(
-                        item.get("key") == key and item.get("action") in {"FILLED", "SELECTED"}
-                        for item in field_audit
-                    ):
-                        field_status[key] = "UNFILLED"
-                    elif key in present_keys:
-                        field_status[key] = "FILLED"
-                if "name" not in present_keys and {"first_name", "last_name"}.issubset(present_keys):
-                    first_filled = any(
-                        item.get("key") == "first_name"
-                        and item.get("action") in {"FILLED", "SELECTED"}
-                        for item in field_audit
-                    )
-                    last_filled = any(
-                        item.get("key") == "last_name"
-                        and item.get("action") in {"FILLED", "SELECTED"}
-                        for item in field_audit
-                    )
-                    field_status["name"] = "FILLED" if first_filled and last_filled else "UNFILLED"
-
-                checkboxes = form.locator("input[type=checkbox]")
-                for index in range(checkboxes.count()):
-                    el = checkboxes.nth(index)
-                    if not el.is_visible() or not el.is_enabled():
-                        continue
-                    label = _label_for(el)
-                    marker = _marker(el, label)
-                    required = _required(el)
-                    lower = f"{marker} {label}".lower()
-                    marketing = bool(
-                        re.search(r"newsletter|marketing|updates|メルマガ|配信|宣伝|広告", lower)
-                    )
-                    consent = bool(
-                        re.search(r"agree|consent|privacy|terms|同意|個人情報|利用規約", lower)
-                    )
-                    role_match = bool(
-                        re.search(r"founder|ceo|chief executive|代表|経営者", lower)
-                    )
-                    action = "LEFT_UNCHECKED_OPTIONAL"
-                    if marketing and required:
-                        action = "REQUIRED_MARKETING_OPT_IN_BLOCKED"
-                        missing_required.append(f"marketing_checkbox_{index}")
-                    elif marketing:
-                        if el.is_checked():
-                            try:
-                                el.uncheck()
-                                action = "UNCHECKED_OPTIONAL_MARKETING"
-                            except Exception:
-                                action = "OPTIONAL_MARKETING_ALREADY_CHECKED"
-                        else:
-                            action = "LEFT_UNCHECKED_OPTIONAL"
-                    elif (required or consent or role_match) and not el.is_checked():
-                        try:
-                            el.check()
-                            action = (
-                                "CHECKED_ROLE"
-                                if role_match and not consent and not required
-                                else "CHECKED_REQUIRED_CONSENT"
-                            )
-                        except Exception as exc:
-                            action = "CHECK_ERROR"
-                            if required:
-                                missing_required.append(f"checkbox_{index}")
-                    elif el.is_checked():
-                        action = "ALREADY_CHECKED"
-                    checkbox_audit.append(
-                        {
+                for step_index in range(4):
+                    fields = form.locator("input:not([type=hidden]), textarea, select")
+                    present_keys = set()
+                    for index in range(fields.count()):
+                        el = fields.nth(index)
+                        if not el.is_visible() or not el.is_enabled():
+                            continue
+                        typ = (el.get_attribute("type") or "text").lower()
+                        if typ in {"submit", "button", "file", "checkbox", "radio", "reset", "image"} or (
+                            (el.get_attribute("role") or "").lower() == "button"
+                            and el.get_attribute("aria-haspopup")
+                        ):
+                            continue
+                        label = _label_for(el)
+                        marker = _marker(el, label)
+                        key = _field_key(el, label)
+                        required = _required(el)
+                        item = {
                             "index": index,
+                            "key": key or "unknown",
                             "marker": marker,
                             "label": label,
+                            "type": typ,
                             "required": required,
-                            "marketing": marketing,
-                            "final_checked": bool(el.is_checked()),
-                            "action": action,
+                            "action": "NOT_FILLED",
+                            "final_value": "",
                         }
+                        if key:
+                            present_keys.add(key)
+                        value = _value_for(key, marker, subject=subject, message=message)
+                        if value is None:
+                            item["action"] = "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
+                            if required:
+                                missing_required.append(key or marker or f"field_{index}")
+                            field_audit.append(item)
+                            continue
+
+                        try:
+                            tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
+                            if typ in {"select-one", "select-multiple"} or tag == "select":
+                                selected, selected_text = _select_option(el, key)
+                                if not selected:
+                                    item["action"] = "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
+                                    if required:
+                                        missing_required.append(key or marker or f"field_{index}")
+                                else:
+                                    item["action"] = "SELECTED"
+                                    item["final_value"] = selected_text or _current_value(el)
+                            else:
+                                if key == "phone":
+                                    picker_present, phone_country_ok = _select_phone_country(el)
+                                    item["phone_country"] = (
+                                        "Japan" if phone_country_ok else
+                                        "UNSET" if picker_present else "NOT_AVAILABLE"
+                                    )
+                                    if picker_present and not phone_country_ok:
+                                        raise RuntimeError("PHONE_COUNTRY_UNMAPPED")
+                                el.fill(value)
+                                item["action"] = "FILLED"
+                                item["final_value"] = _current_value(el) or value
+                        except Exception as exc:
+                            item["action"] = "FILL_ERROR"
+                            item["error"] = f"{type(exc).__name__}:{exc}"
+                            if required:
+                                missing_required.append(key or marker or f"field_{index}")
+                        field_audit.append(item)
+
+
+                    custom_fields = form.locator(
+                        "div[role=combobox], [role=button][aria-haspopup='listbox']"
                     )
+                    custom_seen = set()
+                    for custom_index in range(custom_fields.count()):
+                        el = custom_fields.nth(custom_index)
+                        key = ""
+                        marker = ""
+                        label = ""
+                        required = False
+                        try:
+                            if not el.is_visible() or not el.is_enabled():
+                                continue
+                            tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
+                            if tag == "input" and not (
+                                (el.get_attribute("role") or "").lower() == "button"
+                                and el.get_attribute("aria-haspopup")
+                            ):
+                                continue
+                            label = _label_for(el)
+                            marker = _marker(el, label)
+                            key = _field_key(el, label)
+                            if not key or key in custom_seen:
+                                continue
+                            custom_seen.add(key)
+                            present_keys.add(key)
+                            required = (
+                                _required(el)
+                                or key in {
+                                    "country",
+                                    "reason",
+                                    "discovery_source",
+                                    "category",
+                                    "revenue",
+                                    "monthly_traffic",
+                                    "platform",
+                                }
+                            )
+                            item = {
+                                "index": 10000 + custom_index,
+                                "key": key,
+                                "marker": marker,
+                                "label": label,
+                                "type": "custom_dropdown",
+                                "required": required,
+                                "action": "NOT_FILLED",
+                                "final_value": "",
+                            }
+                            value = _value_for(key, marker, subject=subject, message=message)
+                            if value is None:
+                                item["action"] = (
+                                    "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
+                                )
+                                if required:
+                                    missing_required.append(key or marker or f"custom_field_{custom_index}")
+                                field_audit.append(item)
+                                continue
+                            selected, selected_text = _select_custom_option(el, key)
+                            if not selected:
+                                item["action"] = (
+                                    "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
+                                )
+                                if required:
+                                    missing_required.append(key or marker or f"custom_field_{custom_index}")
+                            else:
+                                item["action"] = "SELECTED"
+                                item["final_value"] = selected_text or _current_value(el) or value
+                            field_audit.append(item)
+                        except Exception as exc:
+                            field_audit.append(
+                                {
+                                    "index": 10000 + custom_index,
+                                    "key": key or "unknown",
+                                    "marker": marker,
+                                    "label": label,
+                                    "type": "custom_dropdown",
+                                    "required": required,
+                                    "action": "FILL_ERROR",
+                                    "final_value": "",
+                                    "error": f"{type(exc).__name__}:{exc}",
+                                }
+                            )
+                            if required:
+                                missing_required.append(key or marker or f"custom_field_{custom_index}")
 
-                radios = form.locator("input[type=radio]")
-                for index in range(radios.count()):
-                    el = radios.nth(index)
-                    if el.is_visible() and el.is_enabled() and _required(el) and not el.is_checked():
-                        missing_required.append(f"radio_required_{index}:{_marker(el, _label_for(el))}")
+                    for key in CORE_FIELDS:
+                        if key in present_keys and not any(
+                            item.get("key") == key and item.get("action") in {"FILLED", "SELECTED"}
+                            for item in field_audit
+                        ):
+                            field_status[key] = "UNFILLED"
+                        elif key in present_keys:
+                            field_status[key] = "FILLED"
+                    if "name" not in present_keys and {"first_name", "last_name"}.issubset(present_keys):
+                        first_filled = any(
+                            item.get("key") == "first_name"
+                            and item.get("action") in {"FILLED", "SELECTED"}
+                            for item in field_audit
+                        )
+                        last_filled = any(
+                            item.get("key") == "last_name"
+                            and item.get("action") in {"FILLED", "SELECTED"}
+                            for item in field_audit
+                        )
+                        field_status["name"] = "FILLED" if first_filled and last_filled else "UNFILLED"
 
-                core_present = {
-                    key for key in CORE_FIELDS
-                    if key in present_keys or field_status.get(key) == "FILLED"
-                }
-                core_unfilled.extend(
-                    key for key in CORE_FIELDS
-                    if key in core_present and field_status.get(key) != "FILLED"
-                )
-                if "message" in present_keys and field_status.get("message") != "FILLED":
-                    core_unfilled.append("message")
-                if not any(field_status.get(key) == "FILLED" for key in ("name", "company", "email")):
-                    core_unfilled.append("identity")
-                if missing_required or core_unfilled:
-                    return result_payload(
-                        "FORM_FAILED",
-                        reason="REQUIRED_FIELD_MAPPING_UNCERTAIN",
+                    checkboxes = form.locator("input[type=checkbox]")
+                    for index in range(checkboxes.count()):
+                        el = checkboxes.nth(index)
+                        if not el.is_visible() or not el.is_enabled():
+                            continue
+                        label = _label_for(el)
+                        marker = _marker(el, label)
+                        required = _required(el)
+                        lower = f"{marker} {label}".lower()
+                        marketing = bool(
+                            re.search(r"newsletter|marketing|updates|メルマガ|配信|宣伝|広告", lower)
+                        )
+                        consent = bool(
+                            re.search(r"agree|consent|privacy|terms|同意|個人情報|利用規約", lower)
+                        )
+                        role_match = bool(
+                            re.search(r"founder|ceo|chief executive|代表|経営者", lower)
+                        )
+                        action = "LEFT_UNCHECKED_OPTIONAL"
+                        if marketing and required:
+                            action = "REQUIRED_MARKETING_OPT_IN_BLOCKED"
+                            missing_required.append(f"marketing_checkbox_{index}")
+                        elif marketing:
+                            if el.is_checked():
+                                try:
+                                    el.uncheck()
+                                    action = "UNCHECKED_OPTIONAL_MARKETING"
+                                except Exception:
+                                    action = "OPTIONAL_MARKETING_ALREADY_CHECKED"
+                            else:
+                                action = "LEFT_UNCHECKED_OPTIONAL"
+                        elif (required or consent or role_match) and not el.is_checked():
+                            try:
+                                el.check()
+                                action = (
+                                    "CHECKED_ROLE"
+                                    if role_match and not consent and not required
+                                    else "CHECKED_REQUIRED_CONSENT"
+                                )
+                            except Exception as exc:
+                                action = "CHECK_ERROR"
+                                if required:
+                                    missing_required.append(f"checkbox_{index}")
+                        elif el.is_checked():
+                            action = "ALREADY_CHECKED"
+                        checkbox_audit.append(
+                            {
+                                "index": index,
+                                "marker": marker,
+                                "label": label,
+                                "required": required,
+                                "marketing": marketing,
+                                "final_checked": bool(el.is_checked()),
+                                "action": action,
+                            }
+                        )
+
+                    radios = form.locator("input[type=radio]")
+                    for index in range(radios.count()):
+                        el = radios.nth(index)
+                        if el.is_visible() and el.is_enabled() and _required(el) and not el.is_checked():
+                            missing_required.append(f"radio_required_{index}:{_marker(el, _label_for(el))}")
+
+                    core_present = {
+                        key for key in CORE_FIELDS
+                        if key in present_keys or field_status.get(key) == "FILLED"
+                    }
+                    core_unfilled.extend(
+                        key for key in CORE_FIELDS
+                        if key in core_present and field_status.get(key) != "FILLED"
                     )
-                if not any(item.get("action") in {"FILLED", "SELECTED"} for item in field_audit):
-                    return result_payload("FORM_FAILED", reason="NO_FORM_FIELDS_FILLED")
+                    if "message" in present_keys and field_status.get("message") != "FILLED":
+                        core_unfilled.append("message")
+                    if not any(field_status.get(key) == "FILLED" for key in ("name", "company", "email")):
+                        core_unfilled.append("identity")
+                    if missing_required or core_unfilled:
+                        return result_payload(
+                            "FORM_FAILED",
+                            reason="REQUIRED_FIELD_MAPPING_UNCERTAIN",
+                        )
+                    if not any(item.get("action") in {"FILLED", "SELECTED"} for item in field_audit):
+                        return result_payload("FORM_FAILED", reason="NO_FORM_FIELDS_FILLED")
 
-                _dismiss_cookie_banner([page] + list(page.frames[1:]))
-                submit = _submit_control(form_context, form)
-                if submit is None:
-                    return result_payload("FORM_FAILED", reason="SUBMIT_CONTROL_NOT_FOUND")
+                    _dismiss_cookie_banner([page] + list(page.frames[1:]))
+                    submit = _submit_control(form_context, form)
+                    if submit is None:
+                        return result_payload("FORM_FAILED", reason="SUBMIT_CONTROL_NOT_FOUND")
+                    control_label = _control_label(submit)
+                    if re.search(r"\bnext\b", control_label, re.I):
+                        try:
+                            submit.click(timeout=15000)
+                        except Exception as first_click_error:
+                            _dismiss_cookie_banner([page] + list(page.frames[1:]))
+                            try:
+                                submit.click(timeout=15000)
+                            except Exception:
+                                raise first_click_error
+                        try:
+                            page.wait_for_load_state("domcontentloaded", timeout=5000)
+                        except Exception:
+                            pass
+                        page.wait_for_timeout(1500)
+                        continue
                 submission_attempted = True
                 try:
                     submit.click(timeout=15000)
