@@ -56,17 +56,18 @@ jobs:
         run: |
           set -euo pipefail
           echo "LIST_ONLY_MODE=TRUE"
-          for NAME in $(gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' | sed 's#.*/##' | grep -E '^lead-factory-(approved-sacrifice|sacrifice)(-|$)' || true); do
-            gcloud scheduler jobs pause "$NAME" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
-          done
-          for SERVICE_NAME in $(gcloud run services list --region="$REGION" --project="$PROJECT" --format='value(metadata.name)' | grep -E '^aone-sacrifice-' || true); do
-            if ! timeout 90s gcloud run services update "$SERVICE_NAME" \
-              --region="$REGION" --project="$PROJECT" \
-              --update-env-vars=LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_FACTORY_SEND_ENABLED=FALSE,OUTREACH_FACTORY_SEND_ENABLED=FALSE,OUTREACH_SACRIFICE_SEND_ENABLED=FALSE \
-              >/dev/null; then
-              echo "Legacy sacrifice service list-only update timed out or was unavailable; current runtime send guard remains FALSE."
-            fi
-          done
+          # Safety-only cleanup. Every control-plane call is bounded so this can
+          # never block deployment of the production list factory.
+          LEGACY_SCHEDULERS="$(timeout 45s gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' 2>/dev/null | sed 's#.*/##' | grep -E '^lead-factory-(approved-sacrifice|sacrifice)(-|$)' || true)"
+          while IFS= read -r NAME; do
+            [ -z "$NAME" ] && continue
+            timeout 20s gcloud scheduler jobs pause "$NAME" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
+          done <<< "$LEGACY_SCHEDULERS"
+          LEGACY_SERVICES="$(timeout 45s gcloud run services list --region="$REGION" --project="$PROJECT" --format='value(metadata.name)' 2>/dev/null | grep -E '^aone-sacrifice-' || true)"
+          while IFS= read -r SERVICE_NAME; do
+            [ -z "$SERVICE_NAME" ] && continue
+            timeout 60s gcloud run services update "$SERVICE_NAME"               --region="$REGION" --project="$PROJECT"               --update-env-vars=LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_FACTORY_SEND_ENABLED=FALSE,OUTREACH_FACTORY_SEND_ENABLED=FALSE,OUTREACH_SACRIFICE_SEND_ENABLED=FALSE               >/dev/null 2>&1 || true
+          done <<< "$LEGACY_SERVICES"
 
       - name: Enable runtime APIs
         run: |
