@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import uuid
 from datetime import datetime, timezone
 
@@ -34,6 +36,15 @@ def record_event(sheets, *, event_type: str, reason_code: str = "", reason_note:
                  company_name: str = "", domain: str = "", email: str = "",
                  source_id: str = "", raw_ref: str = "", status: str = "") -> None:
     """Best-effort append to the existing SalesControl_Events operational ledger."""
+    # High-throughput qualification mode keeps the production objective on the
+    # Raw/Gate/Promotion/SSOT ledgers. Per-company event rows would consume the
+    # same Sheets write quota and can starve SSOT promotion; failures remain in
+    # the stage-specific technical ledgers.
+    if (
+        str(os.getenv("LEAD_FACTORY_SUPPRESS_PIPELINE_EVENTS", "")).strip().upper() == "TRUE"
+        and str(event_type or "").upper().startswith("PIPELINE_")
+    ):
+        return
     now = datetime.now(timezone.utc).isoformat()
     dedupe = f"lead-factory:{event_type}:{source_id or company_name}:{domain or email}:{now[:16]}"
     try:
