@@ -9,8 +9,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: approved-ec-form-audit-execute-once
-  cancel-in-progress: true
+  group: approved-ec-form-audit-execute-once-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   sacrifice:
