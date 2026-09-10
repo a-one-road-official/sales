@@ -157,12 +157,18 @@ jobs:
           echo "::add-mask::$RUNTIME_TOKEN"
           echo "INTERNAL_TOKEN=$RUNTIME_TOKEN" >> "$GITHUB_ENV"
 
-      - name: Verify live outreach Prompt SSOT
+      - name: Verify live outreach Prompt SSOT and refresh stale drafts
         run: |
           set -euo pipefail
           curl --fail-with-body --silent --show-error --max-time 90 \
             -H "X-Aone-Internal-Token: $INTERNAL_TOKEN" \
             "$SERVICE_URL/outreach/prompt-status"
+          curl --fail-with-body --silent --show-error --max-time 540 \
+            -X POST \
+            -H "X-Aone-Internal-Token: $INTERNAL_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            "$SERVICE_URL/prep/tick"
 
       - name: Ensure durable worker queue
         run: |
