@@ -189,7 +189,7 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
     if key == "industry":
         return "Retail"
     if key == "reason":
-        return "A product expert"
+        return os.getenv("OUTREACH_FORM_REASON") or "A product expert"
     if key == "discovery_source":
         return "Found you online"
     if key == "category":
@@ -752,13 +752,7 @@ class PublicContactFormExecutor:
                         if not el.is_visible() or not el.is_enabled():
                             continue
                         typ = (el.get_attribute("type") or "text").lower()
-                        if typ in {"submit", "button", "file", "checkbox", "radio", "reset", "image"} or (
-                            (el.get_attribute("role") or "").lower() == "button"
-                            and el.get_attribute("aria-haspopup")
-                        ) or (
-                            el.get_attribute("readonly") is not None
-                            and (el.get_attribute("role") or "").lower() == "combobox"
-                        ):
+                        if typ in {"submit", "button", "file", "checkbox", "radio", "reset", "image"}:
                             continue
                         label = _label_for(el)
                         marker = _marker(el, label)
@@ -786,7 +780,23 @@ class PublicContactFormExecutor:
 
                         try:
                             tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
-                            if typ in {"select-one", "select-multiple"} or tag == "select":
+                            role = (el.get_attribute("role") or "").lower()
+                            is_custom_dropdown = (
+                                role in {"combobox", "button"}
+                                and bool(el.get_attribute("aria-haspopup"))
+                            )
+                            if is_custom_dropdown:
+                                selected, selected_text = _select_custom_option(el, key)
+                                if not selected:
+                                    item["action"] = (
+                                        "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
+                                    )
+                                    if required:
+                                        missing_required.append(key or marker or f"field_{index}")
+                                else:
+                                    item["action"] = "SELECTED"
+                                    item["final_value"] = selected_text or _current_value(el) or value
+                            elif typ in {"select-one", "select-multiple"} or tag == "select":
                                 selected, selected_text = _select_option(el, key)
                                 if not selected:
                                     item["action"] = "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
@@ -828,9 +838,10 @@ class PublicContactFormExecutor:
                         try:
                             if not el.is_visible() or not el.is_enabled():
                                 continue
-                            # HubSpot renders real dropdowns as readonly input[role=combobox].
-                            # Keep those controls; they contain the visible choice list and a hidden
-                            # submission input. The selector above already excludes unrelated inputs.
+                            # Input-based dropdowns are processed in the main field loop.
+                            # Keep only non-input custom controls here to avoid duplicate audits.
+                            if tag == "input":
+                                continue
                             label = _label_for(el)
                             marker = _marker(el, label)
                             key = _field_key(el, label)
