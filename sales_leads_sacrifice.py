@@ -1,4 +1,4 @@
-"""Isolated EC sacrifice lane sourced from the attached sales_leads workbook.
+"""Isolated outbound test lanes sourced from curated sales-lead snapshots.
 
 This module deliberately has no Google Sheets dependency.  In particular it never
 reads or writes the production SSOT spreadsheet.  The workbook snapshot is treated
@@ -77,7 +77,7 @@ def load_rows(path: Path = SOURCE_PATH) -> list[dict]:
 
 
 def is_forbidden_factory_target(row: dict) -> bool:
-    """Hard-stop factory, BPO, SSOT, and manufacturing targets."""
+    """Hard-stop factory, SSOT, and manufacturing targets; BPO is explicit-only."""
     fields = (
         row.get("record_origin"),
         row.get("source_sheet"),
