@@ -78,18 +78,34 @@ def dispatch_lane(factory, lane: str) -> dict:
     )
 
     # Qualify the existing backlog before adding slower source-crawl work.
-    jobs = []
+    # MAKTEK is placed on a separate queue so a pre-existing FIFO backlog cannot
+    # delay the companies captured for the active production goal.
+    priority_queue = str(
+        cfg.get("LEAD_FACTORY_PRIORITY_TASKS_QUEUE", "lead-factory-priority-workers")
+    ).strip()
+    priority_jobs = []
+    normal_jobs = []
+    def add_job(path: str, payload: dict, stage: str, priority: bool = False) -> None:
+        (priority_jobs if priority else normal_jobs).append((path, payload, stage))
+
     for company in gates:
         lead_id = str(company.get("lead_id", "")).strip()
         if lead_id:
-            jobs.append(("/worker/gate", {"lead_id": lead_id}, "gate"))
+            add_job(
+                "/worker/gate", {"lead_id": lead_id}, "gate",
+                priority=str(company.get("source_name", "")).strip() == "MAKTEK Eurasia 2026",
+            )
     for company in domains:
         lead_id = str(company.get("lead_id", "")).strip()
         if lead_id:
-            jobs.append(("/worker/domain", {"lead_id": lead_id}, "domain"))
+            add_job(
+                "/worker/domain", {"lead_id": lead_id}, "domain",
+                priority=str(company.get("source_name", "")).strip() == "MAKTEK Eurasia 2026",
+            )
     for source in sources:
-        jobs.append(("/worker/source", {"source_id": source.source_id}, "source"))
+        add_job("/worker/source", {"source_id": source.source_id}, "source")
 
+    jobs = priority_jobs + normal_jobs
     queued = {"source": 0, "domain": 0, "gate": 0, "already_queued": 0, "errors": 0, "deferred": 0}
     errors = []
     mode = "CLOUD_TASKS_ASYNC"
@@ -123,35 +139,53 @@ def dispatch_lane(factory, lane: str) -> dict:
 
     now = datetime.now(timezone.utc)
     bucket = f"{now:%Y%m%d%H}{(now.minute // 10) * 10:02d}"
-    try:
-        dispatcher = TaskDispatcher()
+    queue_batches = [
+        (priority_queue, priority_jobs),
+        (None, normal_jobs),
+    ]
+    for queue_name, queue_jobs in queue_batches:
+        if not queue_jobs:
+            continue
         fallback_jobs = []
-        cloud_tasks_failed = False
-        for path, payload, stage in jobs:
-            key = f"{lane_key.lower()}:{stage}:{payload.get('source_id') or payload.get('lead_id')}:{bucket}"
-            if cloud_tasks_failed:
-                fallback_jobs.append((path, payload, stage))
-                continue
-            try:
-                result = dispatcher.enqueue(path, payload, key)
-                if result.get("status") == "ALREADY_QUEUED":
-                    queued["already_queued"] += 1
-                else:
-                    queued[stage] += 1
-            except Exception as exc:
-                # A missing queue or enqueuer permission is container-wide. Stop
-                # repeating the same failing RPC for every remaining job.
-                cloud_tasks_failed = True
-                fallback_jobs.append((path, payload, stage))
-                errors.append({"stage": stage, "error": f"cloud_tasks:{type(exc).__name__}:{exc}"})
-        enqueue_http_fallback(fallback_jobs)
-    except Exception as exc:
-        errors.append({"stage": "dispatcher", "error": f"{type(exc).__name__}:{exc}"})
         try:
-            enqueue_http_fallback(jobs)
-        except Exception as inner:
-            queued["errors"] += len(jobs)
-            errors.append({"stage": "fallback", "error": f"{type(inner).__name__}:{inner}"})
+            dispatcher = TaskDispatcher(queue=queue_name)
+            cloud_tasks_failed = False
+            for path, payload, stage in queue_jobs:
+                key = f"{lane_key.lower()}:{stage}:{payload.get('source_id') or payload.get('lead_id')}:{bucket}"
+                if cloud_tasks_failed:
+                    fallback_jobs.append((path, payload, stage))
+                    continue
+                try:
+                    result = dispatcher.enqueue(path, payload, key)
+                    if result.get("status") == "ALREADY_QUEUED":
+                        queued["already_queued"] += 1
+                    else:
+                        queued[stage] += 1
+                except Exception as exc:
+                    # A missing queue or enqueuer permission is isolated to the
+                    # selected queue; do not let an old FIFO queue block MAKTEK.
+                    cloud_tasks_failed = True
+                    fallback_jobs.extend(
+                        (p, pl, st) for p, pl, st in queue_jobs[queue_jobs.index((path, payload, stage)):]
+                    )
+                    errors.append({
+                        "stage": stage,
+                        "queue": queue_name or "default",
+                        "error": f"cloud_tasks:{type(exc).__name__}:{exc}",
+                    })
+                    break
+            enqueue_http_fallback(fallback_jobs)
+        except Exception as exc:
+            errors.append({
+                "stage": "dispatcher",
+                "queue": queue_name or "default",
+                "error": f"{type(exc).__name__}:{exc}",
+            })
+            try:
+                enqueue_http_fallback(queue_jobs)
+            except Exception as inner:
+                queued["errors"] += len(queue_jobs)
+                errors.append({"stage": "fallback", "queue": queue_name or "default", "error": f"{type(inner).__name__}:{inner}"})
 
     return {
         "status": "ENQUEUED_WITH_ERRORS" if queued["errors"] else "ENQUEUED",
