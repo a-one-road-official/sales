@@ -257,7 +257,11 @@ def _select_option(el, key: str) -> tuple[bool, str]:
     return False, ""
 
 
-def _select_custom_option(el, key: str) -> tuple[bool, str]:
+def _normalise_choice_text(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").replace("\\", "")).strip().casefold()
+
+
+def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
     """Select a visible option from a HubSpot-style custom dropdown."""
     wanted = {
         "country": ("japan", "日本"),
@@ -269,9 +273,13 @@ def _select_custom_option(el, key: str) -> tuple[bool, str]:
     if key == "revenue":
         configured = str(os.getenv("OUTREACH_FORM_ANNUAL_REVENUE") or "").strip().lower()
         wanted = tuple(part.strip() for part in configured.split("|") if part.strip()) if configured else ()
+        if wanted:
+            wanted += ("less than $1m", "less than €1m", "less than €1 million")
     if key == "monthly_traffic":
         configured = str(os.getenv("OUTREACH_FORM_MONTHLY_TRAFFIC") or "").strip().lower()
         wanted = tuple(part.strip() for part in configured.split("|") if part.strip()) if configured else ()
+        if wanted:
+            wanted += ("less than 250k", "less than 250,000")
     configured_by_key = {
         "reason": "OUTREACH_FORM_REASON",
         "discovery_source": "OUTREACH_FORM_DISCOVERY_SOURCE",
@@ -284,21 +292,33 @@ def _select_custom_option(el, key: str) -> tuple[bool, str]:
         if configured:
             # Permit site-specific labels in one deployment configuration.
             wanted = tuple(part.strip() for part in configured.split("|") if part.strip())
+    wanted_tokens = tuple(
+        _normalise_choice_text(token) for token in wanted if _normalise_choice_text(token)
+    )
     try:
         el.click(timeout=5000)
         time.sleep(0.2)
-        roots = [el.locator("xpath=.."), el.locator("xpath=../..")]
+        roots = [
+            el.locator("xpath=.."),
+            el.locator("xpath=../.."),
+            el.locator("xpath=ancestor::*[@data-hsfc-id='DropdownField'][1]"),
+        ]
+        if context is not None:
+            roots.append(context.locator("[role=listbox]:visible"))
         for root in roots:
             options = root.locator("[role=option], li")
-            for index in range(min(options.count(), 160)):
+            for index in range(min(options.count(), 240)):
                 option = options.nth(index)
-                if not option.is_visible() or not option.is_enabled():
+                if not option.is_visible():
                     continue
                 text = str(option.inner_text() or "").strip()
-                haystack = text.lower()
-                if wanted and not any(token and token in haystack for token in wanted):
+                haystack = _normalise_choice_text(text)
+                if wanted_tokens and not any(token in haystack for token in wanted_tokens):
                     continue
-                option.click(timeout=5000)
+                try:
+                    option.click(timeout=5000)
+                except Exception:
+                    option.click(timeout=5000, force=True)
                 return True, text
     except Exception:
         pass
@@ -318,7 +338,7 @@ def _select_phone_country(el, context=None) -> tuple[bool, bool]:
         picker.click(timeout=5000)
         roots = [root, el.locator("xpath=ancestor::form[1]")]
         if context is not None:
-            roots.append(context)
+            roots.append(context.locator("[role=listbox]:visible"))
         for option_root in roots:
             options = option_root.locator("[role=option], li")
             for index in range(min(options.count(), 240)):
@@ -326,12 +346,12 @@ def _select_phone_country(el, context=None) -> tuple[bool, bool]:
                 if not option.is_visible():
                     continue
                 text = str(option.inner_text() or "").strip()
-                if re.search(r"\\bJapan\\b|日本", text, re.I):
+                if re.search(r"\bJapan\b|日本", text, re.I):
                     option.click(timeout=5000)
                     return True, True
         return True, False
-    except Exception:
-        return True, False
+
+
 def _current_value(el) -> str:
     try:
         if (el.get_attribute("type") or "").lower() == "checkbox":
@@ -815,7 +835,7 @@ class PublicContactFormExecutor:
                         try:
                             tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
                             if is_custom_dropdown:
-                                selected, selected_text = _select_custom_option(el, key)
+                                selected, selected_text = _select_custom_option(el, key, page)
                                 if not selected:
                                     item["action"] = (
                                         "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
@@ -910,7 +930,7 @@ class PublicContactFormExecutor:
                                     missing_required.append(key or marker or f"custom_field_{custom_index}")
                                 field_audit.append(item)
                                 continue
-                            selected, selected_text = _select_custom_option(el, key)
+                            selected, selected_text = _select_custom_option(el, key, page)
                             if not selected:
                                 item["action"] = (
                                     "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
