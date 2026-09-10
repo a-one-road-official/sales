@@ -66,7 +66,7 @@ jobs:
           LEGACY_SERVICES="$(timeout 45s gcloud run services list --region="$REGION" --project="$PROJECT" --format='value(metadata.name)' 2>/dev/null | grep -E '^aone-sacrifice-' || true)"
           while IFS= read -r SERVICE_NAME; do
             [ -z "$SERVICE_NAME" ] && continue
-            timeout 60s gcloud run services update "$SERVICE_NAME"               --region="$REGION" --project="$PROJECT"               --update-env-vars=LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_FACTORY_SEND_ENABLED=FALSE,OUTREACH_FACTORY_SEND_ENABLED=FALSE,OUTREACH_SACRIFICE_SEND_ENABLED=FALSE               >/dev/null 2>&1 || true
+            timeout 60s gcloud run services update "$SERVICE_NAME"               --region="$REGION" --project="$PROJECT"               --update-env-vars=LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_SEND_MODE=DISABLED,LEAD_FACTORY_EXPLICIT_SEND_APPROVAL=FALSE,LEAD_FACTORY_FACTORY_SEND_ENABLED=FALSE,OUTREACH_FACTORY_SEND_ENABLED=FALSE,OUTREACH_SACRIFICE_SEND_ENABLED=FALSE               >/dev/null 2>&1 || true
           done <<< "$LEGACY_SERVICES"
 
       - name: Enable runtime APIs
