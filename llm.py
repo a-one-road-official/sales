@@ -148,7 +148,16 @@ Use primary company/investor announcements where possible; reliable business new
         prompt = f"""
 You are the official-domain resolver for A-one road's internal Lead Factory.
 Research exactly ONE company and identify its official corporate website.
-Use web_search. Prefer the company's own legal/corporate site and authoritative association/exhibitor records.
+Use web_search for every company. Search the exact quoted company name together with the
+country and industrial context. The source record is only provenance; it is not a directory
+of official websites.
+
+For EXHIBITION sources specifically, do NOT extract, infer, or depend on outbound links from
+the exhibitor page. Most exhibitor indexes publish only company names and booth numbers. Instead,
+use the company-name search results, inspect the candidate's own home/about/contact pages, and
+prefer a domain that matches the distinctive company-name tokens (including a country TLD when
+appropriate).
+
 Never return a reseller, distributor, LinkedIn page, directory profile, social network, marketplace, or news article as the official domain.
 Never guess from the company name. If multiple companies share the name, use source/country context to disambiguate.
 
@@ -163,6 +172,8 @@ Return ONLY JSON:
 }}
 
 HIGH means the evidence directly establishes that the returned site belongs to this exact company/entity.
+The site's title or visible company identity should match the searched entity, and the evidence
+must include the official page URL. A name-shaped domain by itself is insufficient.
 If that standard is not met, return MEDIUM/LOW and leave official_domain empty when appropriate.
 
 COMPANY CONTEXT:
@@ -457,4 +468,3 @@ CONTACT (use exact email only if present; do not infer one):
         if not subject or not body:
             raise RuntimeError("draft_missing_subject_or_body")
         return {"subject": subject, "body": body}
-
