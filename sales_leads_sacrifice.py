@@ -226,15 +226,30 @@ def load_rows_for_lane(lane: str, sheets=None) -> list[dict]:
     return merged
 
 
-def is_forbidden_factory_target(row: dict) -> bool:
-    """Hard-stop factory, SSOT, and manufacturing targets; BPO is explicit-only."""
+def is_forbidden_factory_target(
+    row: dict,
+    *,
+    allow_shared_non_factory_sheet: bool = False,
+) -> bool:
+    """Hard-stop factory/SSOT targets without rejecting the shared source sheet.
+
+    The live BPO and Sales/GTM rows live in a tab named
+    営業リスト＿Factory/BPO. That tab title is provenance, not the company's
+    industry, so it must not be treated as a manufacturing marker when the row
+    has already passed the explicit BPO or Sales/GTM lane filter.
+    """
+    source_sheet = str(row.get("source_sheet") or "").strip()
     fields = (
         row.get("record_origin"),
-        row.get("source_sheet"),
         row.get("domain"),
         row.get("company_name"),
         row.get("what_it_solves"),
     )
+    if not (
+        allow_shared_non_factory_sheet
+        and source_sheet == "営業リスト＿Factory/BPO"
+    ):
+        fields = fields + (source_sheet,)
     haystack = " ".join(str(value or "") for value in fields).upper()
     return any(marker in haystack for marker in FACTORY_OR_INDUSTRIAL_MARKERS)
 
@@ -285,7 +300,14 @@ def sacrifice_candidates(
             continue
         evidence = source_website_check(row)
         company_name = str(row.get("company_name") or "").strip()
-        if company_name in FACTORY_OR_INDUSTRIAL_NAMES or is_forbidden_factory_target(row):
+        allow_shared_non_factory_sheet = (
+            normalized_lane in {"BPO", "SALES_GTM"}
+            and row_domain in {BPO_DOMAIN, SALES_GTM_DOMAIN}
+        )
+        if company_name in FACTORY_OR_INDUSTRIAL_NAMES or is_forbidden_factory_target(
+            row,
+            allow_shared_non_factory_sheet=allow_shared_non_factory_sheet,
+        ):
             continue
         selected.append({
             "sacrifice_lane": normalized_lane,
