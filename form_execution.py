@@ -427,7 +427,12 @@ def _form_score(form) -> int:
             typ = (el.get_attribute("type") or "text").lower()
             if typ in {"submit", "button", "file", "checkbox", "radio", "reset", "image"}:
                 continue
-            if not el.is_visible() or not el.is_enabled():
+            role = (el.get_attribute("role") or "").lower()
+            is_custom_dropdown = (
+                role in {"combobox", "button"}
+                and bool(el.get_attribute("aria-haspopup"))
+            )
+            if not el.is_visible() or (not el.is_enabled() and not is_custom_dropdown):
                 continue
             visible += 1
             label = _label_for(el)
@@ -735,7 +740,16 @@ class PublicContactFormExecutor:
                 contexts = [page] + list(page.frames[1:])
                 if _captcha_present(contexts):
                     return result_payload("FORM_FAILED", reason="CAPTCHA_PRESENT")
-                chosen = _choose_form(contexts)
+                # Some embedded HubSpot forms render after the host page.
+                # Wait for a real, visible, relevant form before auditing it.
+                chosen = None
+                for _ in range(12):
+                    candidate = _choose_form(contexts)
+                    if candidate and _form_score(candidate[1]) > 0:
+                        chosen = candidate
+                        break
+                    page.wait_for_timeout(750)
+                    contexts = [page] + list(page.frames[1:])
                 if not chosen:
                     return result_payload("FORM_FAILED", reason="FORM_NOT_FOUND")
                 form_context, form = chosen
