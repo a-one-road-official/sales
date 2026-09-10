@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 import hashlib
+import os
 import threading
 import time
 import uuid
@@ -38,7 +39,31 @@ SOURCE_HEADERS = [
 class SheetsRepo:
     def __init__(self, spreadsheet_id: str):
         self._read_lock = threading.Lock()
+        self._write_lock = threading.Lock()
         self._last_read_at = 0.0
+        self._last_write_at = 0.0
+        self._read_cache: dict[str, tuple[float, list[list[str]]]] = {}
+        try:
+            self._read_min_interval = max(
+                0.2,
+                min(5.0, float(os.getenv("LEAD_FACTORY_SHEETS_READ_MIN_INTERVAL_SECONDS", "1.05") or 1.05)),
+            )
+        except ValueError:
+            self._read_min_interval = 1.05
+        try:
+            self._read_cache_ttl = max(
+                0.0,
+                min(30.0, float(os.getenv("LEAD_FACTORY_SHEETS_READ_CACHE_TTL_SECONDS", "3") or 3)),
+            )
+        except ValueError:
+            self._read_cache_ttl = 3.0
+        try:
+            self._write_min_interval = max(
+                0.2,
+                min(5.0, float(os.getenv("LEAD_FACTORY_SHEETS_WRITE_MIN_INTERVAL_SECONDS", "0.25") or 0.25)),
+            )
+        except ValueError:
+            self._write_min_interval = 0.25
         creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
         self.svc = build("sheets", "v4", credentials=creds, cache_discovery=False)
         self.spreadsheet_id = spreadsheet_id
@@ -46,19 +71,26 @@ class SheetsRepo:
 
     def read(self, range_: str) -> list[list[str]]:
         # Sheets quota is shared by the runtime identity. Serialize reads per
-        # container and back off on transient quota/server responses so parallel
-        # Scheduler ticks do not turn a recoverable burst into a dead pipeline.
+        # container, reuse very recent identical reads, and back off on transient
+        # quota/server responses so parallel Scheduler ticks do not turn a
+        # recoverable burst into a dead pipeline.
         with self._read_lock:
+            now = time.monotonic()
+            cached = self._read_cache.get(range_)
+            if cached and self._read_cache_ttl and now - cached[0] < self._read_cache_ttl:
+                return [list(row) for row in cached[1]]
             for attempt in range(5):
                 elapsed = time.monotonic() - self._last_read_at
-                if elapsed < 0.15:
-                    time.sleep(0.15 - elapsed)
+                if elapsed < self._read_min_interval:
+                    time.sleep(self._read_min_interval - elapsed)
                 try:
                     res = self.svc.spreadsheets().values().get(
                         spreadsheetId=self.spreadsheet_id, range=range_
                     ).execute()
                     self._last_read_at = time.monotonic()
-                    return res.get("values", [])
+                    values = res.get("values", [])
+                    self._read_cache[range_] = (self._last_read_at, [list(row) for row in values])
+                    return [list(row) for row in values]
                 except HttpError as exc:
                     status = getattr(exc.resp, "status", None)
                     if status not in {429, 500, 502, 503, 504} or attempt == 4:
@@ -67,14 +99,35 @@ class SheetsRepo:
             return []
 
 
+    def _execute_write(self, operation):
+        """Serialize writes and retry transient Sheets quota/server responses."""
+        with self._write_lock:
+            for attempt in range(5):
+                elapsed = time.monotonic() - self._last_write_at
+                if elapsed < self._write_min_interval:
+                    time.sleep(self._write_min_interval - elapsed)
+                try:
+                    result = operation()
+                    self._last_write_at = time.monotonic()
+                    with self._read_lock:
+                        self._read_cache.clear()
+                    return result
+                except HttpError as exc:
+                    status = getattr(exc.resp, "status", None)
+                    if status not in {429, 500, 502, 503, 504} or attempt == 4:
+                        raise
+                    time.sleep(min(8.0, 2 ** attempt))
+        return None
+
+
     def append(self, sheet: str, values: list) -> None:
-        self.svc.spreadsheets().values().append(
+        self._execute_write(lambda: self.svc.spreadsheets().values().append(
             spreadsheetId=self.spreadsheet_id,
             range=f"{sheet}!A:ZZ",
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": [values]},
-        ).execute()
+        ).execute())
         if sheet == "Config":
             self.invalidate_config_cache()
 
@@ -235,22 +288,22 @@ class SheetsRepo:
 
 
     def update_row(self, sheet: str, row_number: int, values: list) -> None:
-        self.svc.spreadsheets().values().update(
+        self._execute_write(lambda: self.svc.spreadsheets().values().update(
             spreadsheetId=self.spreadsheet_id,
             range=f"{sheet}!A{row_number}:ZZ{row_number}",
             valueInputOption="RAW",
             body={"values": [values]},
-        ).execute()
+        ).execute())
 
 
     def update_range(self, range_: str, values: list[list]) -> None:
         """Narrow values update used to preserve unrelated formulas/validation."""
-        self.svc.spreadsheets().values().update(
+        self._execute_write(lambda: self.svc.spreadsheets().values().update(
             spreadsheetId=self.spreadsheet_id,
             range=range_,
             valueInputOption="RAW",
             body={"values": values},
-        ).execute()
+        ).execute())
         if str(range_).startswith("Config!") or str(range_).startswith("'Config'!"):
             self.invalidate_config_cache()
 
