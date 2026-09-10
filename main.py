@@ -24,6 +24,7 @@ from outreach_execution import (
     record_outbound_attempt,
 )
 from outreach_stability import SacrificeStability
+from outreach_autopilot import BPOAutopilot
 from sacrifice_failure_loop import classify_batch, batch_gate
 from sales_leads_sacrifice_run import run_ten_sacrifice_batch
 from observability import failure_code, record_event
@@ -32,6 +33,7 @@ from observability import failure_code, record_event
 app = FastAPI(title="A-one Lead Factory", version="0.3.2")
 factory: LeadFactory | None = None
 production_controller: QualifiedLeadProductionController | None = None
+bpo_autopilot: BPOAutopilot | None = None
 _recovery_thread: threading.Thread | None = None
 _recovery_stop = threading.Event()
 _recovery_lock = threading.Lock()
@@ -103,6 +105,16 @@ def start_recovery_pump() -> None:
     _recovery_thread.start()
 
 
+@app.on_event("startup")
+def resume_bpo_autopilot() -> None:
+    if os.getenv("OUTREACH_AUTOPILOT_ENABLED", "FALSE").upper() != "TRUE":
+        return
+    try:
+        get_bpo_autopilot().resume_if_active()
+    except Exception as exc:
+        print(f"BPO autopilot resume failed: {type(exc).__name__}:{exc}", flush=True)
+
+
 @app.on_event("shutdown")
 def stop_recovery_pump() -> None:
     _recovery_stop.set()
@@ -154,6 +166,17 @@ def get_factory() -> LeadFactory:
     if factory is None:
         factory = LeadFactory(SETTINGS)
     return factory
+def get_bpo_autopilot() -> BPOAutopilot:
+    global bpo_autopilot
+    if bpo_autopilot is None:
+        bpo_autopilot = BPOAutopilot(
+            factory_getter=get_factory,
+            config_getter=lambda: _outbound_runtime_config(get_factory()),
+            batch_runner=lambda payload: _run_sales_leads_sacrifice(payload, scheduled=True),
+        )
+    return bpo_autopilot
+
+
 
 
 def get_production_controller() -> QualifiedLeadProductionController:
@@ -640,24 +663,11 @@ def _outbound_flag(lane: str) -> str:
 
 
 def _outbound_send_enabled(lane: str, cfg: dict[str, str] | None = None) -> bool:
-    """Enable only the explicitly configured isolated EC sacrifice lane."""
-    normalized = str(lane or "").strip().upper()
-    if normalized != "EC_SACRIFICE":
-        return False
-    values = cfg if cfg is not None else os.environ
-
-    def value(key: str, default: str = "FALSE") -> object:
-        return values.get(key, os.getenv(key, default))
-
-    return (
-        _config_truthy(value("LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME"))
-        and _config_truthy(value("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE"))
-        and str(value("LEAD_FACTORY_SEND_MODE", "DISABLED")).strip().upper() == "ENABLED"
-        and _config_truthy(value("OUTREACH_SACRIFICE_SEND_ENABLED"))
-        and _config_truthy(value("LEAD_FACTORY_EXPLICIT_SEND_APPROVAL"))
-        and bool(str(value("OUTREACH_SACRIFICE_TARGET_COMPANIES", "") or "").strip())
-    )
-
+    """Delegate outbound permission to the shared BPO gate."""
+    runtime_cfg = dict(cfg or {})
+    for key in _OUTBOUND_RUNTIME_KEYS:
+        runtime_cfg.setdefault(key, os.getenv(key, ""))
+    return outbound_lane_send_enabled(lane, runtime_cfg)
 def _sacrifice_send_enabled(
     lane: str = "BPO",
     cfg: dict[str, str] | None = None,
@@ -732,7 +742,8 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
             batch_slot=batch_slot,
             lane=lane,
         )
-    if execute_external:
+    record_stability = not bool((payload or {}).get("_autopilot_managed", False))
+    if execute_external and record_stability:
         try:
             critical_errors = []
             for item in result.get("results", []) or []:
@@ -753,6 +764,7 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
             # Sends already completed must remain visible even if the batch ledger
             # is temporarily unavailable.
             result["stability_record_error"] = f"{type(exc).__name__}:{exc}"
+
     result["trigger"] = "SCHEDULER" if scheduled else "DIRECT"
     result["send_enabled"] = execute_external
     result["lane"] = lane
@@ -815,6 +827,38 @@ def bpo_run(payload: dict):
         return _run_sales_leads_sacrifice(request_payload, scheduled=False)
     except HTTPException:
         raise
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/outreach/bpo-autopilot/start")
+def bpo_autopilot_start(payload: dict):
+    """Create one durable BPO job; the worker continues after this request returns."""
+    try:
+        request_payload = dict(payload or {})
+        request_payload["lane"] = "BPO"
+        return get_bpo_autopilot().start(request_payload)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.get("/outreach/bpo-autopilot/status")
+def bpo_autopilot_status(job_id: str = ""):
+    try:
+        return get_bpo_autopilot().status(str(job_id or "").strip())
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/outreach/bpo-autopilot/stop")
+def bpo_autopilot_stop(payload: dict):
+    try:
+        job_id = str((payload or {}).get("job_id") or "").strip()
+        return get_bpo_autopilot().stop(job_id)
     except Exception as exc:
         _fail(exc)
 
