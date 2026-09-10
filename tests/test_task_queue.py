@@ -170,3 +170,4 @@ def test_failure_codes_are_stable_for_operational_reporting():
     assert failure_code("HTTP 429 quota exceeded") == "SHEETS_QUOTA"
     assert failure_code("reCAPTCHA blocked contact form") == "RECAPTCHA_OR_BOT_DEFENSE"
     assert failure_code("no_channel_found") == "EMAIL_NOT_FOUND"
+    assert failure_code("SandboxError:cloud_run_sandbox_launcher_not_available") == "SANDBOX_UNAVAILABLE"
