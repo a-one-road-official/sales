@@ -18,6 +18,7 @@ def failure_code(*values: object) -> str:
         ("SHEETS_QUOTA", ("429", "rate_limit", "quota")),
         ("TIMEOUT", ("timeout", "timed out", "deadline")),
         ("DUPLICATE_BLOCKED", ("duplicate", "idempotency")),
+        ("DRIVE_STORAGE_UNAVAILABLE", ("service accounts do not have storage quota", "upload/drive/v3/files", "drive_storage_fallback")),
         ("AUTHORIZATION", ("401", "403", "permission", "unauthorized")),
         ("SANDBOX_UNAVAILABLE", ("sandboxerror", "sandbox_no_output", "sandbox_launcher")),
         ("NETWORK_ERROR", ("http", "connection", "connecterror", "connect", "dns", "ssl")),
