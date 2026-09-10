@@ -164,8 +164,8 @@ def _fail(exc: Exception):
         InternalNotifier(recipient).notify(
             subject="A-one Lead Factory internal error",
             body=(
-                "An internal autonomous endpoint failed and will remain eligible for retry/repair.\\n\\n"
-                f"error={error[:5000]}\\n"
+                "An internal autonomous endpoint failed and will remain eligible for retry/repair.\n\n"
+                f"error={error[:5000]}\n"
                 "Customer-facing sending was not executed."
             ),
         )
@@ -195,7 +195,7 @@ def deep_healthz():
         "factory_enabled": os.getenv("LEAD_FACTORY_ENABLED", "TRUE").upper() == "TRUE",
         "gemini_vertex_ready": bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")),
         "external_write": os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE").upper() == "TRUE",
-        "customer_facing_send": os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE").upper() == "TRUE",
+        "customer_facing_send": os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "TRUE").upper() == "TRUE",
     }
 
 
@@ -237,7 +237,7 @@ def ops_status():
                 "in_process_recovery": "ACTIVE" if _recovery_thread and _recovery_thread.is_alive() else "STARTING_OR_DISABLED",
                 "deployment_activation": "NON_BLOCKING",
             },
-            "customer_facing_send": "EXPLICIT_APPROVAL_REQUIRED",
+            "customer_facing_send": "ENABLED_FOR_EC_SACRIFICE" if _sacrifice_send_enabled() else "DISABLED",
         }
     except Exception as exc:
         _fail(exc)
@@ -390,18 +390,13 @@ def evaluate_mittelstand(company_context: dict):
         _fail(exc)
 
 
-@app.post("/mittelstand/tick")
-def mittelstand_tick():
+@app.post("/worker/mittelstand")
+def worker_mittelstand(payload: dict):
+    lead_id = str(payload.get("lead_id") or "").strip()
+    if not lead_id:
+        raise HTTPException(status_code=400, detail="missing_lead_id")
     try:
-        return get_factory().mittelstand_tick()
-    except Exception as exc:
-        _fail(exc)
-
-
-@app.post("/promotion/tick")
-def promotion_tick():
-    try:
-        return get_factory().promotion_tick()
+        return get_factory().mittelstand_one(lead_id)
     except Exception as exc:
         _fail(exc)
 
@@ -414,18 +409,46 @@ def domain_tick():
         _fail(exc)
 
 
+@app.post("/domain/growth")
+def domain_growth():
+    try:
+        return get_factory().domain_tick(lane="GROWTH")
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/domain/mittelstand")
+def domain_mittelstand():
+    try:
+        return get_factory().domain_tick(lane="MITTELSTAND")
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/promotion/tick")
+def promotion_tick():
+    try:
+        return get_factory().promotion_tick()
+    except Exception as exc:
+        _fail(exc)
+
+
 @app.post("/failover/domain")
 def failover_domain_tick():
-    """Direct domain-drain lane independent of dispatch, Cloud Tasks and deploy.
-
-    This endpoint is intentionally small: it is a recovery pump for the case
-    where the queue/dispatch path is unavailable. It uses the same official-site
-    resolver and Gate contract, and never writes to the customer-facing send path.
-    """
+    """Direct domain+Gate lane independent of dispatch, Cloud Tasks and deploy."""
     try:
-        limit = max(1, min(6, int(os.getenv("LEAD_FACTORY_FAILOVER_DOMAIN_BATCH", "2") or 2)))
+        lf = get_factory()
+        try:
+            domain_limit = max(1, min(25, int(os.getenv("LEAD_FACTORY_FAILOVER_DOMAIN_BATCH", "2") or 2)))
+        except ValueError:
+            domain_limit = 2
         with _recovery_lock:
-            return get_factory().domain_tick(limit=limit)
+            domain = lf.domain_tick(limit=domain_limit)
+        try:
+            gate = lf.growth_tick(limit=max(1, min(25, domain_limit * 2)))
+        except TypeError:
+            gate = lf.growth_tick()
+        return {"status": "FAILOVER_COMPLETE", "execution_path": "DIRECT_FAILOVER", "domain": domain, "gate": gate}
     except Exception as exc:
         _fail(exc)
 
@@ -527,44 +550,84 @@ def prep_tick():
         _fail(exc)
 
 
+def _sacrifice_limit(payload: dict | None) -> int:
+    try:
+        limit = int((payload or {}).get("limit", 10))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="invalid_sacrifice_limit")
+    if limit < 1 or limit > 10:
+        raise HTTPException(status_code=400, detail="sacrifice_batch_limit_must_be_1_to_10")
+    return limit
+
+
+def _sacrifice_send_enabled() -> bool:
+    return os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "TRUE").upper() == "TRUE"
+
+
+def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict:
+    limit = _sacrifice_limit(payload)
+    lf = get_factory()
+    cfg = dict(lf._config())
+
+    # EC_SACRIFICE is a pre-scoped canary lane.  A single deployment-level
+    # kill switch controls external execution; there is no per-request approval
+    # handshake and no broad external-write flag dependency.
+    execute_external = _sacrifice_send_enabled() and not bool((payload or {}).get("dry_run", False))
+    cfg["OUTREACH_SACRIFICE_SEND_ENABLED"] = "TRUE" if execute_external else "FALSE"
+    cfg["OUTREACH_SACRIFICE_LANES"] = cfg.get(
+        "OUTREACH_SACRIFICE_LANES", "EC,RETAIL,SACRIFICE,EC_SACRIFICE"
+    )
+
+    executor = SacrificialEmailExecutor(lf.sheets) if execute_external else None
+    result = run_ten_sacrifice_batch(
+        llm=lf.llm,
+        drive=lf.drive,
+        cfg=cfg,
+        limit=limit,
+        executor=executor,
+        execute_external=execute_external,
+    )
+    result["trigger"] = "SCHEDULER" if scheduled else "DIRECT"
+    result["send_enabled"] = execute_external
+    return result
+
+
 @app.post("/outreach/execute-sacrificial")
 def execute_sacrificial(payload: dict):
-    raise HTTPException(status_code=410, detail="deprecated_ssot_sacrifice_endpoint")
+    """Compatibility alias for the current isolated sales_leads sacrifice runner."""
+    try:
+        return _run_sales_leads_sacrifice(payload, scheduled=False)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _fail(exc)
 
 
 @app.post("/outreach/sacrificial-tick")
 def sacrificial_tick(payload: dict):
-    raise HTTPException(status_code=410, detail="deprecated_ssot_sacrifice_endpoint")
+    """Compatibility alias for the Scheduler sacrifice lane."""
+    try:
+        return _run_sales_leads_sacrifice(payload, scheduled=True)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _fail(exc)
 
 
 @app.post("/outreach/sales-leads-sacrifice-tick")
 def sales_leads_sacrifice_tick(payload: dict):
-    """Scheduler entrypoint for preparation only; customer-facing execution is explicit."""
+    """Scheduler entrypoint for the isolated EC/retail sacrifice lane."""
     try:
-        if int((payload or {}).get("limit", 10)) != 10:
-            raise HTTPException(status_code=400, detail="sacrifice_batch_must_be_exactly_ten")
-        prepared = []
-        for candidate in sacrifice_candidates(load_rows(), limit=10):
-            item = dict(candidate)
-            item["research_context"] = make_research_context(candidate)
-            item["status"] = "READY_FOR_RESEARCH"
-            prepared.append(item)
-        return {
-            "status": "SACRIFICE_PREP_ONLY",
-            "source": "sales_leads",
-            "lane": "EC_SACRIFICE",
-            "production_ssot_touched": False,
-            "external_send": "BLOCKED",
-            "blocked_reason": "scheduler_has_no_external_send_authority",
-            "candidates": prepared,
-        }
+        return _run_sales_leads_sacrifice(payload, scheduled=True)
+    except HTTPException:
+        raise
     except Exception as exc:
         _fail(exc)
 
 
 @app.post("/outreach/sales-leads-sacrifice-failure-analysis")
 def sales_leads_sacrifice_failure_analysis(payload: dict):
-    """Classify one completed ten-company run and decide the next repair action."""
+    """Classify a completed sacrifice run.  Analysis is advisory and never blocks the next run."""
     results = list((payload or {}).get("results") or [])
     if len(results) > 10:
         raise HTTPException(status_code=400, detail="maximum_ten_results")
@@ -579,40 +642,9 @@ def sales_leads_sacrifice_failure_analysis(payload: dict):
 
 @app.post("/outreach/sales-leads-sacrifice-run")
 def sales_leads_sacrifice_run(payload: dict):
-    """Run one exact ten-company batch on sales_leads only.
-
-    External execution is opt-in per request and hard-scoped to the attached
-    EC/retail sacrifice source. Production SSOT is never touched here.
-    """
+    """Run one bounded EC/retail sacrifice batch."""
     try:
-        if int((payload or {}).get("limit", 10)) != 10:
-            raise HTTPException(status_code=400, detail="sacrifice_batch_must_be_exactly_ten")
-        lf = get_factory()
-        cfg = lf._config()
-        requested_external = bool((payload or {}).get("execute_external", False))
-        approval_flags = (
-            os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE").upper() == "TRUE"
-            and os.getenv("OUTREACH_SACRIFICE_SEND_ENABLED", "FALSE").upper() == "TRUE"
-            and os.getenv("LEAD_FACTORY_EXPLICIT_SEND_APPROVAL", "FALSE").upper() == "TRUE"
-        )
-        if requested_external and not approval_flags:
-            return {
-                "status": "EXTERNAL_SEND_BLOCKED",
-                "source": "sales_leads",
-                "lane": "EC_SACRIFICE",
-                "production_ssot_touched": False,
-                "external_send": "BLOCKED",
-                "blocked_reason": "explicit_send_approval_and_runtime_flags_required",
-            }
-        execute_external = requested_external and approval_flags
-        if execute_external:
-            cfg = dict(cfg)
-            cfg["OUTREACH_FACTORY_SEND_ENABLED"] = "FALSE"
-        executor = SacrificialEmailExecutor(lf.sheets) if execute_external else None
-        return run_ten_sacrifice_batch(
-            llm=lf.llm, drive=lf.drive, cfg=cfg, limit=10,
-            executor=executor, execute_external=execute_external,
-        )
+        return _run_sales_leads_sacrifice(payload, scheduled=False)
     except HTTPException:
         raise
     except Exception as exc:
