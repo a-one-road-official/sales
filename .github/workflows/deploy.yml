@@ -18,8 +18,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: lead-factory-qualified-ssot-deploy-v2
-  cancel-in-progress: false
+  group: lead-factory-qualified-ssot-deploy
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -172,6 +172,15 @@ jobs:
             --region="$REGION" --project="$PROJECT" \
             --update-env-vars=LEAD_FACTORY_SERVICE_URL="$URL" >/dev/null
           echo "SERVICE_URL=$URL" >> "$GITHUB_ENV"
+
+      - name: Synchronize controller token with serving revision
+        run: |
+          RUNTIME_TOKEN="$(gcloud run services describe "$SERVICE" \
+            --region="$REGION" --project="$PROJECT" --format=json | \
+            python -c 'import json,sys; d=json.load(sys.stdin); e=d.get("spec",{}).get("template",{}).get("spec",{}).get("containers",[{}])[0].get("env",[]); print(next((x.get("value","") for x in e if x.get("name")=="LEAD_FACTORY_INTERNAL_TOKEN"), ""))')"
+          test -n "$RUNTIME_TOKEN"
+          echo "::add-mask::$RUNTIME_TOKEN"
+          echo "INTERNAL_TOKEN=$RUNTIME_TOKEN" >> "$GITHUB_ENV"
 
       - name: Ensure durable worker queue
         run: |
