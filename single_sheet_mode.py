@@ -274,3 +274,282 @@ def install(cls):
     cls.list_needs_domain = list_needs_domain
     cls.list_pending_gate = list_pending_gate
     cls.list_pending_mittelstand = list_pending_mittelstand
+
+
+    def update_raw_domain_resolution(self, lead_id, domain, website="", hq_country="", confidence="HIGH",
+                                     evidence="", *, row_number=None, source_type="",
+                                     preserve_formulas=True, check_duplicates=True):
+        domain = self._normalize_domain(domain or website)
+        if str(confidence).upper() != "HIGH" or not domain:
+            return {"status": "UNRESOLVED", "lead_id": lead_id, "confidence": str(confidence).upper()}
+        row = find(self, lead_id=lead_id)
+        if not row:
+            raise KeyError(f"lead_not_found:{lead_id}")
+        source_type = str(source_type or row.get("LF_source_type") or "").upper()
+        duplicate = "NEW"
+        if check_duplicates:
+            for other in rows(self):
+                if int(other["row_number"]) == int(row["row_number"]):
+                    continue
+                other_domain = self._normalize_domain(
+                    other.get("LF_normalized_domain") or other.get("LF_domain") or other.get("website") or ""
+                )
+                if other_domain and other_domain == domain:
+                    duplicate = "EXISTS_IN_SALES"
+                    break
+        intake = "SKIP" if duplicate != "NEW" else (
+            "READY_FOR_MITTELSTAND_GATE" if source_type.startswith("MITTELSTAND_") else "READY_FOR_GATE"
+        )
+        canonical = str(website or f"https://{domain}").strip()
+        update(self, row["row_number"], {
+            "website": canonical,
+            "original_domain": domain,
+            "LF_domain": domain,
+            "LF_website": canonical,
+            "LF_hq_country": hq_country or row.get("LF_hq_country", ""),
+            "LF_normalized_domain": domain,
+            "LF_duplicate_state": duplicate,
+            "LF_intake_status": intake,
+            "LF_history": f"{datetime.now(timezone.utc).isoformat()}|DOMAIN_RESOLVED|{domain}",
+        })
+        return {
+            "status": "RESOLVED", "lead_id": lead_id, "domain": domain,
+            "website": canonical, "duplicate_state": duplicate,
+            "intake_status": intake, "evidence": evidence,
+        }
+
+    def mark_needs_domain(self, lead_id):
+        row = find(self, lead_id=lead_id)
+        if row:
+            update(self, row["row_number"], {
+                "website": "", "original_domain": "", "LF_domain": "", "LF_website": "",
+                "LF_normalized_domain": "", "LF_intake_status": "NEEDS_DOMAIN",
+                "LF_screening_status": "PENDING",
+            })
+
+    def update_raw_screening(self, lead_id, screening_status, gate_version, error="", *, row_number=None):
+        row = find(self, lead_id=lead_id)
+        if not row:
+            raise KeyError(f"lead_not_found:{lead_id}")
+        status = str(screening_status or "").upper()
+        now = datetime.now(timezone.utc).isoformat()
+        changes = {
+            "LF_screening_status": status,
+            "LF_last_screened_at": now,
+            "LF_gate_version": gate_version,
+            "LF_error": error,
+            "LF_history": f"{now}|GATE|{status}",
+        }
+        if status in {"GO", "PASS"}:
+            changes.update({"Status": "未接触", "added_at": now, "LF_intake_status": "PROMOTED_TO_SALES"})
+        elif status in {"NO", "NO-GO", "FAIL"}:
+            changes.update({"Status": "対象外", "LF_intake_status": "SCREENED_NO_GO"})
+        update(self, row["row_number"], changes)
+
+    def append_dict(self, sheet, row):
+        if sheet in {"LeadFactory_MetaLog", "LeadFactory_TriggerSignals", "LeadFactory_ScraperTests", "SalesControl_Events"}:
+            print(f"single-sheet-ssot:{sheet}:{row}", flush=True)
+            return
+        if sheet not in {
+            "LeadFactory_GateResults", "LeadFactory_MittelstandResults",
+            "LeadFactory_ContactResearch", "LeadFactory_MessageDrafts", "LeadFactory_ApprovalQueue",
+        }:
+            if sheet == SSOT:
+                raise RuntimeError("direct_human_ssot_append_blocked:use_single_sheet_pipeline")
+            print(f"single-sheet-ssot:dropped:{sheet}", flush=True)
+            return
+        lead_id = str(row.get("lead_id") or row.get("company_key") or "").strip()
+        target = find(
+            self, lead_id=lead_id,
+            company_name=row.get("company_name") or row.get("original_company") or ""
+        )
+        if not target:
+            return
+        if sheet in {"LeadFactory_GateResults", "LeadFactory_MittelstandResults"}:
+            evidence = row.get("evidence") or row.get("G6_evidence") or row.get("M3_evidence") or ""
+            reason = row.get("most_important_reason") or row.get("selection_reason") or row.get("G6_reason") or row.get("M3_reason") or ""
+            update(self, target["row_number"], {
+                "selection_reason": reason,
+                "research_sources": evidence,
+                "reviewed_at": row.get("evaluated_at") or datetime.now(timezone.utc).isoformat(),
+            })
+            return
+        if sheet == "LeadFactory_ContactResearch":
+            update(self, target["row_number"], {
+                "営業メール宛先": row.get("email") or row.get("contact_email") or row.get("recipient") or "",
+                "営業メール根拠": row.get("evidence") or row.get("reason") or "",
+            })
+            return
+        if sheet == "LeadFactory_MessageDrafts":
+            update(self, target["row_number"], {
+                "営業メール宛先": row.get("to") or row.get("email") or row.get("recipient") or "",
+                "営業メール件名": row.get("subject") or "",
+                "営業メール本文": row.get("body") or row.get("message") or "",
+                "営業メール根拠": row.get("evidence") or row.get("personalization_evidence") or "",
+                "営業メール生成日時": row.get("generated_at") or row.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                "営業メール状態": row.get("status") or row.get("prompt_status") or "DRAFT_READY",
+            })
+            return
+        update(self, target["row_number"], {
+            "営業メール承認": row.get("approved") or row.get("approval") or "FALSE",
+            "営業メール送信可否": row.get("execution_allowed") or "FALSE",
+            "営業メール状態": row.get("status") or "READY",
+        })
+
+    def append(self, sheet, values):
+        if sheet == SSOT:
+            raise RuntimeError("direct_human_ssot_append_blocked:use_single_sheet_pipeline")
+        print(f"single-sheet-ssot:dropped append:{sheet}", flush=True)
+
+    def append_rows(self, sheet, values_rows):
+        if sheet == SSOT:
+            raise RuntimeError("direct_human_ssot_append_blocked:use_single_sheet_pipeline")
+        print(f"single-sheet-ssot:dropped append_rows:{sheet}", flush=True)
+
+    def meta_log(self, row):
+        print(f"single-sheet-ssot:meta:{row}", flush=True)
+
+    def append_runlog(self, row):
+        print(f"single-sheet-ssot:runlog:{row}", flush=True)
+
+    def add_access_request(self, source, reason, required_action):
+        req_id = f"access-{uuid.uuid4()}"
+        print(f"single-sheet-ssot:access:{req_id}:{source.source_name}:{reason}", flush=True)
+        return req_id
+
+    def register_scraper(self, row):
+        return None
+
+    def get_scraper(self, source_id):
+        return None
+
+    def update_scraper_health(self, source_id, **changes):
+        return None
+
+    def append_test(self, row):
+        return None
+
+    def ensure_outreach_schema(self):
+        return None
+
+    def append_contact_research(self, row):
+        append_dict(self, "LeadFactory_ContactResearch", row)
+
+    def append_message_draft(self, row):
+        append_dict(self, "LeadFactory_MessageDrafts", row)
+
+    def append_approval_queue(self, row):
+        append_dict(self, "LeadFactory_ApprovalQueue", row)
+
+    def append_mittelstand_result(self, row):
+        append_dict(self, "LeadFactory_MittelstandResults", row)
+
+    def list_promotable_candidates(self, lane=None):
+        lane_key = str(lane or "").upper()
+        out = []
+        for row in rows(self):
+            result = str(row.get("LF_screening_status") or "").upper()
+            if result not in {"GO", "PASS"}:
+                continue
+            source_type = str(row.get("LF_source_type") or "").upper()
+            if lane_key == "MITTELSTAND" and not source_type.startswith("MITTELSTAND_"):
+                continue
+            if lane_key == "GROWTH" and source_type.startswith("MITTELSTAND_"):
+                continue
+            out.append({
+                "lead_id": row.get("LF_lead_id", ""),
+                "company_name": row.get("company_name") or row.get("LF_company_name", ""),
+                "domain": row.get("LF_domain") or row.get("original_domain", ""),
+                "website": row.get("LF_website") or row.get("website", ""),
+                "hq_country": row.get("LF_hq_country") or row.get("hq_country", ""),
+                "source_type": source_type,
+                "source_name": row.get("LF_source_name") or row.get("source", ""),
+                "final_result": result,
+                "evaluated_at": row.get("LF_last_screened_at", ""),
+                "row_number": row["row_number"],
+            })
+        return out
+
+    def promotion_tick(self, lane=None):
+        candidates = list_promotable_candidates(self, lane)
+        return {
+            "status": "COMPLETE", "eligible": len(candidates), "promoted": 0,
+            "existing": len(candidates), "skipped": 0, "details": [],
+        }
+
+    def outreach_draft_rows(self):
+        out = []
+        for row in rows(self):
+            if str(row.get("営業メール本文") or "").strip():
+                out.append({
+                    "company_key": row.get("LF_lead_id", ""),
+                    "draft_id": row.get("LF_lead_id", ""),
+                    "subject": row.get("営業メール件名", ""),
+                    "body": row.get("営業メール本文", ""),
+                    "status": row.get("営業メール状態", ""),
+                    "row_number": row["row_number"],
+                })
+        return out
+
+    def outreach_queue_rows(self):
+        return outreach_draft_rows(self)
+
+    def outreach_candidates(self, limit=5, lane=None):
+        drafted = {str(x.get("company_key") or "") for x in outreach_draft_rows(self)}
+        out = []
+        for candidate in list_promotable_candidates(self, lane):
+            key = str(candidate.get("lead_id") or "")
+            row = find(self, lead_id=key)
+            if not row or key in drafted or str(row.get("Status") or "") != "未接触":
+                continue
+            out.append(candidate)
+            if len(out) >= max(0, int(limit)):
+                break
+        return out
+
+    def latest_contact(self, company_key):
+        row = find(self, lead_id=company_key)
+        if not row:
+            return None
+        return {
+            "company_key": company_key,
+            "email": row.get("営業メール宛先", ""),
+            "evidence": row.get("営業メール根拠", ""),
+            "row_number": row["row_number"],
+        }
+
+    def count_promoted_leads(self):
+        return sum(
+            1 for row in rows(self)
+            if str(row.get("LF_screening_status") or "").upper() in {"GO", "PASS"}
+        )
+
+    def recent_supply_runlogs(self, lane, limit=10):
+        return []
+
+    cls.update_raw_domain_resolution = update_raw_domain_resolution
+    cls.mark_needs_domain = mark_needs_domain
+    cls.update_raw_screening = update_raw_screening
+    cls.append_dict = append_dict
+    cls.append = append
+    cls.append_rows = append_rows
+    cls.meta_log = meta_log
+    cls.append_runlog = append_runlog
+    cls.add_access_request = add_access_request
+    cls.register_scraper = register_scraper
+    cls.get_scraper = get_scraper
+    cls.update_scraper_health = update_scraper_health
+    cls.append_test = append_test
+    cls.ensure_outreach_schema = ensure_outreach_schema
+    cls.append_contact_research = append_contact_research
+    cls.append_message_draft = append_message_draft
+    cls.append_approval_queue = append_approval_queue
+    cls.append_mittelstand_result = append_mittelstand_result
+    cls.list_promotable_candidates = list_promotable_candidates
+    cls.promotion_tick = promotion_tick
+    cls.outreach_draft_rows = outreach_draft_rows
+    cls.outreach_queue_rows = outreach_queue_rows
+    cls.outreach_candidates = outreach_candidates
+    cls.latest_contact = latest_contact
+    cls.count_promoted_leads = count_promoted_leads
+    cls.recent_supply_runlogs = recent_supply_runlogs
