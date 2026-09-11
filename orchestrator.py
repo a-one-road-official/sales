@@ -42,7 +42,12 @@ def extract(snapshot):
     def add(name, website="", record_url=""):
         name = re.sub(r"\s+", " ", str(name or "")).strip()
         website = str(website or "").strip()
+        lower = name.casefold()
         if len(name) < 2 or len(name) > 240 or name.lower() in seen:
+            return
+        if lower in {"name", "provider", "privacy policy", "cookie", "purpose", "expires after"}:
+            return
+        if any(token in lower for token in ("privacy policy", "cookie policy", "expires after")):
             return
         if not website.startswith(("http://", "https://")):
             website = ""
