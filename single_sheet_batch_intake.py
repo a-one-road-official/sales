@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from datetime import datetime, timezone
 
 
@@ -188,32 +189,45 @@ def append_raw_records_batched(repo, source, records):
             header_index = {str(h): i for i, h in enumerate(headers) if h}
             lead_index = header_index.get("LF_lead_id")
             name_index = header_index.get("company_name", 0)
-            with repo._read_lock:
-                repo._read_cache.clear()
-            readback = repo.read(metrics["target_range"])
             expected_ids = {
                 str(row.get("LF_lead_id") or "").strip()
                 for row in pending
                 if str(row.get("LF_lead_id") or "").strip()
             }
+            written = 0
+            readback_rows = []
             actual_ids = set()
             actual_names = set()
-            for row in readback:
-                padded = list(row) + [""] * max(0, len(headers) - len(row))
-                if lead_index is not None:
-                    value = str(padded[lead_index] or "").strip()
+            for attempt in range(3):
+                with repo._read_lock:
+                    repo._read_cache.clear()
+                readback_rows = repo.read(metrics["target_range"])
+                actual_ids = set()
+                actual_names = set()
+                for row in readback_rows:
+                    padded = list(row) + [""] * max(0, len(headers) - len(row))
+                    if lead_index is not None:
+                        value = str(padded[lead_index] or "").strip()
+                        if value:
+                            actual_ids.add(value)
+                    value = str(padded[name_index] or "").strip()
                     if value:
-                        actual_ids.add(value)
-                value = str(padded[name_index] or "").strip()
-                if value:
-                    actual_names.add(value)
-            written = (
-                len(expected_ids & actual_ids)
-                if lead_index is not None
-                else sum(1 for row in pending if row.get("company_name") in actual_names)
-            )
+                        actual_names.add(value)
+                written = (
+                    len(expected_ids & actual_ids)
+                    if lead_index is not None
+                    else sum(
+                        1 for row in pending
+                        if row.get("company_name") in actual_names
+                    )
+                )
+                if written == len(pending):
+                    break
+                if attempt < 2:
+                    time.sleep(1.0)
             metrics["written_row_count"] = written
-            metrics["readback_row_count"] = len(readback)
+            metrics["readback_row_count"] = len(readback_rows)
+            metrics["readback_attempts"] = attempt + 1
             metrics["readback_match"] = written == len(pending)
             if not metrics["readback_match"]:
                 metrics["error_count"] = 1
