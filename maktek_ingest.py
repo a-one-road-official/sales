@@ -52,6 +52,23 @@ def _clean_company(value: str) -> str:
     return name
 
 
+def _valid_company_name(value: str) -> bool:
+    """Reject navigation/page/booth artifacts before they enter Raw.
+
+    This mirrors the validation-stage pattern used by mature scraping stacks:
+    extraction may be permissive, persistence requires a plausible entity key.
+    """
+    name = _clean_company(value)
+    if len(name) < 2:
+        return False
+    if not any(ch.isalpha() for ch in name):
+        return False
+    # Pure pagination/booth labels occasionally leak from the staging table.
+    if re.fullmatch(r"[\d\s./,#-]+", name):
+        return False
+    return True
+
+
 def _parse_country(prefix: str) -> tuple[str, str]:
     for country in sorted(COUNTRIES, key=len, reverse=True):
         matches = list(re.finditer(rf"\s{re.escape(country)}(?=\s+(?:Brands|Representatives)|$)", prefix, flags=re.I))
@@ -78,7 +95,7 @@ def parse_exhibitors(html: str, page_url: str) -> list[dict]:
         # Everything after company+country is optional brand/representative metadata.
         prefix = re.split(r"\s+(?:Brands|Representatives)\s+", prefix, maxsplit=1, flags=re.I)[0].strip()
         company, country = _parse_country(prefix)
-        if not company:
+        if not _valid_company_name(company):
             continue
         locations = re.findall(
             r"Hall:\s*([^\s]+(?:\s*/\s*[^\s]+)?)\s+Booth:\s*(.+?)(?=(?:\s+Hall:)|$)",
@@ -137,7 +154,7 @@ class MaktekIngestor:
         for raw in rows or []:
             values = list(raw or [])
             company = _clean_company(str(values[0] if values else "").strip())
-            if not company or _norm(company) in {"company", "company name", "company_name"}:
+            if not _valid_company_name(company) or _norm(company) in {"company", "company name", "company_name"}:
                 continue
             country = str(values[1] if len(values) > 1 else "").strip()
             key = _norm(company)
