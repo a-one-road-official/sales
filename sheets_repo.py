@@ -2042,3 +2042,7 @@ class SheetsRepo:
             if len(out) >= max(0, int(limit)):
                 break
         return out
+
+
+from single_sheet_mode import install as _install_single_sheet_mode
+_install_single_sheet_mode(SheetsRepo)
