@@ -412,7 +412,13 @@ class SheetsRepo:
             if sheet == "営業リスト＿Factory/BPO":
                 from promotion_accounting import validate_new_sales_payload
                 for row in rows:
-                    validate_new_sales_payload(row, headers)
+                    is_pipeline_intake = (
+                        str(row.get("record_origin") or "").upper() == "LEADFACTORY"
+                        and str(row.get("LF_screening_status") or "").upper() == "PENDING"
+                        and str(row.get("Status") or "") == "判定中"
+                    )
+                    if not is_pipeline_intake:
+                        validate_new_sales_payload(row, headers)
 
             start = max(2, int(start_row))
             end = start + len(rows) - 1

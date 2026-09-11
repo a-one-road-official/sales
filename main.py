@@ -28,6 +28,9 @@ from outreach_autopilot import BPOAutopilot
 from sacrifice_failure_loop import classify_batch, batch_gate
 from sales_leads_sacrifice_run import run_ten_sacrifice_batch
 from observability import failure_code, record_event
+from sheets_repo import SheetsRepo
+from single_sheet_batch_intake import append_raw_records_batched
+SheetsRepo.append_raw_records = append_raw_records_batched
 
 
 app = FastAPI(title="A-one Lead Factory", version="0.3.2")
