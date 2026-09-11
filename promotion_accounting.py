@@ -180,39 +180,7 @@ def _ledger_sheet_id(repo) -> int | None:
 
 
 def ensure_promotion_ledger(repo) -> dict:
-    sheet_id = _ledger_sheet_id(repo)
-    if sheet_id is None:
-        result = _write(
-            repo,
-            lambda: repo.svc.spreadsheets().batchUpdate(
-                spreadsheetId=repo.spreadsheet_id,
-                body={"requests": [{
-                    "addSheet": {
-                        "properties": {
-                            "title": LEDGER_SHEET,
-                            "hidden": True,
-                            "gridProperties": {"rowCount": 1000, "columnCount": len(LEDGER_HEADERS)},
-                        }
-                    }
-                }]},
-            ).execute(),
-        )
-        replies = result.get("replies", []) if isinstance(result, dict) else []
-        sheet_id = replies[0].get("addSheet", {}).get("properties", {}).get("sheetId") if replies else None
-        if sheet_id is None:
-            sheet_id = _ledger_sheet_id(repo)
-        if sheet_id is None:
-            raise RuntimeError("promotion_ledger_sheet_creation_failed")
-        repo.update_range(f"'{LEDGER_SHEET}'!A1:N1", [LEDGER_HEADERS])
-    else:
-        header_rows = repo.read(f"'{LEDGER_SHEET}'!1:1")
-        if not header_rows or not any(str(x or "").strip() for x in header_rows[0]):
-            repo.update_range(f"'{LEDGER_SHEET}'!A1:N1", [LEDGER_HEADERS])
-    ledger_headers = repo.read(f"'{LEDGER_SHEET}'!1:1")
-    if not ledger_headers or [str(x or "").strip() for x in ledger_headers[0]] != LEDGER_HEADERS:
-        raise RuntimeError("promotion_ledger_schema_invalid")
-    return {"sheet_id": int(sheet_id), "headers": LEDGER_HEADERS}
-
+    return {"sheet_id": None, "headers": LEDGER_HEADERS, "storage": "営業リスト＿Factory/BPO"}
 
 def _ledger_rows(repo) -> list[dict]:
     ensure_promotion_ledger(repo)
