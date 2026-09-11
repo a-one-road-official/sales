@@ -25,7 +25,7 @@ def _is_valid_company_name(value: object, source_type: object = "", source_name:
         return False
     source_kind = str(source_type or "").upper()
     if source_kind.startswith("MITTELSTAND_") and (
-        lower.startswith(("association of ", "federation of ", "working group:", "metal is cool"))
+        lower.startswith(("association ", "federation ", "working group:", "metal is cool"))
         or "campaign for apprentices" in lower
     ):
         return False
