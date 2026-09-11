@@ -173,3 +173,39 @@ def test_failure_codes_are_stable_for_operational_reporting():
     assert failure_code("SandboxError:cloud_run_sandbox_launcher_not_available") == "SANDBOX_UNAVAILABLE"
     assert failure_code("drive_storage_fallback:HttpError:Service Accounts do not have storage quota") == "DRIVE_STORAGE_UNAVAILABLE"
     assert failure_code("HttpError: Range (LeadFactory_Scrapers!Q1) exceeds grid limits") == "SHEETS_SCHEMA"
+
+
+def test_unicode_company_name_generates_country_domains():
+    from domain_tools import company_domain_hints
+
+    hints = company_domain_hints("ZÜMRESOFT YAZILIM HİZMETLERİ LTD. ŞTİ", "Turkey")
+    assert "https://zumresoft.com.tr" in hints
+    assert "https://zumresoft.com" in hints
+
+
+def test_one_token_brand_generates_domain_candidates():
+    from domain_tools import company_domain_hints
+
+    hints = company_domain_hints("ZWSOFT", "China")
+    assert "https://zwsoft.com" in hints
+
+
+def test_multi_query_ranker_rewards_repeated_high_rank_host():
+    from domain_ranker import rank_search_candidates
+
+    company = {
+        "company_name": "Acme Robotics GmbH",
+        "hq_country": "Germany",
+        "product_category": "industrial robotics",
+    }
+    results = [
+        {"query_type": "Q1", "rank": 1, "url": "https://acmerobotics.de", "title": "Acme Robotics GmbH", "snippet": "Industrial robotics Germany"},
+        {"query_type": "Q2", "rank": 1, "url": "https://www.acmerobotics.de/about", "title": "Acme Robotics | About", "snippet": "Official company website"},
+        {"query_type": "Q3", "rank": 2, "url": "https://acmerobotics.de/products", "title": "Acme Robotics products", "snippet": "Industrial robotics"},
+        {"query_type": "Q1", "rank": 2, "url": "https://directory.example/acme", "title": "Acme Robotics directory", "snippet": "Germany"},
+    ]
+    ranked = rank_search_candidates(company, results, {"directory.example"})
+    assert ranked
+    assert ranked[0].domain == "acmerobotics.de"
+    assert ranked[0].features["query_count"] == 3
+    assert ranked[0].score > 0.5
