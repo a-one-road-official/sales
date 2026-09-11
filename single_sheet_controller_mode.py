@@ -12,9 +12,13 @@ def install(cls):
         return cfg
 
     def _set_config(self, values):
+        rendered = {str(k): str(v) for k, v in values.items()}
         current = dict(getattr(self, "_runtime_goal_config", {}))
-        current.update({str(k): str(v) for k, v in values.items()})
+        current.update(rendered)
         self._runtime_goal_config = current
+        backing = getattr(self.sheets, "config", None)
+        if isinstance(backing, dict):
+            backing.update(rendered)
 
     def _queue_counts(self):
         rows = self.sheets._single_ssot_rows() if hasattr(self.sheets, "_single_ssot_rows") else []
