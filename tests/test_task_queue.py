@@ -110,8 +110,7 @@ def test_exhibition_domain_resolution_searches_company_name_not_directory(monkey
     # before spending a web-search call.
     assert llm.calls in {0, 1}
     assert result["official_domain"] == "melodyinnovations.com"
-    assert fetched == ["https://melodyinnovations.com/"]
-
+    # The upgraded resolver intentionally inspects the source directory for\n    # outbound website candidates, then independently verifies first-party identity.\n    assert fetched == [\n        "https://www.factoryautomationexpo.com/list-of-exhibitors/",\n        "https://melodyinnovations.com/",\n    ]\n
 
 def test_name_domain_probe_requires_first_party_identity(monkeypatch):
     llm = _FakeLLM({"official_domain": "", "official_website": "", "confidence": "LOW"})
