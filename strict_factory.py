@@ -16,6 +16,13 @@ from safe_fetch import TrustedFetcher
 from source_universe import for_lane as bootstrap_sources_for_lane
 from task_queue import TaskDispatcher
 from observability import failure_code, record_event
+from domain_tools import (
+    candidate_identity_score,
+    company_domain_hints,
+    company_tokens,
+    registrable_domain,
+    source_record_candidates,
+)
 
 
 THIRD_PARTY_HOSTS = {
@@ -125,42 +132,37 @@ class OfficialSiteResolver:
 
     @staticmethod
     def _name_domain_candidates(company: dict) -> list[str]:
-        """Build low-risk domain-shaped hints for a second-pass HTTP check.
+        """Build Unicode-aware first-party domain hints.
 
-        These are only probes. `_verify` must establish first-party identity before
-        any candidate is accepted, so a guessed domain can never become SSOT data
-        by itself.
+        One-token brands are supported. Every hint remains a probe and must pass
+        first-party verification before it can reach Gate.
         """
-        tokens = _tokens(company.get("company_name", ""))
-        if len(tokens) < 2:
-            return []
-        slug = "".join(tokens)
-        dashed = "-".join(tokens)
-        country = str(company.get("hq_country") or "").strip().lower()
-        suffixes = [".com"]
-        country_suffixes = {
-            "india": [".in", ".co.in"],
-            "germany": [".de"],
-            "austria": [".at"],
-            "italy": [".it"],
-            "netherlands": [".nl"],
-            "switzerland": [".ch"],
-            "france": [".fr"],
-            "united kingdom": [".co.uk"],
-            "uk": [".co.uk"],
-            "japan": [".co.jp"],
-            "taiwan": [".tw"],
-        }
-        suffixes[0:0] = country_suffixes.get(country, [])
-        out = []
-        for base in (slug, dashed):
-            if not base:
-                continue
-            for suffix in suffixes:
-                candidate = f"https://{base}{suffix}"
-                if candidate not in out:
-                    out.append(candidate)
-        return out[:8]
+        return company_domain_hints(
+            str(company.get("company_name") or ""),
+            str(company.get("hq_country") or ""),
+            limit=18,
+        )
+
+    def _directory_candidates(self, company: dict) -> tuple[list[str], list[str]]:
+        """Recover likely official links exposed by exhibitor/member directories."""
+        record_url = str(company.get("source_record_url") or company.get("source_url") or "").strip()
+        if not record_url.startswith(("http://", "https://")):
+            return [], []
+        try:
+            snap = self._fetch(record_url, 1)
+        except Exception as exc:
+            return [], [f"source_record_fetch:{type(exc).__name__}"]
+        if int(getattr(snap, "status_code", 500) or 500) >= 400:
+            return [], [f"source_record_http_{getattr(snap, 'status_code', 500)}"]
+        urls = source_record_candidates(
+            record_url,
+            str(getattr(snap, "text", "") or ""),
+            str(company.get("company_name") or ""),
+            THIRD_PARTY_HOSTS,
+            source_host=_host(record_url),
+            limit=12,
+        )
+        return urls, []
 
     def _verify(self, company: dict, url: str, source_direct: bool = False) -> dict:
         h = _host(url)
@@ -181,109 +183,131 @@ class OfficialSiteResolver:
         if not final_host or _blocked(final_host) or self._same_source_host(final_url, company):
             return {"verified": False, "reason": "redirect_not_first_party"}
 
-        company_tokens = _tokens(company.get("company_name", ""))
-        host_flat = final_host.replace("-", "").replace("_", "")
-        host_hits = [t for t in company_tokens if t in host_flat]
+        tokens = _tokens(company.get("company_name", ""))
+        host_flat = registrable_domain(final_host).replace("-", "").replace("_", "")
+        host_hits = [t for t in tokens if len(t) >= 4 and t in host_flat]
         text = _visible_text(getattr(snap, "text", ""))[:160000].lower()
-        text_hits = [t for t in company_tokens if re.search(rf"\b{re.escape(t)}\b", text)]
-        score = (3 if host_hits else 0) + (2 if text_hits else 0) + (2 if source_direct else 0)
+        text_hits = [t for t in tokens if len(t) >= 4 and re.search(rf"\b{re.escape(t)}\b", text)]
+        legacy_score = (3 if host_hits else 0) + (2 if text_hits else 0) + (2 if source_direct else 0)
+        identity_score, identity_reasons = candidate_identity_score(
+            str(company.get("company_name") or ""),
+            final_url,
+            str(getattr(snap, "text", "") or ""),
+        )
         country = str(company.get("hq_country") or "").strip().lower()
         if country and country in text:
-            score += 1
-        verified = bool(host_hits or text_hits) and score >= 4
+            legacy_score += 1
+        score = max(legacy_score, identity_score + (2 if source_direct else 0))
+        verified = score >= 4 and bool(host_hits or text_hits or identity_reasons)
         return {
             "verified": verified,
-            "official_domain": final_host if verified else "",
+            "official_domain": registrable_domain(final_host) if verified else "",
             "official_website": final_url if verified else "",
             "confidence": "HIGH" if verified else "LOW",
             "reason": "verified_first_party_identity" if verified else "insufficient_first_party_identity",
-            "evidence": [final_url],
+            "evidence": [final_url] + identity_reasons,
         }
 
     def resolve(self, company: dict) -> dict:
+        """Resolve first-party sites with cheap/high-signal paths before web search."""
         candidates: list[tuple[str, bool, str]] = []
+        rejected: list[str] = []
         search_research: dict = {}
+
         existing = str(company.get("website") or company.get("domain") or "").strip()
-        exhibition = self._is_exhibition(company)
-        if existing and not exhibition:
+        if existing:
             if not existing.startswith(("http://", "https://")):
                 existing = "https://" + existing
             candidates.append((existing, False, "raw_candidate"))
 
-        # For exhibitor sources, the source page is intentionally not crawled for
-        # company URLs. It remains in the candidate context as provenance only.
+        directory_urls, directory_errors = self._directory_candidates(company)
+        rejected.extend(directory_errors)
+        for value in directory_urls:
+            candidates.append((value, True, "source_directory_outbound"))
+
+        for value in self._name_domain_candidates(company):
+            candidates.append((value, False, "name_domain_probe"))
+
+        def verify_candidates(items: list[tuple[str, bool, str]]) -> dict | None:
+            seen: set[str] = set()
+            for url, source_direct, origin in items:
+                h = _host(url)
+                rd = registrable_domain(h)
+                if not h or not rd or rd in seen:
+                    continue
+                seen.add(rd)
+                result = self._verify(company, url, source_direct=source_direct)
+                if result.get("verified"):
+                    return {
+                        "official_domain": result["official_domain"],
+                        "official_website": result["official_website"],
+                        "hq_country": company.get("hq_country", ""),
+                        "confidence": "HIGH",
+                        "verification": "VERIFIED_FIRST_PARTY",
+                        "evidence": [origin] + list(result.get("evidence", [])),
+                    }
+                rejected.append(f"{origin}:{rd}:{result.get('reason', 'rejected')}")
+            return None
+
+        deterministic = verify_candidates(candidates)
+        if deterministic:
+            return deterministic
+
+        # Fresh search is reserved for the unresolved tail. Multiple candidates
+        # are consumed from one search call to reduce repeated model/search cost.
+        search_candidates: list[tuple[str, bool, str]] = []
         if self.llm is not None:
             try:
                 search_research = self.llm.resolve_company_domain(company)
+                raw_candidates = search_research.get("candidates")
+                if isinstance(raw_candidates, list):
+                    for item in raw_candidates:
+                        value = str(item.get("url") if isinstance(item, dict) else item or "").strip()
+                        if value:
+                            if not value.startswith(("http://", "https://")):
+                                value = "https://" + value
+                            search_candidates.append((value, False, "company_name_web_search_candidate"))
                 for key in ("official_website", "official_domain"):
                     value = str(search_research.get(key) or "").strip()
                     if value:
                         if not value.startswith(("http://", "https://")):
                             value = "https://" + value
-                        candidates.append((value, False, "company_name_web_search"))
-            except Exception:
-                pass
+                        search_candidates.append((value, False, "company_name_web_search"))
+            except Exception as exc:
+                rejected.append(f"company_name_web_search_error:{type(exc).__name__}")
 
-        # A name-shaped domain is only a bounded second pass after web search. It
-        # is never accepted without a first-party content check in `_verify`.
-        for value in self._name_domain_candidates(company):
-            candidates.append((value, False, "name_domain_probe"))
+        searched = verify_candidates(search_candidates)
+        if searched:
+            return searched
 
-        if existing and exhibition:
-            # An exhibition row may carry a prefilled domain from a separate
-            # authoritative signal. Verify it, but do not treat the exhibitor page
-            # as the reason it is trusted.
-            if not existing.startswith(("http://", "https://")):
-                existing = "https://" + existing
-            candidates.append((existing, False, "raw_candidate"))
-
-        seen: set[str] = set()
-        rejected: list[str] = []
-        for url, source_direct, origin in candidates:
-            h = _host(url)
-            if not h or h in seen:
-                continue
-            seen.add(h)
-            result = self._verify(company, url, source_direct=source_direct)
-            if result.get("verified"):
+        confidence = str(search_research.get("confidence") or "").upper()
+        evidence = search_research.get("evidence")
+        selected = str(search_research.get("official_website") or search_research.get("official_domain") or "").strip()
+        selected_host = _host(selected)
+        if confidence == "HIGH" and selected_host and evidence and not _blocked(selected_host):
+            selected_rd = registrable_domain(selected_host)
+            matching_fetch_failure = any(
+                ("company_name_web_search" in item and selected_rd in item and ":fetch:" in item)
+                for item in rejected
+            )
+            if matching_fetch_failure:
+                official = selected if selected.startswith(("http://", "https://")) else "https://" + selected
                 return {
-                    "official_domain": result["official_domain"],
-                    "official_website": result["official_website"],
-                    "hq_country": company.get("hq_country", ""),
-                    "confidence": "HIGH",
-                    "verification": "VERIFIED_FIRST_PARTY",
-                    "evidence": [origin] + list(result.get("evidence", [])),
-                }
-            # A search result can be conclusive while the Cloud Run egress path
-            # is temporarily unable to fetch the candidate site. Keep that row
-            # moving when the model returned the exact candidate, HIGH confidence,
-            # and a source URL; guessed name-shaped domains never use this path.
-            if (
-                origin == "company_name_web_search"
-                and str(search_research.get("confidence") or "").upper() == "HIGH"
-                and str(result.get("reason") or "").startswith("fetch:")
-                and _host(str(search_research.get("official_website") or search_research.get("official_domain") or "")) == h
-                and search_research.get("evidence")
-            ):
-                official = str(search_research.get("official_website") or url).strip()
-                if not official.startswith(("http://", "https://")):
-                    official = "https://" + official
-                return {
-                    "official_domain": h,
+                    "official_domain": selected_rd,
                     "official_website": official,
                     "hq_country": company.get("hq_country", ""),
                     "confidence": "HIGH",
                     "verification": "VERIFIED_BY_COMPANY_NAME_SEARCH",
-                    "evidence": [origin] + [str(x) for x in search_research.get("evidence", [])] + [str(result.get("reason"))],
+                    "evidence": ["company_name_web_search"] + [str(x) for x in evidence],
                 }
-            rejected.append(f"{origin}:{h}:{result.get('reason', 'rejected')}")
+
         return {
             "official_domain": "",
             "official_website": "",
             "hq_country": company.get("hq_country", ""),
             "confidence": "LOW",
             "verification": "UNRESOLVED_OFFICIAL_SITE",
-            "evidence": rejected[:20] or ["no_official_site_candidate"],
+            "evidence": rejected[:40] or ["no_official_site_candidate"],
         }
 
     def verify_existing(self, company: dict) -> dict:
