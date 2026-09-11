@@ -553,3 +553,113 @@ def install(cls):
     cls.latest_contact = latest_contact
     cls.count_promoted_leads = count_promoted_leads
     cls.recent_supply_runlogs = recent_supply_runlogs
+
+
+    raw_headers = [
+        "lead_id","company_name","domain","website","hq_country","source_type","source_name",
+        "source_url","source_record_url","discovered_at","last_seen_at","screening_status",
+        "last_screened_at","gate_version","error","normalized_domain","duplicate_state","intake_status",
+    ]
+
+    def read(self, range_):
+        ref = str(range_ or "").replace("'", "")
+        if ref.startswith("Config!"):
+            return [[k, v] for k, v in sorted(get_config(self).items())]
+        if ref.startswith("LeadFactory_Raw!"):
+            if "1:1" in ref:
+                return [raw_headers]
+            data = []
+            for row in rows(self):
+                if not str(row.get("LF_lead_id") or "").strip():
+                    continue
+                data.append([
+                    row.get("LF_lead_id", ""),
+                    row.get("company_name") or row.get("LF_company_name", ""),
+                    row.get("LF_domain", ""),
+                    row.get("LF_website") or row.get("website", ""),
+                    row.get("LF_hq_country") or row.get("hq_country", ""),
+                    row.get("LF_source_type", ""),
+                    row.get("LF_source_name", ""),
+                    row.get("LF_source_url", ""),
+                    row.get("LF_source_record_url", ""),
+                    row.get("LF_discovered_at", ""),
+                    row.get("LF_last_seen_at", ""),
+                    row.get("LF_screening_status", ""),
+                    row.get("LF_last_screened_at", ""),
+                    row.get("LF_gate_version", ""),
+                    row.get("LF_error", ""),
+                    row.get("LF_normalized_domain", ""),
+                    row.get("LF_duplicate_state", ""),
+                    row.get("LF_intake_status", ""),
+                ])
+            return data
+        if ref.startswith("LeadFactory_Sources!"):
+            source_headers = [
+                "source_id","source_type","source_name","source_url","country","event_year",
+                "exhibitor_directory_url","first_discovered_at","last_crawled_at","crawl_status",
+                "exhibitor_count","last_error",
+            ]
+            if "1:1" in ref:
+                return [source_headers]
+            return [[
+                s.source_id, s.source_type, s.source_name, s.source_url, s.country,
+                s.event_year or "", s.exhibitor_directory_url or s.source_url, "", "",
+                s.crawl_status or "READY", s.exhibitor_count or "", s.last_error or "",
+            ] for s in list_sources(self)]
+        if ref.startswith((
+            "LeadFactory_GateResults!", "LeadFactory_MittelstandResults!", "LeadFactory_RunLog!",
+            "LeadFactory_MetaLog!", "LeadFactory_Suppressions!", "LeadFactory_Scrapers!",
+            "LeadFactory_ScraperTests!", "LeadFactory_AccessRequests!", "LeadFactory_TriggerSignals!",
+            "LeadFactory_ContactResearch!", "LeadFactory_MessageDrafts!", "LeadFactory_ApprovalQueue!",
+            "LeadFactory_PromotionLedger!", "LeadFactory_ExecutionLog!", "LeadFactory_ExecutionBatches!",
+            "SalesControl_Events!",
+        )):
+            return []
+        return native_read(self, range_)
+
+    native_update_range = cls.update_range
+
+    def update_range(self, range_, values):
+        ref = str(range_ or "").replace("'", "")
+        if ref.startswith("Config!"):
+            return None
+        if ref.startswith("LeadFactory_"):
+            print(f"single-sheet-ssot:dropped update:{ref}", flush=True)
+            return None
+        return native_update_range(self, range_, values)
+
+    def update_message_draft(self, draft_id, changes):
+        row = find(self, lead_id=draft_id)
+        if not row:
+            return False
+        mapped = {}
+        if "subject" in changes:
+            mapped["営業メール件名"] = changes["subject"]
+        if "body" in changes:
+            mapped["営業メール本文"] = changes["body"]
+        if "status" in changes:
+            mapped["営業メール状態"] = changes["status"]
+        if "prompt_status" in changes:
+            mapped["営業メール状態"] = changes["prompt_status"]
+        update(self, row["row_number"], mapped)
+        return True
+
+    def update_approval_queue_for_draft(self, draft_id, changes):
+        row = find(self, lead_id=draft_id)
+        if not row:
+            return False
+        update(self, row["row_number"], {
+            "営業メール承認": changes.get("approved") or changes.get("approval") or "",
+            "営業メール送信可否": changes.get("execution_allowed") or "",
+            "営業メール状態": changes.get("status") or "",
+        })
+        return True
+
+    def operational_event_summary(self, limit=5000):
+        return {"events_scanned": 0, "event_counts": {}, "failure_counts": {}, "last_events": []}
+
+    cls.read = read
+    cls.update_range = update_range
+    cls.update_message_draft = update_message_draft
+    cls.update_approval_queue_for_draft = update_approval_queue_for_draft
+    cls.operational_event_summary = operational_event_summary
