@@ -371,10 +371,7 @@ class StrictGateWorker(GateWorker):
     def process_company(self, company: dict) -> dict:
         verification = self.resolver.verify_existing(company)
         if not verification.get("verified"):
-            row = int(company.get("row_number") or 0)
-            if row > 0:
-                self.sheets.update_range(f"LeadFactory_Raw!C{row}:D{row}", [["", ""]])
-                self.sheets.update_range(f"LeadFactory_Raw!R{row}", [["NEEDS_DOMAIN"]])
+            self.sheets.mark_needs_domain(str(company.get("lead_id") or ""))
             return {"lead_id": company.get("lead_id", ""), "final_result": "REQUEUED_NEEDS_OFFICIAL_SITE"}
         canonical = dict(company)
         canonical["domain"] = verification.get("official_domain", "")
