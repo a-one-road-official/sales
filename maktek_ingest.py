@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from safe_fetch import TrustedFetcher
+from models import Source
 
 
 BASE_URL = "https://www.maktekfuari.com/en/exhibitor-list"
@@ -220,78 +221,24 @@ class MaktekIngestor:
         return list(records.values()), final_page
 
     def _append_raw(self, records: list[dict], sales_names: set[str]) -> tuple[int, int]:
-        headers_rows = self.sheets.read("LeadFactory_Raw!1:1")
-        if not headers_rows:
-            raise RuntimeError("missing_header:LeadFactory_Raw")
-        headers = headers_rows[0]
-        existing = self.sheets.read("LeadFactory_Raw!A2:G")
-        existing_maktek = {
-            _norm((r + [""] * 7)[1])
-            for r in existing
-            if str((r + [""] * 7)[6]).strip() == SOURCE_NAME
-        }
-        now = datetime.now(timezone.utc).isoformat()
-        new_rows = []
-        skipped = 0
-        for rec in records:
-            key = _norm(rec["company_name"])
-            if key in existing_maktek:
-                skipped += 1
-                continue
-            lead_id = "lead-maktek2026-" + hashlib.sha256(key.encode()).hexdigest()[:20]
-            row = {
-                "lead_id": lead_id,
-                "company_name": rec["company_name"],
-                "domain": "",
-                "website": "",
-                "hq_country": rec.get("hq_country", ""),
-                "source_type": "EXHIBITION",
-                "source_name": SOURCE_NAME,
-                "source_url": BASE_URL,
-                "source_record_url": rec.get("source_record_url") or rec.get("source_page_url") or BASE_URL,
-                "discovered_at": now,
-                "last_seen_at": now,
-                "screening_status": "PENDING",
-                "normalized_domain": "",
-                "duplicate_state": "EXISTS_IN_SALES" if key in sales_names else "NEW",
-                "intake_status": "NEEDS_DOMAIN",
-                "job_id": "maktek2026-full-ingest",
-                "run_id": "maktek2026-full-ingest",
-                "worker": "deterministic_maktek_ingestor",
-                "checkpoint": "FULL_DIRECTORY_CAPTURED",
-            }
-            ordered = [row.get(h, "") for h in headers]
-            mapped = dict(zip(headers, ordered))
-            if (
-                mapped.get("source_name") != SOURCE_NAME
-                or mapped.get("source_type") != "EXHIBITION"
-                or mapped.get("screening_status") != "PENDING"
-                or mapped.get("intake_status") != "NEEDS_DOMAIN"
-                or mapped.get("job_id") != "maktek2026-full-ingest"
-                or mapped.get("run_id") != "maktek2026-full-ingest"
-            ):
-                raise RuntimeError("raw_schema_mapping_guard_failed")
-            new_rows.append(ordered)
-        if new_rows:
-            # Write the operational A:R contract at an explicit row. Using a
-            # wide A:ZZ append on this legacy sheet can extend grid rowCount
-            # without making the first 18 business columns readable to the
-            # domain/gate workers.
-            visible_rows = [row[:18] for row in new_rows]
-            start_row = len(existing) + 2
-            end_row = start_row + len(visible_rows) - 1
-            operation = lambda: self.sheets.svc.spreadsheets().values().update(
-                spreadsheetId=self.sheets.spreadsheet_id,
-                range=f"LeadFactory_Raw!A{start_row}:R{end_row}",
-                valueInputOption="RAW",
-                body={"values": visible_rows},
-            ).execute()
-            executor = getattr(self.sheets, "_execute_write", None)
-            if callable(executor):
-                executor(operation)
-            else:
-                operation()
-        return len(new_rows), skipped
+        source = Source(
+            source_id=SOURCE_ID,
+            source_type="EXHIBITION",
+            source_name=SOURCE_NAME,
+            source_url=BASE_URL,
+            country="Türkiye",
+            event_year="2026",
+            exhibitor_directory_url=BASE_URL,
+            crawl_status="READY",
+        )
+        payload = [{
+            "company_name": rec["company_name"],
+            "website": "",
+            "domain": "",
+            "hq_country": rec.get("hq_country", ""),
+            "source_record_url": rec.get("source_record_url") or rec.get("source_page_url") or BASE_URL,
+        } for rec in records]
+        return self.sheets.append_raw_records(source, payload)
 
     def _upsert_human(self, records: list[dict]) -> tuple[int, int]:
         raise RuntimeError(
