@@ -9,6 +9,29 @@ from datetime import datetime, timezone
 SSOT = "営業リスト＿Factory/BPO"
 
 
+def _is_valid_company_name(value: object, source_type: object = "", source_name: object = "") -> bool:
+    """Reject directory UI metadata and non-company association labels at intake."""
+    name = " ".join(str(value or "").strip().split())
+    lower = name.casefold()
+    if len(name) < 2 or len(name) > 240:
+        return False
+    exact_noise = {
+        "name", "provider", "privacy policy", "cookie", "purpose",
+        "expires after", "brands", "representatives", "review in detail",
+    }
+    if lower in exact_noise:
+        return False
+    if any(token in lower for token in ("privacy policy", "cookie policy", "expires after")):
+        return False
+    source_kind = str(source_type or "").upper()
+    if source_kind.startswith("MITTELSTAND_") and (
+        lower.startswith(("association of ", "federation of ", "working group:", "metal is cool"))
+        or "campaign for apprentices" in lower
+    ):
+        return False
+    return any(ch.isalpha() for ch in name)
+
+
 def _emit(metrics: dict) -> None:
     print(
         "LEAD_FACTORY_INTAKE_METRICS "
@@ -49,6 +72,7 @@ def append_raw_records_batched(repo, source, records):
     duplicates = 0
     candidate_count = 0
     dropped_missing_name = 0
+    dropped_invalid_name = 0
     duplicate_examples = []
     decision_examples = []
 
@@ -56,6 +80,9 @@ def append_raw_records_batched(repo, source, records):
         name = str(rec.get("company_name") or "").strip()
         if not name:
             dropped_missing_name += 1
+            continue
+        if not _is_valid_company_name(name, source.source_type, source.source_name):
+            dropped_invalid_name += 1
             continue
         candidate_count += 1
         name_key = repo._normalize_name(name)
@@ -144,6 +171,7 @@ def append_raw_records_batched(repo, source, records):
         "written_row_count": 0,
         "error_count": 0,
         "dropped_missing_name": dropped_missing_name,
+        "dropped_invalid_name": dropped_invalid_name,
         "duplicate_examples": duplicate_examples,
         "decision_examples": decision_examples,
         "readback_match": False,
