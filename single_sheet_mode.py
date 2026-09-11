@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -14,7 +15,40 @@ SSOT = "営業リスト＿Factory/BPO"
 def install(cls):
     native_read = cls.read
 
+    def enforce_sheet_contract(self):
+        now = time.monotonic()
+        last = float(getattr(self, "_sheet_contract_checked_at", 0.0) or 0.0)
+        if now - last < 120:
+            return
+        self._sheet_contract_checked_at = now
+        try:
+            meta = self.svc.spreadsheets().get(
+                spreadsheetId=self.spreadsheet_id,
+                fields="sheets(properties(sheetId,title,hidden))",
+            ).execute()
+            hidden = [
+                item.get("properties", {})
+                for item in meta.get("sheets", [])
+                if item.get("properties", {}).get("hidden")
+            ]
+            machine_prefixes = ("LeadFactory_", "SalesOS_", "SalesControl_", "DEPRECATED_", "__TMP_")
+            delete_ids = [
+                int(p["sheetId"]) for p in hidden
+                if str(p.get("title") or "").startswith(machine_prefixes)
+            ]
+            survivors = [p for p in hidden if int(p.get("sheetId", -1)) not in set(delete_ids)]
+            if len(survivors) > 2:
+                delete_ids.extend(int(p["sheetId"]) for p in survivors[2:])
+            if delete_ids:
+                self._execute_write(lambda: self.svc.spreadsheets().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body={"requests": [{"deleteSheet": {"sheetId": sid}} for sid in sorted(set(delete_ids))]},
+                ).execute())
+        except Exception as exc:
+            print(f"single-sheet-ssot:sheet-contract-warning:{type(exc).__name__}:{exc}", flush=True)
+
     def get_config(self):
+        enforce_sheet_contract(self)
         cfg = {
             "LEAD_FACTORY_HUMAN_SSOT_SHEET": SSOT,
             "LEAD_FACTORY_HUMAN_APPEND_MIN_ROW": "2",
@@ -274,6 +308,7 @@ def install(cls):
     def list_pending_mittelstand(self, limit=20):
         return lf_candidates(self, {"READY_FOR_MITTELSTAND_GATE"}, limit, "MITTELSTAND")
 
+    cls.enforce_sheet_contract = enforce_sheet_contract
     cls.get_config = get_config
     cls.invalidate_config_cache = lambda self: None
     cls._single_ssot_headers = headers
