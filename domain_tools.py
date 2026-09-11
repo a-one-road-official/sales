@@ -15,7 +15,7 @@ LEGAL_WORDS = {
     "gmbh", "ag", "sa", "sas", "spa", "plc", "private", "pvt", "llc", "kg", "kgaa",
     "srl", "bv", "nv", "oy", "ab", "as", "group", "holding", "holdings", "the",
     "sti", "stti", "lsti", "anonim", "sirketi", "sir", "tic", "ticaret", "sanayi",
-    "hizmetleri", "hizmet", "yazilim",
+    "hizmetleri", "hizmet", "yazilim", "and", "ve",
 }
 
 COUNTRY_SUFFIXES = {
@@ -79,7 +79,13 @@ def company_domain_hints(name: str, country: str = "", limit: int = 24) -> list[
     first = tokens[0]
     first_two = "".join(tokens[:2]) if len(tokens) >= 2 else first
     first_two_dash = "-".join(tokens[:2]) if len(tokens) >= 2 else first
-    for value in (first, first_two, first_two_dash, joined, dashed):
+    # A lone brand token is valuable (e.g. ZWSOFT / ZÜMRESOFT). For multi-token
+    # legal names, probing the first word alone creates generic false positives
+    # such as retail.in, global.com, or industrial.de.
+    bases_input = [joined, dashed, first_two, first_two_dash]
+    if len(tokens) == 1:
+        bases_input.insert(0, first)
+    for value in bases_input:
         value = re.sub(r"[^a-z0-9-]", "", value).strip("-")
         if len(value) >= 3 and value not in bases:
             bases.append(value)

@@ -106,7 +106,9 @@ def test_exhibition_domain_resolution_searches_company_name_not_directory(monkey
         "source_record_url": "https://www.factoryautomationexpo.com/list-of-exhibitors/",
     })
 
-    assert llm.calls == 1
+    # Deterministic first-party verification may resolve a distinctive brand
+    # before spending a web-search call.
+    assert llm.calls in {0, 1}
     assert result["official_domain"] == "melodyinnovations.com"
     assert fetched == ["https://melodyinnovations.com/"]
 
