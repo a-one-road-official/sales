@@ -180,39 +180,7 @@ def _ledger_sheet_id(repo) -> int | None:
 
 
 def ensure_promotion_ledger(repo) -> dict:
-    sheet_id = _ledger_sheet_id(repo)
-    if sheet_id is None:
-        result = _write(
-            repo,
-            lambda: repo.svc.spreadsheets().batchUpdate(
-                spreadsheetId=repo.spreadsheet_id,
-                body={"requests": [{
-                    "addSheet": {
-                        "properties": {
-                            "title": LEDGER_SHEET,
-                            "hidden": True,
-                            "gridProperties": {"rowCount": 1000, "columnCount": len(LEDGER_HEADERS)},
-                        }
-                    }
-                }]},
-            ).execute(),
-        )
-        replies = result.get("replies", []) if isinstance(result, dict) else []
-        sheet_id = replies[0].get("addSheet", {}).get("properties", {}).get("sheetId") if replies else None
-        if sheet_id is None:
-            sheet_id = _ledger_sheet_id(repo)
-        if sheet_id is None:
-            raise RuntimeError("promotion_ledger_sheet_creation_failed")
-        repo.update_range(f"'{LEDGER_SHEET}'!A1:N1", [LEDGER_HEADERS])
-    else:
-        header_rows = repo.read(f"'{LEDGER_SHEET}'!1:1")
-        if not header_rows or not any(str(x or "").strip() for x in header_rows[0]):
-            repo.update_range(f"'{LEDGER_SHEET}'!A1:N1", [LEDGER_HEADERS])
-    ledger_headers = repo.read(f"'{LEDGER_SHEET}'!1:1")
-    if not ledger_headers or [str(x or "").strip() for x in ledger_headers[0]] != LEDGER_HEADERS:
-        raise RuntimeError("promotion_ledger_schema_invalid")
-    return {"sheet_id": int(sheet_id), "headers": LEDGER_HEADERS}
-
+    return {"sheet_id": None, "headers": LEDGER_HEADERS, "storage": "営業リスト＿Factory/BPO"}
 
 def _ledger_rows(repo) -> list[dict]:
     ensure_promotion_ledger(repo)
@@ -375,4 +343,94 @@ def accounting_snapshot(repo, baseline: int, start_at: str | None) -> dict:
         "promotion_ledger_rows": reconciliation.get("ledger_rows", 0),
         "promotion_ledger_backfilled": reconciliation.get("backfilled", 0),
         "sales_schema_hash": sales_schema_hash(_sales_headers(repo)[1]),
+    }
+
+
+# Single-sheet SSOT accounting: no PromotionLedger tab is created.
+def ensure_promotion_ledger(repo) -> dict:
+    return {"sheet_id": None, "headers": LEDGER_HEADERS, "storage": "営業リスト＿Factory/BPO"}
+
+
+def _ledger_rows(repo) -> list[dict]:
+    out = []
+    for row_number, row, sheet, headers in iter_sales_rows(repo):
+        if _text(row.get("record_origin")).upper() != "LEADFACTORY":
+            continue
+        gate = _text(row.get("LF_screening_status")).upper()
+        if gate not in {"GO", "PASS"}:
+            continue
+        out.append({
+            "promotion_key": _promotion_key(row),
+            "lead_id": _text(row.get("LF_lead_id")),
+            "company_name": _text(row.get("company_name")),
+            "domain": _domain(row.get("original_domain") or row.get("website")),
+            "lane": _lane(row),
+            "gate_result": gate,
+            "source_type": _text(row.get("LF_source_type")),
+            "source_name": _text(row.get("LF_source_name") or row.get("source")),
+            "promoted_at": _text(row.get("added_at")),
+            "sales_sheet": sheet,
+            "sales_row": str(row_number),
+            "status": "PROMOTED",
+            "sales_schema_hash": sales_schema_hash(headers),
+            "reason": "single_sheet_ssot",
+            "_row_number": row_number,
+        })
+    return out
+
+
+def record_promotion(repo, candidate: dict, result: dict, *, status: str = "PROMOTED", reason: str = "") -> dict:
+    key = _promotion_key(candidate)
+    return {
+        "status": "SSOT_ROW_IS_LEDGER",
+        "promotion_key": key,
+        "ledger_row": result.get("row_number") or candidate.get("row_number"),
+    }
+
+
+def reconcile_promotion_ledger(repo) -> dict:
+    rows = _ledger_rows(repo)
+    return {"backfilled": 0, "ledger_rows": len(rows), "storage": "営業リスト＿Factory/BPO"}
+
+
+def ledger_unique_since(repo, start_at: str | None) -> int:
+    start = _parse_datetime(start_at or "") if start_at else None
+    keys = set()
+    for row in _ledger_rows(repo):
+        timestamp = _parse_datetime(row.get("promoted_at"))
+        if start is not None and (timestamp is None or timestamp < start):
+            continue
+        key = _text(row.get("promotion_key"))
+        if key:
+            keys.add(key)
+    return len(keys)
+
+
+def count_valid_qualified_ssot(repo) -> int:
+    total = 0
+    for _, row, _, _ in iter_sales_rows(repo):
+        if not is_countable_sales_row(row):
+            continue
+        if _text(row.get("record_origin")).upper() == "LEADFACTORY":
+            if _text(row.get("LF_screening_status")).upper() not in {"GO", "PASS"}:
+                continue
+        total += 1
+    return total
+
+
+def accounting_snapshot(repo, baseline: int, start_at: str | None) -> dict:
+    current = count_valid_qualified_ssot(repo)
+    daily_added = ledger_unique_since(repo, start_at)
+    accounted = int(baseline) + daily_added
+    return {
+        "current_qualified_ssot": current,
+        "baseline_qualified_ssot": int(baseline),
+        "daily_added": daily_added,
+        "accounted_qualified_ssot": accounted,
+        "accounting_drift": current - accounted,
+        "promotion_ledger_unique_since_goal": daily_added,
+        "promotion_ledger_rows": len(_ledger_rows(repo)),
+        "promotion_ledger_backfilled": 0,
+        "sales_schema_hash": sales_schema_hash(_sales_headers(repo)[1]),
+        "storage": "営業リスト＿Factory/BPO",
     }

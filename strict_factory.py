@@ -371,10 +371,7 @@ class StrictGateWorker(GateWorker):
     def process_company(self, company: dict) -> dict:
         verification = self.resolver.verify_existing(company)
         if not verification.get("verified"):
-            row = int(company.get("row_number") or 0)
-            if row > 0:
-                self.sheets.update_range(f"LeadFactory_Raw!C{row}:D{row}", [["", ""]])
-                self.sheets.update_range(f"LeadFactory_Raw!R{row}", [["NEEDS_DOMAIN"]])
+            self.sheets.mark_needs_domain(str(company.get("lead_id") or ""))
             return {"lead_id": company.get("lead_id", ""), "final_result": "REQUEUED_NEEDS_OFFICIAL_SITE"}
         canonical = dict(company)
         canonical["domain"] = verification.get("official_domain", "")
@@ -577,16 +574,24 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
         return {"status": smoke_status or "SMOKE_FAILED", "source_id": source.source_id, "smoke": smoke}
 
     def _raw_by_id(self, lead_id: str) -> dict | None:
-        headers_rows = self.sheets.read("LeadFactory_Raw!1:1")
-        if not headers_rows:
-            return None
-        headers = headers_rows[0]
-        for row_number, row in enumerate(self.sheets.read("LeadFactory_Raw!A2:R"), start=2):
-            padded = row + [""] * max(0, len(headers) - len(row))
-            item = dict(zip(headers, padded))
-            if str(item.get("lead_id", "")) == str(lead_id):
-                item["row_number"] = row_number
-                return item
+        if hasattr(self.sheets, "_single_ssot_find"):
+            row = self.sheets._single_ssot_find(lead_id=str(lead_id))
+            if not row:
+                return None
+            return {
+                "row_number": row.get("row_number"),
+                "lead_id": row.get("LF_lead_id", ""),
+                "company_name": row.get("company_name") or row.get("LF_company_name", ""),
+                "domain": row.get("LF_domain", ""),
+                "website": row.get("LF_website") or row.get("website", ""),
+                "hq_country": row.get("LF_hq_country") or row.get("hq_country", ""),
+                "source_type": row.get("LF_source_type", ""),
+                "source_name": row.get("LF_source_name", ""),
+                "source_url": row.get("LF_source_url", ""),
+                "source_record_url": row.get("LF_source_record_url", ""),
+                "screening_status": row.get("LF_screening_status", ""),
+                "intake_status": row.get("LF_intake_status", ""),
+            }
         return None
 
     def domain_one(self, lead_id: str) -> dict:
@@ -793,53 +798,45 @@ ALREADY KNOWN SOURCES — find different/adjacent sources:
         }
 
     def _backlog_snapshot(self) -> dict:
-        raw = self.sheets.read("LeadFactory_Raw!A2:R")
+        rows = self.sheets._single_ssot_rows() if hasattr(self.sheets, "_single_ssot_rows") else []
         needs_domain = ready_growth = ready_mittel = 0
         latest_raw = None
-        for r in raw:
-            padded = r + [""] * (18 - len(r))
-            intake = str(padded[17] or "").upper()
-            screening = str(padded[11] or "").upper()
+        raw_total = 0
+        for row in rows:
+            if not str(row.get("LF_lead_id") or "").strip():
+                continue
+            raw_total += 1
+            intake = str(row.get("LF_intake_status") or "").upper()
+            screening = str(row.get("LF_screening_status") or "").upper()
             if intake == "NEEDS_DOMAIN" and screening in {"", "PENDING"}:
                 needs_domain += 1
             elif intake == "READY_FOR_GATE" and screening in {"", "PENDING"}:
                 ready_growth += 1
             elif intake == "READY_FOR_MITTELSTAND_GATE" and screening in {"", "PENDING"}:
                 ready_mittel += 1
-            ts = _parse_iso(padded[9] if len(padded) > 9 else "")
+            ts = _parse_iso(str(row.get("LF_discovered_at") or ""))
             if ts and (latest_raw is None or ts > latest_raw):
                 latest_raw = ts
-
-        sources = self.sheets.read("LeadFactory_Sources!A2:L")
-        source_work = 0
-        latest_source = None
-        for r in sources:
-            padded = r + [""] * (12 - len(r))
-            status = str(padded[9] or "").upper()
-            if status in {"", "DISCOVERED", "READY", "RETRY", "ERROR", "DEGRADED", "READY_FOR_CLOUD_SMOKE", "REPAIR_READY_FOR_CLOUD_SMOKE"}:
-                source_work += 1
-            ts = _parse_iso(padded[7] if len(padded) > 7 else "")
-            if ts and (latest_source is None or ts > latest_source):
-                latest_source = ts
+        try:
+            source_total = len(self.sheets.list_sources())
+        except Exception:
+            source_total = 0
         return {
             "needs_domain": needs_domain,
             "ready_growth_gate": ready_growth,
             "ready_mittelstand_gate": ready_mittel,
-            "source_work": source_work,
+            "source_work": source_total,
             "latest_raw_at": latest_raw.isoformat() if latest_raw else "",
-            "latest_source_at": latest_source.isoformat() if latest_source else "",
-            "raw_total": len(raw),
-            "source_total": len(sources),
+            "latest_source_at": "",
+            "raw_total": raw_total,
+            "source_total": source_total,
             "promoted_total": self.sheets.count_promoted_leads(),
         }
 
     def _set_config_value(self, key: str, value: str) -> None:
-        rows = self.sheets.read("Config!A2:B200")
-        for row_number, row in enumerate(rows, start=2):
-            if row and str(row[0]) == str(key):
-                self.sheets.update_range(f"Config!B{row_number}", [[str(value)]])
-                return
-        self.sheets.append("Config", [str(key), str(value)])
+        state = getattr(self, "_runtime_config_overrides", {})
+        state[str(key)] = str(value)
+        self._runtime_config_overrides = state
 
     def control_tick(self) -> dict:
         """Stop only after the source frontier and all processing backlogs are genuinely quiet."""

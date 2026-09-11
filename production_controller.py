@@ -275,3 +275,7 @@ class QualifiedLeadProductionController:
         status["report"] = self._report(status)
         return status
 
+
+
+from single_sheet_controller_mode import install as _install_single_sheet_controller
+_install_single_sheet_controller(QualifiedLeadProductionController)
