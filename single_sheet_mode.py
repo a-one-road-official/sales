@@ -130,6 +130,8 @@ def install(cls):
                 exhibitor_directory_url=item.get("exhibitor_directory_url", url),
                 crawl_status="READY",
             ))
+        dynamic = getattr(self, "_single_sheet_dynamic_sources", {})
+        out.extend(dynamic.values())
         return out
 
     def source_by_id(self, source_id):
@@ -143,7 +145,21 @@ def install(cls):
         if not url:
             return False, ""
         sid = "source-" + hashlib.sha256(url.encode()).hexdigest()[:20]
-        return sid not in {x.source_id for x in list_sources(self)}, sid
+        if sid in {x.source_id for x in list_sources(self)}:
+            return False, sid
+        dynamic = dict(getattr(self, "_single_sheet_dynamic_sources", {}))
+        dynamic[sid] = Source(
+            source_id=sid,
+            source_type=candidate.get("source_type", "EXHIBITION"),
+            source_name=candidate.get("source_name", ""),
+            source_url=candidate.get("source_url", url),
+            country=candidate.get("country", ""),
+            event_year=str(candidate.get("event_year", "")),
+            exhibitor_directory_url=candidate.get("exhibitor_directory_url", url),
+            crawl_status="READY",
+        )
+        self._single_sheet_dynamic_sources = dynamic
+        return True, sid
 
     def update_source_crawl_state(self, source_id, **kwargs):
         return {"source_id": source_id, **kwargs}
