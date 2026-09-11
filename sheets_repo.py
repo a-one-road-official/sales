@@ -143,15 +143,28 @@ class SheetsRepo:
         return None
 
 
+    def _bounded_append_range(self, sheet: str, width: int) -> str:
+        """Return the narrowest append range required by the payload.
+
+        Using A:ZZ on every technical append caused Google Sheets to physically
+        expand several machine tabs to hundreds of columns and eventually hit
+        the workbook-wide 10M-cell ceiling. Bound appends to the actual payload.
+        """
+        width = max(1, int(width or 1))
+        last_col = self._column_letter(width)
+        escaped = str(sheet).replace("'", "''")
+        return f"'{escaped}'!A:{last_col}"
+
     def append(self, sheet: str, values: list) -> None:
         # Human-facing SSOT writes must go through promotion validation and the
         # append-structure writer. Raw list appends cannot prove Gate/added_at
         # invariants and are therefore rejected at the repository boundary.
         if sheet == "営業リスト＿Factory/BPO":
             raise RuntimeError("direct_human_ssot_append_blocked:use_promote_to_sales_if_new")
+        append_range = self._bounded_append_range(sheet, len(values))
         self._execute_write(lambda: self.svc.spreadsheets().values().append(
             spreadsheetId=self.spreadsheet_id,
-            range=f"{sheet}!A:ZZ",
+            range=append_range,
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": [values]},
@@ -166,9 +179,11 @@ class SheetsRepo:
             return
         if sheet == "営業リスト＿Factory/BPO":
             raise RuntimeError("direct_human_ssot_append_blocked:use_batch_promotion")
+        width = max((len(row) for row in values_rows), default=1)
+        append_range = self._bounded_append_range(sheet, width)
         self._execute_write(lambda: self.svc.spreadsheets().values().append(
             spreadsheetId=self.spreadsheet_id,
-            range=f"{sheet}!A:ZZ",
+            range=append_range,
             valueInputOption="RAW",
             insertDataOption="INSERT_ROWS",
             body={"values": values_rows},
