@@ -172,23 +172,25 @@ Use primary company/investor announcements where possible; reliable business new
     def resolve_company_domain(self, company_context: dict) -> dict:
         """Resolve one company to its official website/domain using fresh web search.
 
-        The caller advances the row only when confidence=HIGH. Ambiguity must remain unresolved.
+        One search call should return a ranked candidate set so the resolver can
+        verify several plausible sites locally before spending another search call.
         """
         prompt = f"""
 You are the official-domain resolver for A-one road's internal Lead Factory.
 Research exactly ONE company and identify its official corporate website.
-Use web_search for every company. Search the exact quoted company name together with the
-country and industrial context. The source record is only provenance; it is not a directory
-of official websites.
 
-For EXHIBITION sources specifically, do NOT extract, infer, or depend on outbound links from
-the exhibitor page. Most exhibitor indexes publish only company names and booth numbers. Instead,
-use the company-name search results, inspect the candidate's own home/about/contact pages, and
-prefer a domain that matches the distinctive company-name tokens (including a country TLD when
-appropriate).
+SEARCH STRATEGY:
+1. Search the exact quoted company name + country.
+2. Search the exact quoted company name + manufacturer / industrial / official website.
+3. If the source is an exhibition or association, use the event/association name only
+   as disambiguation context.
+4. Inspect the candidate company's own home/about/contact pages.
+5. Prefer a candidate whose brand/legal identity and geography match the exact entity.
 
-Never return a reseller, distributor, LinkedIn page, directory profile, social network, marketplace, or news article as the official domain.
-Never guess from the company name. If multiple companies share the name, use source/country context to disambiguate.
+Never return a reseller, distributor, LinkedIn page, directory profile, social network,
+marketplace, or news article as the official domain. Never infer a domain only from the
+company name. When names collide, use country, product, booth/event, and legal-entity
+context to disambiguate.
 
 Return ONLY JSON:
 {{
@@ -197,13 +199,17 @@ Return ONLY JSON:
   "hq_country": "country or empty",
   "confidence": "HIGH|MEDIUM|LOW",
   "evidence": ["url"],
-  "reason": "concise explanation"
+  "reason": "concise explanation",
+  "candidates": [
+    {{"url": "https://candidate-1.example/", "reason": "why plausible"}},
+    {{"url": "https://candidate-2.example/", "reason": "why plausible"}}
+  ]
 }}
 
-HIGH means the evidence directly establishes that the returned site belongs to this exact company/entity.
-The site's title or visible company identity should match the searched entity, and the evidence
-must include the official page URL. A name-shaped domain by itself is insufficient.
-If that standard is not met, return MEDIUM/LOW and leave official_domain empty when appropriate.
+Return up to 5 candidates, ranked best first. Candidate URLs may be included at
+MEDIUM confidence; the caller verifies them. HIGH means direct evidence establishes
+that the selected site belongs to this exact company/entity. If that standard is not
+met, leave official_domain empty and use MEDIUM/LOW.
 
 COMPANY CONTEXT:
 {json.dumps(company_context, ensure_ascii=False)[:24000]}
@@ -216,6 +222,9 @@ COMPANY CONTEXT:
         data = self._json(resp.output_text)
         if not isinstance(data, dict):
             raise RuntimeError("domain_resolution_not_object")
+        candidates = data.get("candidates")
+        if not isinstance(candidates, list):
+            data["candidates"] = []
         return data
 
     def discover_mittelstand_sources(self, policy_text: str, limit: int = 13) -> list[dict]:
