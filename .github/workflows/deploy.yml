@@ -330,6 +330,7 @@ jobs:
           echo
 
       - name: Bootstrap promotion ledger reconciliation
+        if: ${{ always() }}
         run: |
           echo "POST /promotion/tick (internal SSOT accounting bootstrap)"
           timeout 480 curl --fail-with-body --retry 3 --retry-all-errors --retry-delay 3 \
@@ -339,6 +340,7 @@ jobs:
             "${SERVICE_URL}/promotion/tick"
 
       - name: Dispatch qualification work after deploy
+        if: ${{ always() }}
         continue-on-error: true
         run: |
           echo "Dispatching qualification work to Cloud Tasks; outbound sending remains disabled."
@@ -347,6 +349,7 @@ jobs:
           done
 
       - name: Activate and verify execution after deploy
+        if: ${{ always() }}
         continue-on-error: true
         run: |
           echo "Starting direct recovery execution; this step is independent of ChatGPT session lifetime."
@@ -367,6 +370,7 @@ jobs:
           echo "::warning::deployment succeeded; direct recovery execution is queued for Scheduler retry"
 
       - name: Publish runtime execution status
+        if: ${{ always() }}
         continue-on-error: true
         run: |
           timeout 90 curl --silent --show-error --fail-with-body \
@@ -382,6 +386,7 @@ jobs:
           fi
 
       - name: Verify autonomous infrastructure
+        if: ${{ always() }}
         run: |
           echo '--- Cloud Run ---'
           gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" \
