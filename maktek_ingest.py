@@ -200,7 +200,7 @@ class MaktekIngestor:
         self._capture_meta = {
             "mode": "BUNDLED_CAPTURE",
             "pages_scanned": int(payload.get("pages_scanned") or 0),
-            "scraped_company_count": len(records),
+            "scraped_company_count": len(payload.get("rows", []) or []),
             "normalized_company_count": len(records),
         }
         return list(records.values())
@@ -328,6 +328,7 @@ class MaktekIngestor:
                 "written_row_count": intake.get("written_row_count", 0),
                 "error_count": max(1, int(intake.get("error_count", 0) or 0)),
                 "readback_match": False,
+                "readback_attempts": int(intake.get("readback_attempts", 0) or 0),
                 "error": f"{type(exc).__name__}:{exc}",
                 "customer_facing_action": False,
             }
@@ -396,6 +397,7 @@ class MaktekIngestor:
             "written_row_count": written_count,
             "error_count": int(intake.get("error_count", 0) or 0),
             "readback_match": readback_match,
+            "readback_attempts": int(intake.get("readback_attempts", 0) or 0),
             "target_start_row": intake.get("target_start_row"),
             "target_end_row": intake.get("target_end_row"),
             "target_range": intake.get("target_range"),

@@ -318,7 +318,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "POST /maktek/ingest (SSOT intake with readback verification)"
-          RESPONSE="$(timeout 480 curl --fail-with-body --silent --show-error --retry 2 --retry-all-errors --retry-delay 5             -X POST             -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}"             -H "Content-Type: application/json"             "${SERVICE_URL}/maktek/ingest")"
+          RESPONSE="$(timeout 480 curl --silent --show-error --retry 2 --retry-all-errors --retry-delay 5             -X POST             -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}"             -H "Content-Type: application/json"             "${SERVICE_URL}/maktek/ingest")"
           echo "${RESPONSE}"
           STATUS="$(python -c 'import json,sys; print(json.loads(sys.stdin.read() or "{}").get("status",""))' <<<"${RESPONSE}")"
           WRITTEN="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("written_row_count",0) or 0))' <<<"${RESPONSE}")"
