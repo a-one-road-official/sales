@@ -139,6 +139,12 @@ def test_name_domain_probe_requires_first_party_identity(monkeypatch):
         "retail-solution-and-technologies.in",
         "retail-solution-and-technologies.co.in",
         "retail-solution-and-technologies.com",
+        "retailsolutiontechnologies.in",
+        "retailsolutiontechnologies.co.in",
+        "retailsolutiontechnologies.com",
+        "retail-solution-technologies.in",
+        "retail-solution-technologies.co.in",
+        "retail-solution-technologies.com",
     }
 
 
