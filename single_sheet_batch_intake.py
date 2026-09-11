@@ -48,7 +48,12 @@ def append_raw_records_batched(repo, source, records):
         if domain:
             domains.add(domain)
     if pending:
-        values = repo._native_read("'営業リスト＿Factory/BPO'!A2:A")
-        last = max([1] + [n for n, row in enumerate(values, start=2) if row and str(row[0] or "").strip()])
+        last = max(
+            [1] + [
+                int(row.get("row_number") or 0)
+                for row in existing
+                if str(row.get("company_name") or "").strip()
+            ]
+        )
         repo.append_rows_preserving_previous_row_structure("営業リスト＿Factory/BPO", pending, last + 1)
     return len(pending), duplicates
