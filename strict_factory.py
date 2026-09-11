@@ -16,6 +16,7 @@ from safe_fetch import TrustedFetcher
 from source_universe import for_lane as bootstrap_sources_for_lane
 from task_queue import TaskDispatcher
 from observability import failure_code, record_event
+from domain_ranker import rank_search_candidates
 from domain_tools import (
     candidate_identity_score,
     company_domain_hints,
@@ -259,6 +260,18 @@ class OfficialSiteResolver:
         if self.llm is not None:
             try:
                 search_research = self.llm.resolve_company_domain(company)
+                ranked = rank_search_candidates(
+                    company,
+                    search_research.get("search_results") or [],
+                    THIRD_PARTY_HOSTS,
+                )
+                for item in ranked[:8]:
+                    if item.urls:
+                        search_candidates.append((
+                            item.urls[0],
+                            False,
+                            f"multi_query_rank:{item.score:.4f}:{item.confidence:.4f}",
+                        ))
                 raw_candidates = search_research.get("candidates")
                 if isinstance(raw_candidates, list):
                     for item in raw_candidates:
