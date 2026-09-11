@@ -226,9 +226,6 @@ class OfficialSiteResolver:
         for value in directory_urls:
             candidates.append((value, True, "source_directory_outbound"))
 
-        for value in self._name_domain_candidates(company):
-            candidates.append((value, False, "name_domain_probe"))
-
         def verify_candidates(items: list[tuple[str, bool, str]]) -> dict | None:
             seen: set[str] = set()
             for url, source_direct, origin in items:
@@ -292,6 +289,16 @@ class OfficialSiteResolver:
         searched = verify_candidates(search_candidates)
         if searched:
             return searched
+
+        # Guessed domains are the final deterministic fallback, after search-based
+        # ranking. This avoids accepting a generic parked/adjacent domain simply
+        # because its page happens to mention the company name.
+        guessed = verify_candidates([
+            (value, False, "name_domain_probe")
+            for value in self._name_domain_candidates(company)
+        ])
+        if guessed:
+            return guessed
 
         confidence = str(search_research.get("confidence") or "").upper()
         evidence = search_research.get("evidence")
