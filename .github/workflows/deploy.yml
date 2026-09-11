@@ -230,7 +230,7 @@ jobs:
           }
 
           # Keep legacy direct/serial lanes paused; Cloud Tasks is the sole worker fan-out.
-          for OLD in lead-factory-daily lead-factory-growth-supply lead-factory-mittelstand-supply lead-factory-domain-failover lead-factory-recovery lead-factory-source-failover lead-factory-prep; do
+          for OLD in lead-factory-daily lead-factory-growth-supply lead-factory-mittelstand-supply lead-factory-domain-failover lead-factory-recovery lead-factory-source-failover lead-factory-prep lead-factory-qualified-pump; do
             gcloud scheduler jobs pause "$OLD" --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
           done
 
@@ -315,10 +315,18 @@ jobs:
           echo
 
       - name: Bootstrap deterministic MAKTEK raw capture
-        continue-on-error: true
         run: |
-          echo "POST /maktek/ingest (raw-only public directory capture)"
-          timeout 480 curl --fail-with-body --silent --show-error --retry 2 --retry-all-errors --retry-delay 5             -X POST             -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}"             -H "Content-Type: application/json"             "${SERVICE_URL}/maktek/ingest" ||             echo "::warning::MAKTEK raw capture deferred; autonomous source dispatch remains active"
+          set -euo pipefail
+          echo "POST /maktek/ingest (SSOT intake with readback verification)"
+          RESPONSE="$(timeout 480 curl --fail-with-body --silent --show-error --retry 2 --retry-all-errors --retry-delay 5             -X POST             -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}"             -H "Content-Type: application/json"             "${SERVICE_URL}/maktek/ingest")"
+          echo "${RESPONSE}"
+          STATUS="$(python -c 'import json,sys; print(json.loads(sys.stdin.read() or "{}").get("status",""))' <<<"${RESPONSE}")"
+          WRITTEN="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("written_row_count",0) or 0))' <<<"${RESPONSE}")"
+          READBACK="$(python -c 'import json,sys; print(str(bool(json.loads(sys.stdin.read() or "{}").get("readback_match",False))).lower())' <<<"${RESPONSE}")"
+          test "${STATUS}" = "PASS"
+          test "${WRITTEN}" -gt 0
+          test "${READBACK}" = "true"
+          echo "MAKTEK SSOT intake verified: written_row_count=${WRITTEN} readback_match=${READBACK}"
           echo
 
       - name: Bootstrap promotion ledger reconciliation

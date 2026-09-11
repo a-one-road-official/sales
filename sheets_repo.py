@@ -400,7 +400,7 @@ class SheetsRepo:
     def append_rows_preserving_previous_row_structure(
         self, sheet: str, rows: list[dict], start_row: int
     ) -> tuple[int, int]:
-        """Write qualified rows contiguously at the SSOT bottom in bounded batches."""
+        """Write intake rows at the physical bottom and retain SSOT row structure."""
         if not rows:
             return (0, 0)
         with self._write_lock:
@@ -408,7 +408,6 @@ class SheetsRepo:
             if not headers_rows:
                 raise RuntimeError(f"missing_header:{sheet}")
             headers = [str(h or "").strip() for h in headers_rows[0]]
-            header_index = {h: i for i, h in enumerate(headers) if h}
             if sheet == "営業リスト＿Factory/BPO":
                 from promotion_accounting import validate_new_sales_payload
                 for row in rows:
@@ -480,17 +479,27 @@ class SheetsRepo:
 
             last_col = self._column_letter(len(headers))
             values = [[row.get(header, "") for header in headers] for row in rows]
-            # Keep each request comfortably below Sheets payload and timeout limits.
+            api_responses = []
             for offset in range(0, len(values), 250):
                 chunk = values[offset:offset + 250]
                 chunk_start = start + offset
                 chunk_end = chunk_start + len(chunk) - 1
-                self.svc.spreadsheets().values().update(
+                response = self.svc.spreadsheets().values().update(
                     spreadsheetId=self.spreadsheet_id,
                     range=f"'{sheet}'!A{chunk_start}:{last_col}{chunk_end}",
                     valueInputOption="RAW",
                     body={"values": chunk},
                 ).execute()
+                api_responses.append(response)
+            with self._read_lock:
+                self._read_cache.clear()
+            self._last_append_metrics = {
+                "sheet": sheet,
+                "target_start_row": start,
+                "target_end_row": end,
+                "target_range": f"'{sheet}'!A{start}:{last_col}{end}",
+                "api_responses": api_responses,
+            }
             return (start, end)
 
 

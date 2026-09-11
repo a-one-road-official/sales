@@ -15,6 +15,17 @@ SSOT = "営業リスト＿Factory/BPO"
 def install(cls):
     native_read = cls.read
 
+    def _runtime_state(self):
+        scrapers = getattr(self, "_single_sheet_scrapers", None)
+        if scrapers is None:
+            scrapers = {}
+            self._single_sheet_scrapers = scrapers
+        source_states = getattr(self, "_single_sheet_source_states", None)
+        if source_states is None:
+            source_states = {}
+            self._single_sheet_source_states = source_states
+        return scrapers, source_states
+
     def enforce_sheet_contract(self):
         now = time.monotonic()
         last = float(getattr(self, "_sheet_contract_checked_at", 0.0) or 0.0)
@@ -150,10 +161,12 @@ def install(cls):
 
     def list_sources(self):
         from source_universe import BOOTSTRAP_SOURCES
+        _, source_states = self._runtime_state()
         out = []
         for item in BOOTSTRAP_SOURCES:
             url = canonicalize_url(item.get("exhibitor_directory_url") or item.get("source_url") or "")
             sid = "source-" + hashlib.sha256(url.encode()).hexdigest()[:20]
+            state = source_states.get(sid, {})
             out.append(Source(
                 source_id=sid,
                 source_type=item.get("source_type", "EXHIBITION"),
@@ -162,10 +175,27 @@ def install(cls):
                 country=item.get("country", ""),
                 event_year=str(item.get("event_year", "")),
                 exhibitor_directory_url=item.get("exhibitor_directory_url", url),
-                crawl_status="READY",
+                last_crawled_at=str(state.get("last_crawled_at") or ""),
+                crawl_status=str(state.get("crawl_status") or "READY"),
+                exhibitor_count=state.get("exhibitor_count"),
+                last_error=str(state.get("last_error") or ""),
             ))
         dynamic = getattr(self, "_single_sheet_dynamic_sources", {})
-        out.extend(dynamic.values())
+        for sid, source in dynamic.items():
+            state = source_states.get(sid, {})
+            out.append(Source(
+                source_id=source.source_id,
+                source_type=source.source_type,
+                source_name=source.source_name,
+                source_url=source.source_url,
+                country=source.country,
+                event_year=source.event_year,
+                exhibitor_directory_url=source.exhibitor_directory_url,
+                last_crawled_at=str(state.get("last_crawled_at") or source.last_crawled_at or ""),
+                crawl_status=str(state.get("crawl_status") or source.crawl_status or "READY"),
+                exhibitor_count=state.get("exhibitor_count", source.exhibitor_count),
+                last_error=str(state.get("last_error") or source.last_error or ""),
+            ))
         return out
 
     def source_by_id(self, source_id):
@@ -196,7 +226,12 @@ def install(cls):
         return True, sid
 
     def update_source_crawl_state(self, source_id, **kwargs):
-        return {"source_id": source_id, **kwargs}
+        _, source_states = self._runtime_state()
+        sid = str(source_id or "").strip()
+        state = dict(source_states.get(sid, {}))
+        state.update(kwargs)
+        source_states[sid] = state
+        return {"source_id": sid, **state}
 
     def append_raw_records(self, source, records):
         existing = rows(self)
@@ -308,6 +343,7 @@ def install(cls):
     def list_pending_mittelstand(self, limit=20):
         return lf_candidates(self, {"READY_FOR_MITTELSTAND_GATE"}, limit, "MITTELSTAND")
 
+    cls._runtime_state = _runtime_state
     cls.enforce_sheet_contract = enforce_sheet_contract
     cls.get_config = get_config
     cls.invalidate_config_cache = lambda self: None
@@ -469,13 +505,40 @@ def install(cls):
         return req_id
 
     def register_scraper(self, row):
-        return None
+        scrapers, _ = self._runtime_state()
+        source_id = str(row.get("source_id") or "").strip()
+        if not source_id:
+            raise RuntimeError("scraper_source_id_required")
+        current = dict(scrapers.get(source_id, {}))
+        current.update(dict(row))
+        scrapers[source_id] = current
+        print(
+            f"single-sheet-ssot:scraper-registered:{source_id}:"
+            f"{current.get('status', '')}:v{current.get('version', '')}",
+            flush=True,
+        )
+        return dict(current)
 
     def get_scraper(self, source_id):
-        return None
+        scrapers, _ = self._runtime_state()
+        row = scrapers.get(str(source_id or "").strip())
+        return dict(row) if row else None
 
     def update_scraper_health(self, source_id, **changes):
-        return None
+        scrapers, _ = self._runtime_state()
+        sid = str(source_id or "").strip()
+        current = scrapers.get(sid)
+        if not current:
+            return None
+        current = dict(current)
+        current.update(changes)
+        scrapers[sid] = current
+        print(
+            f"single-sheet-ssot:scraper-health:{sid}:"
+            f"{current.get('status', '')}:{current.get('health_status', '')}",
+            flush=True,
+        )
+        return dict(current)
 
     def append_test(self, row):
         return None

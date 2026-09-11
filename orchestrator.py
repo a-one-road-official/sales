@@ -462,6 +462,45 @@ class LeadFactory:
             raise RuntimeError(reason)
 
         new_count, dup_count = self.sheets.append_raw_records(source, records)
+        intake = dict(getattr(self.sheets, "_last_intake_metrics", {}) or {})
+        runtime = {
+            **stats,
+            "scraped_company_count": int(stats.get("records", actual) or actual),
+            "normalized_company_count": int(stats.get("records", actual) or actual),
+            "candidate_count": int(intake.get("candidate_count", actual) or 0),
+            "new_raw": int(new_count or 0),
+            "duplicates": int(intake.get("duplicate_count", dup_count) or 0),
+            "duplicate_count": int(intake.get("duplicate_count", dup_count) or 0),
+            "pending_append_count": int(
+                intake.get("pending_append_count", new_count) or 0
+            ),
+            "written_row_count": int(
+                intake.get("written_row_count", new_count) or 0
+            ),
+            "error_count": int(intake.get("error_count", 0) or 0),
+            "readback_match": bool(intake.get("readback_match", False)),
+            "target_start_row": intake.get("target_start_row"),
+            "target_end_row": intake.get("target_end_row"),
+            "target_range": intake.get("target_range"),
+            "write_api_response": intake.get("write_api_response", []),
+            "duplicate_examples": intake.get("duplicate_examples", []),
+            "decision_examples": intake.get("decision_examples", []),
+        }
+        if runtime["candidate_count"] == 0:
+            runtime["zero_yield_reason"] = "NO_CANDIDATES"
+        elif runtime["written_row_count"] == 0 and runtime["duplicate_count"] >= runtime["candidate_count"]:
+            runtime["zero_yield_reason"] = "ALL_DUPLICATES"
+        elif runtime["pending_append_count"] > 0 and runtime["written_row_count"] == 0:
+            runtime["zero_yield_reason"] = "WRITE_SKIPPED"
+        elif not runtime["readback_match"]:
+            runtime["zero_yield_reason"] = "READBACK_MISMATCH"
+        else:
+            runtime["zero_yield_reason"] = None
+        print(
+            "LEAD_FACTORY_SOURCE_METRICS "
+            + json.dumps(runtime, ensure_ascii=False, sort_keys=True, default=str),
+            flush=True,
+        )
         baseline = expected_min or max(1, int(actual * 0.70))
         self.sheets.update_scraper_health(
             source.source_id,
@@ -472,7 +511,7 @@ class LeadFactory:
             health_status="HEALTHY",
             last_error="",
         )
-        return {"new_raw": new_count, "duplicates": dup_count, **stats}
+        return runtime
 
     def _run_source_with_run_id(self, source: Source, run_id: str) -> dict:
         """Run only production-activated scrapers.
@@ -567,6 +606,33 @@ class LeadFactory:
                     "repair": repair,
                 }
 
+            written = int(
+                runtime.get("written_row_count", runtime.get("new_raw", 0)) or 0
+            )
+            readback_match = runtime.get("readback_match")
+            if written <= 0 or readback_match is False:
+                zero_reason = runtime.get("zero_yield_reason") or (
+                    "ALL_DUPLICATES"
+                    if int(runtime.get("candidate_count", 0) or 0) > 0
+                    else "NO_CANDIDATES"
+                )
+                try:
+                    self.sheets.update_source_crawl_state(
+                        source_id,
+                        crawl_status="ZERO_YIELD",
+                        exhibitor_count=int(runtime.get("records", 0) or 0),
+                        last_error=zero_reason,
+                    )
+                except Exception:
+                    pass
+                return {
+                    "run_id": run_id,
+                    "status": "ZERO_YIELD",
+                    "source_id": source_id,
+                    "zero_yield_reason": zero_reason,
+                    "runtime": runtime,
+                }
+
             now = datetime.now(timezone.utc).isoformat()
             self.sheets.update_scraper_health(
                 source_id,
@@ -600,7 +666,30 @@ class LeadFactory:
         self.meta.start_heartbeat(run_id, "SOURCE_PIPELINE")
         try:
             source = self.sheets.source_by_id(source_id)
-            return {"run_id": run_id, **self._run_source_with_run_id(source, run_id)}
+            result = self._run_source_with_run_id(source, run_id)
+            status = str(result.get("status", "")).upper()
+            if status in {"READY_FOR_CLOUD_SMOKE", "REPAIR_READY_FOR_CLOUD_SMOKE"}:
+                smoke = self.cloud_smoke_source(source_id)
+                result = {**result, "cloud_smoke": smoke}
+                if str(smoke.get("status", "")).upper() == "ACTIVE":
+                    result["status"] = "RAW_CAPTURED"
+                    result["runtime"] = smoke.get("runtime", {})
+                else:
+                    result["status"] = str(smoke.get("status") or "SMOKE_FAILED").upper()
+            runtime = result.get("runtime") if isinstance(result.get("runtime"), dict) else {}
+            if result.get("status") in {"RAW_CAPTURED", "RAW_CAPTURED_AFTER_REPAIR"}:
+                written = int(
+                    runtime.get("written_row_count", runtime.get("new_raw", 0)) or 0
+                )
+                if written <= 0 or runtime.get("readback_match") is False:
+                    result = {
+                        **result,
+                        "status": "ZERO_YIELD",
+                        "zero_yield_reason": runtime.get(
+                            "zero_yield_reason", "WRITE_SKIPPED"
+                        ),
+                    }
+            return {"run_id": run_id, **result}
         finally:
             self.meta.stop_heartbeat()
 
@@ -628,6 +717,7 @@ class LeadFactory:
         rid = run_id or f"sources-{uuid.uuid4()}"
         results = []
         new_raw = duplicates = errors = auth_required = 0
+        candidate_count_total = pending_append_total = written_row_total = 0
         for source in sources:
             try:
                 result = self._run_source_with_run_id(source, rid)
@@ -637,14 +727,52 @@ class LeadFactory:
             runtime = result.get("runtime") if isinstance(result.get("runtime"), dict) else {}
             records = int(runtime.get("records", 0) or 0)
             new_raw += int(runtime.get("new_raw", 0) or 0)
-            duplicates += int(runtime.get("duplicates", 0) or 0)
+            duplicates += int(runtime.get("duplicates", runtime.get("duplicate_count", 0)) or 0)
+            candidate_count_total += int(runtime.get("candidate_count", records) or 0)
+            pending_append_total += int(runtime.get("pending_append_count", 0) or 0)
+            written_row_total += int(
+                runtime.get("written_row_count", runtime.get("new_raw", 0)) or 0
+            )
+
+            # HTTP/build completion is not a successful source yield. A source
+            # is captured successfully only after a positive Sheets write and
+            # readback confirmation.
+            write_count = int(
+                runtime.get("written_row_count", runtime.get("new_raw", 0)) or 0
+            )
+            readback_match = runtime.get("readback_match")
+            if readback_match is None:
+                readback_match = write_count > 0
+            if status in {"RAW_CAPTURED", "RAW_CAPTURED_AFTER_REPAIR"} and (
+                write_count <= 0 or readback_match is False
+            ):
+                status = "ZERO_YIELD"
+                result = {
+                    **result,
+                    "status": status,
+                    "zero_yield_reason": runtime.get(
+                        "zero_yield_reason", "WRITE_SKIPPED"
+                    ),
+                }
 
             # Distinguish transport/build/runtime failure from a normal empty
             # yield. Rejected discovery candidates remain a data outcome.
             if status in {"RAW_CAPTURED", "RAW_CAPTURED_AFTER_REPAIR"}:
                 source_outcome = "RAW_CAPTURED"
-                source_reason = f"records={records};new_raw={int(runtime.get('new_raw', 0) or 0)}"
+                source_reason = (
+                    f"records={records};candidate_count={int(runtime.get('candidate_count', 0) or 0)};"
+                    f"pending_append_count={int(runtime.get('pending_append_count', 0) or 0)};"
+                    f"written_row_count={int(runtime.get('written_row_count', runtime.get('new_raw', 0)) or 0)}"
+                )
                 source_next_action = "CONTINUE"
+            elif status == "ZERO_YIELD":
+                source_outcome = "ZERO_YIELD"
+                source_reason = str(
+                    result.get("zero_yield_reason")
+                    or runtime.get("zero_yield_reason")
+                    or "WRITE_SKIPPED"
+                )
+                source_next_action = "RETRY_AFTER_DIAGNOSTICS"
             elif status == "AUTH_REQUIRED":
                 source_outcome = "SYSTEM_ERROR"
                 source_reason = str(result.get("reason") or result.get("error") or "authentication_required")
@@ -664,10 +792,43 @@ class LeadFactory:
                 except Exception as smoke_exc:
                     result = {**result, "cloud_smoke_error": f"{type(smoke_exc).__name__}:{smoke_exc}"}
                     status = "ERROR"
+                runtime = result.get("runtime") if isinstance(result.get("runtime"), dict) else {}
+                records = int(runtime.get("records", 0) or 0)
+                new_raw += int(runtime.get("new_raw", 0) or 0)
+                duplicates += int(runtime.get("duplicates", runtime.get("duplicate_count", 0)) or 0)
+                candidate_count_total += int(runtime.get("candidate_count", records) or 0)
+                pending_append_total += int(runtime.get("pending_append_count", 0) or 0)
+                written_row_total += int(
+                    runtime.get("written_row_count", runtime.get("new_raw", 0)) or 0
+                )
+                write_count = int(runtime.get("written_row_count", runtime.get("new_raw", 0)) or 0)
+                readback_match = runtime.get("readback_match", write_count > 0)
+                if status == "RAW_CAPTURED" and (
+                    write_count <= 0 or readback_match is False
+                ):
+                    status = "ZERO_YIELD"
+                    result = {
+                        **result,
+                        "status": status,
+                        "zero_yield_reason": runtime.get(
+                            "zero_yield_reason", "WRITE_SKIPPED"
+                        ),
+                    }
                 if status == "RAW_CAPTURED":
                     source_outcome = "RAW_CAPTURED"
-                    source_reason = f"cloud_smoke_active;records={int((result.get('runtime') or {}).get('records', 0) or 0)}"
+                    source_reason = (
+                        f"cloud_smoke_active;records={records};"
+                        f"written_row_count={write_count}"
+                    )
                     source_next_action = "CONTINUE"
+                elif status == "ZERO_YIELD":
+                    source_outcome = "ZERO_YIELD"
+                    source_reason = str(
+                        result.get("zero_yield_reason")
+                        or runtime.get("zero_yield_reason")
+                        or "WRITE_SKIPPED"
+                    )
+                    source_next_action = "RETRY_AFTER_DIAGNOSTICS"
                 else:
                     source_outcome = "SYSTEM_ERROR"
                     source_reason = str(result.get("error") or result.get("cloud_smoke_error") or result.get("scraper_status") or "cloud_smoke_not_active")
@@ -700,6 +861,17 @@ class LeadFactory:
                         crawl_status="READY_FOR_CLOUD_SMOKE" if status != "NOT_ACTIVE" else "NOT_ACTIVE",
                         exhibitor_count=source.exhibitor_count,
                         last_error=str(result.get("error") or "")[:5000],
+                    )
+                elif status == "ZERO_YIELD":
+                    source_state = self.sheets.update_source_crawl_state(
+                        source.source_id,
+                        crawl_status="RETRY",
+                        exhibitor_count=records,
+                        last_error=str(
+                            result.get("zero_yield_reason")
+                            or runtime.get("zero_yield_reason")
+                            or "WRITE_SKIPPED"
+                        ),
                     )
                 elif status == "AUTH_REQUIRED":
                     auth_required += 1
@@ -788,13 +960,31 @@ class LeadFactory:
                 subject="A-one Lead Factory RunLog write error",
                 body=f"source_tick_runlog_failed={type(log_exc).__name__}:{log_exc}\\nCustomer-facing sending was not executed."
             )
+        if new_raw == 0:
+            overall_status = "ZERO_YIELD"
+            zero_yield_reason = next(
+                (
+                    str(r.get("reason") or r.get("zero_yield_reason"))
+                    for r in results
+                    if r.get("outcome") == "ZERO_YIELD"
+                ),
+                "NO_CANDIDATES" if candidate_count_total == 0 else "WRITE_SKIPPED",
+            )
+        else:
+            overall_status = "COMPLETE_WITH_ERRORS" if errors else "COMPLETE"
+            zero_yield_reason = None
         return {
-            "status": "COMPLETE_WITH_ERRORS" if errors else "COMPLETE",
+            "status": overall_status,
+            "zero_yield_reason": zero_yield_reason,
             "requested": limit,
             "lane": lane_key or "ALL",
             "sources_processed": len(results),
             "new_raw": new_raw,
             "duplicates": duplicates,
+            "candidate_count": candidate_count_total,
+            "pending_append_count": pending_append_total,
+            "written_row_count": written_row_total,
+            "error_count": errors,
             "auth_required": auth_required,
             "errors": errors,
             "system_error_sources": sum(1 for r in results if r.get("outcome") == "SYSTEM_ERROR"),

@@ -267,7 +267,12 @@ def deep_healthz():
 @app.post("/maktek/ingest")
 def maktek_ingest():
     try:
-        return MaktekIngestor(get_factory().sheets).run()
+        result = MaktekIngestor(get_factory().sheets).run()
+        if str(result.get("status", "")).upper() == "ZERO_YIELD":
+            raise HTTPException(status_code=409, detail=result)
+        return result
+    except HTTPException:
+        raise
     except Exception as exc:
         _fail(exc)
 
