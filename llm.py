@@ -170,46 +170,62 @@ Use primary company/investor announcements where possible; reliable business new
 
 
     def resolve_company_domain(self, company_context: dict) -> dict:
-        """Resolve one company to its official website/domain using fresh web search.
+        """Return ranked-search evidence for one company's official domain.
 
-        One search call should return a ranked candidate set so the resolver can
-        verify several plausible sites locally before spending another search call.
+        Inspired by Statistics Netherlands' urlfinding methodology: several query
+        formulations are run for the same enterprise and the downstream resolver
+        aggregates repeated hosts and result-position evidence locally.
         """
         prompt = f"""
-You are the official-domain resolver for A-one road's internal Lead Factory.
-Research exactly ONE company and identify its official corporate website.
+You are the search collector for A-one road's official-domain resolver.
+Research exactly ONE company. Execute multiple independent web searches and return
+the raw candidate evidence needed for local ranking.
 
-SEARCH STRATEGY:
-1. Search the exact quoted company name + country.
-2. Search the exact quoted company name + manufacturer / industrial / official website.
-3. If the source is an exhibition or association, use the event/association name only
-   as disambiguation context.
-4. Inspect the candidate company's own home/about/contact pages.
-5. Prefer a candidate whose brand/legal identity and geography match the exact entity.
+Run these query intents:
+Q1 exact_name_country:
+  exact quoted company name + HQ country
+Q2 exact_name_official:
+  exact quoted company name + "official" + website
+Q3 exact_name_industry:
+  exact quoted company name + the industrial/product context below
+Q4 exact_name_contact:
+  exact quoted company name + contact/about
+Q5 exact_name_source:
+  exact quoted company name + source exhibition/association name
+Q6 legal_or_brand_variant:
+  strongest legal/brand-name variant visible in reliable results + country
 
-Never return a reseller, distributor, LinkedIn page, directory profile, social network,
-marketplace, or news article as the official domain. Never infer a domain only from the
-company name. When names collide, use country, product, booth/event, and legal-entity
-context to disambiguate.
+For each query intent return up to 8 plausible organic results. Preserve result order.
+Directories, LinkedIn, marketplaces, distributors and news may appear as search
+evidence, but mark them third_party=true; they are never eligible as the final
+official domain. Do not fabricate result URLs.
 
 Return ONLY JSON:
 {{
-  "official_domain": "example.com or empty",
+  "official_domain": "best directly-established domain or empty",
   "official_website": "https://... or empty",
   "hq_country": "country or empty",
   "confidence": "HIGH|MEDIUM|LOW",
   "evidence": ["url"],
   "reason": "concise explanation",
+  "search_results": [
+    {{
+      "query_type": "Q1",
+      "rank": 1,
+      "url": "https://...",
+      "title": "...",
+      "snippet": "...",
+      "third_party": false
+    }}
+  ],
   "candidates": [
-    {{"url": "https://candidate-1.example/", "reason": "why plausible"}},
-    {{"url": "https://candidate-2.example/", "reason": "why plausible"}}
+    {{"url": "https://candidate-1.example/", "reason": "why plausible"}}
   ]
 }}
 
-Return up to 5 candidates, ranked best first. Candidate URLs may be included at
-MEDIUM confidence; the caller verifies them. HIGH means direct evidence establishes
-that the selected site belongs to this exact company/entity. If that standard is not
-met, leave official_domain empty and use MEDIUM/LOW.
+HIGH requires direct evidence that the selected site belongs to this exact entity.
+MEDIUM/LOW is acceptable because the caller independently ranks and verifies the
+candidate set.
 
 COMPANY CONTEXT:
 {json.dumps(company_context, ensure_ascii=False)[:24000]}
@@ -222,9 +238,10 @@ COMPANY CONTEXT:
         data = self._json(resp.output_text)
         if not isinstance(data, dict):
             raise RuntimeError("domain_resolution_not_object")
-        candidates = data.get("candidates")
-        if not isinstance(candidates, list):
+        if not isinstance(data.get("candidates"), list):
             data["candidates"] = []
+        if not isinstance(data.get("search_results"), list):
+            data["search_results"] = []
         return data
 
     def discover_mittelstand_sources(self, policy_text: str, limit: int = 13) -> list[dict]:
