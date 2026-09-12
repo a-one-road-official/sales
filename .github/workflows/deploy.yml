@@ -420,7 +420,12 @@ jobs:
             NEW_RAW="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("new_raw",0) or 0))' <<<"${RESPONSE}")"
             WRITTEN="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("written_row_count",0) or 0))' <<<"${RESPONSE}")"
             CANDIDATES="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("candidate_count",0) or 0))' <<<"${RESPONSE}")"
-            echo "mittelstand_tick=${TICK} candidate_count=${CANDIDATES} new_raw=${NEW_RAW} written_row_count=${WRITTEN}"
+            ERRORS="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("error_count",0) or 0))' <<<"${RESPONSE}")"
+            echo "mittelstand_tick=${TICK} candidate_count=${CANDIDATES} new_raw=${NEW_RAW} written_row_count=${WRITTEN} error_count=${ERRORS}"
+            if [ "${NEW_RAW}" -eq 0 ] && [ "${ERRORS}" -gt 0 ]; then
+              echo "mittelstand_source_error_continue"
+              continue
+            fi
             if [ "${NEW_RAW}" -eq 0 ]; then
               echo "mittelstand_source_frontier_exhausted_or_zero_yield"
               break
