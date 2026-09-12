@@ -421,8 +421,10 @@ jobs:
             WRITTEN="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("written_row_count",0) or 0))' <<<"${RESPONSE}")"
             CANDIDATES="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("candidate_count",0) or 0))' <<<"${RESPONSE}")"
             ERRORS="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("error_count",0) or 0))' <<<"${RESPONSE}")"
-            echo "mittelstand_tick=${TICK} candidate_count=${CANDIDATES} new_raw=${NEW_RAW} written_row_count=${WRITTEN} error_count=${ERRORS}"
-            if [ "${NEW_RAW}" -eq 0 ] && [ "${ERRORS}" -gt 0 ]; then
+            AUTH="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("auth_required",0) or 0))' <<<"${RESPONSE}")"
+            SYSTEM_ERRORS="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("system_error_sources",0) or 0))' <<<"${RESPONSE}")"
+            echo "mittelstand_tick=${TICK} candidate_count=${CANDIDATES} new_raw=${NEW_RAW} written_row_count=${WRITTEN} error_count=${ERRORS} auth_required=${AUTH} system_error_sources=${SYSTEM_ERRORS}"
+            if [ "${NEW_RAW}" -eq 0 ] && { [ "${ERRORS}" -gt 0 ] || [ "${AUTH}" -gt 0 ] || [ "${SYSTEM_ERRORS}" -gt 0 ]; }; then
               echo "mittelstand_source_error_continue"
               continue
             fi
