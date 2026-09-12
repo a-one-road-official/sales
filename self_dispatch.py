@@ -103,7 +103,9 @@ def dispatch_lane(factory, lane: str) -> dict:
                 priority=str(company.get("source_name", "")).strip() == "MAKTEK Eurasia 2026",
             )
     for source in sources:
-        add_job("/worker/source", {"source_id": source.source_id}, "source")
+        # Target-company additions must not wait behind the pre-existing
+        # domain/gate backlog; source capture is the active production goal.
+        add_job("/worker/source", {"source_id": source.source_id}, "source", priority=True)
 
     jobs = priority_jobs + normal_jobs
     queued = {"source": 0, "domain": 0, "gate": 0, "already_queued": 0, "errors": 0, "deferred": 0}
