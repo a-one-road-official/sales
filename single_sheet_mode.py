@@ -534,12 +534,34 @@ def install(cls):
 
     def mark_needs_domain(self, lead_id):
         row = find(self, lead_id=lead_id)
-        if row:
+        if not row:
+            return
+        # A failed resolution must never erase a domain already supplied by
+        # research/intake. Keep it gate-ready and only mark NEEDS_DOMAIN when
+        # the row is genuinely missing a domain.
+        existing_domain = self._normalize_domain(
+            row.get("LF_normalized_domain")
+            or row.get("LF_domain")
+            or row.get("website")
+            or row.get("original_domain")
+            or ""
+        )
+        if existing_domain:
+            source_type = str(row.get("LF_source_type") or "").upper()
             update(self, row["row_number"], {
-                "website": "", "original_domain": "", "LF_domain": "", "LF_website": "",
-                "LF_normalized_domain": "", "LF_intake_status": "NEEDS_DOMAIN",
+                "LF_intake_status": (
+                    "READY_FOR_MITTELSTAND_GATE"
+                    if source_type.startswith("MITTELSTAND_")
+                    else "READY_FOR_GATE"
+                ),
                 "LF_screening_status": "PENDING",
             })
+            return
+        update(self, row["row_number"], {
+            "website": "", "original_domain": "", "LF_domain": "", "LF_website": "",
+            "LF_normalized_domain": "", "LF_intake_status": "NEEDS_DOMAIN",
+            "LF_screening_status": "PENDING",
+        })
 
     def update_raw_screening(self, lead_id, screening_status, gate_version, error="", *, row_number=None):
         row = find(self, lead_id=lead_id)
