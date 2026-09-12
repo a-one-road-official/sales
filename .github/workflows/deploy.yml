@@ -185,10 +185,10 @@ jobs:
                 continue
               fi
             fi
+            # Source-capture jobs share the priority queue with the bounded
+            # recovery lane. Four concurrent workers avoid Cloud Run 503s while
+            # keeping target additions ahead of the existing qualification backlog.
             MAX_CONCURRENT=4
-            if [ "$QUEUE" = "lead-factory-priority-workers" ]; then
-              MAX_CONCURRENT=16
-            fi
             if ! gcloud tasks queues update "$QUEUE" \
               --location="$REGION" --project="$PROJECT" \
               --max-concurrent-dispatches="$MAX_CONCURRENT" \
@@ -361,6 +361,37 @@ jobs:
             -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
             -H "Content-Type: application/json" \
             "${SERVICE_URL}/promotion/tick"
+
+      - name: Bootstrap one target source pipeline
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          SOURCE_ID="$(python - <<'PY'
+          import json
+          for path in ("/tmp/discover-mittelstand.json", "/tmp/discover-growth.json"):
+              try:
+                  data=json.load(open(path))
+              except Exception:
+                  continue
+              ids=data.get("added_mittelstand") or data.get("added_growth") or data.get("added") or []
+              if ids:
+                  print(ids[0])
+                  break
+          PY
+          )"
+          if [ -z "${SOURCE_ID}" ]; then
+            echo "::warning::no newly discovered target source; Scheduler will retry source capture"
+          else
+            echo "POST /source/${SOURCE_ID}/run (target source capture)"
+            timeout 540 curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --retry-delay 5 \
+              -X POST \
+              -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d '{}' \
+              "${SERVICE_URL}/source/${SOURCE_ID}/run" | tee /tmp/bootstrap-source.json
+            echo
+          fi
 
       - name: Dispatch qualification work after deploy
         if: ${{ always() }}
