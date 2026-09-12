@@ -36,6 +36,10 @@ class Snapshot:
             "status_code": self.status_code,
             "content_type": self.content_type,
             "text": self.text,
+            # Generated adapters in the existing source registry use both
+            # snapshot["text"] and snapshot["html"]; keep one canonical payload
+            # while preserving backward compatibility for both contracts.
+            "html": self.text,
             "links": self.links,
             "network": self.network or [],
             "api_payloads": self.api_payloads or [],
