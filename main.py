@@ -598,9 +598,11 @@ def discover_fallback():
 
 
 @app.post("/sources/tick")
-def sources_tick():
+def sources_tick(lane: str | None = None, limit: int | None = None):
+    # Targeted source intake must be able to select only manufacturing
+    # Mittelstand sources; the default remains the existing all-lane behavior.
     try:
-        return get_factory().source_tick()
+        return get_factory().source_tick(lane=lane, limit=limit)
     except Exception as exc:
         _fail(exc)
 
