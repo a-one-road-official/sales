@@ -9,3 +9,4 @@ deploy 2026-09-12T12:12:00Z for non-destructive domain fallback
 Target source priority and direct bootstrap at 2026-09-12T12:34:14.580Z
 Allow non-empty target capture at 2026-09-12T12:35:07.034Z
 Throttle backlog and capture runtime diagnostics at 2026-09-12T12:48:58.820Z
+Replace hung deploy with latest target-lane runtime at 2026-09-12T12:55:00Z
