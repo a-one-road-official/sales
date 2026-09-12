@@ -58,15 +58,12 @@ def _target_scope_decision(rec: dict, source) -> tuple[bool, str]:
     )
     is_manufacturing = any(token in source_text for token in manufacturing_tokens)
     if source_type.startswith("MITTELSTAND_"):
-        source_name = str(getattr(source, "source_name", "") or "").casefold()
-        association_tokens = (
-            "vdma", "vdw", "swissmem", "ucimu", "metall", "metaltechnology",
-            "technology industries", "fme", "manufactur", "machine",
-            "industrial", "engineering", "maschinen", "industrie",
-        )
-        if is_manufacturing or any(token in source_name for token in association_tokens):
-            return True, "MANUFACTURING_MITTELSTAND"
-        return False, "NON_MANUFACTURING_MITTELSTAND"
+        # The source itself is already registered as a manufacturing
+        # Mittelstand lane.  Intake admission is intentionally permissive:
+        # company-name/domain dedupe is the SSOT gate; formal screening is
+        # a separate downstream KPI.  This also handles member-directory
+        # records whose manufacturing evidence is not repeated per row.
+        return True, "MANUFACTURING_MITTELSTAND_SOURCE"
     if source_type.startswith(("GROWTH", "EXHIBITION")):
         stage_text = " ".join(
             str(rec.get(key) or "") for key in (
