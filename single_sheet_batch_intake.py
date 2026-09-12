@@ -48,6 +48,7 @@ def _target_scope_decision(rec: dict, source) -> tuple[bool, str]:
         str(rec.get(key) or "") for key in (
             "industry", "sector", "category", "description", "business_description",
             "tags", "manufacturing", "company_type", "source_name",
+            "signal_type", "headline", "notes",
         )
     ).casefold()
     manufacturing_tokens = (
@@ -70,6 +71,7 @@ def _target_scope_decision(rec: dict, source) -> tuple[bool, str]:
         stage_text = " ".join(
             str(rec.get(key) or "") for key in (
                 "funding_stage", "stage", "series", "latest_funding_round",
+                "signal_type",
                 "investment_stage", "funding", "round",
             )
         ).casefold()
