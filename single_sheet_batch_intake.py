@@ -42,7 +42,7 @@ def _emit(metrics: dict) -> None:
 
 
 def _target_scope_decision(rec: dict, source) -> tuple[bool, str]:
-    """Keep new intake limited to manufacturing Mittelstand or manufacturing Series B+."""
+    """Keep new intake limited to industrial manufacturing and filter consumer noise."""
     source_type = str(getattr(source, "source_type", "") or "").upper()
     source_text = " ".join(
         str(rec.get(key) or "") for key in (
@@ -54,35 +54,49 @@ def _target_scope_decision(rec: dict, source) -> tuple[bool, str]:
     manufacturing_tokens = (
         "manufactur", "machinery", "machine tool", "industrial", "factory",
         "automation", "robot", "engineering", "production", "fertigung",
-        "maschinen", "industrie", "produzione", "fabrication",
+        "maschinen", "industrie", "produzione", "fabrication", "metrology",
+        "cnc", "machining", "intralogistics", "additive manufacturing",
     )
+    hard_block_tokens = (
+        "food delivery", "foodservice", "restaurant", "grocery", "meal kit",
+        "e-commerce", "ecommerce", "online marketplace", "retail",
+        "apparel", "fashion", "clothing", "cosmetic", "beauty",
+        "fintech", "insurance", "consumer lending", "payment platform",
+        "education", "edtech", "school", "university", "sports",
+        "football", "soccer", "gaming", "travel", "hotel", "hospitality",
+        "real estate", "property marketplace", "healthcare", "telemedicine",
+        "pharmacy", "pet care", "music streaming", "social network",
+    )
+    if any(token in source_text for token in hard_block_tokens):
+        return False, "BLOCKED_NON_INDUSTRIAL"
     is_manufacturing = any(token in source_text for token in manufacturing_tokens)
+    source_industrial_tokens = (
+        "machine tool", "machinetool", "metaltechnology", "metal technology",
+        "vdw", "vdma", "ucimu", "swissmem", "fme", "technology industries",
+        "manufacturing", "machinery", "industrial automation", "robotics",
+        "engineering association", "formnext", "amb stuttgart", "grindinghub",
+    )
+    source_is_industrial = any(token in source_text for token in source_industrial_tokens)
     if source_type.startswith("MITTELSTAND_"):
-        # The source itself is already registered as a manufacturing
-        # Mittelstand lane.  Intake admission is intentionally permissive:
-        # company-name/domain dedupe is the SSOT gate; formal screening is
-        # a separate downstream KPI.  This also handles member-directory
-        # records whose manufacturing evidence is not repeated per row.
-        return True, "MANUFACTURING_MITTELSTAND_SOURCE"
+        if is_manufacturing or source_is_industrial:
+            return True, "MANUFACTURING_MITTELSTAND_SOURCE"
+        return False, "NON_MANUFACTURING"
     if source_type.startswith(("GROWTH", "EXHIBITION")):
         stage_text = " ".join(
             str(rec.get(key) or "") for key in (
                 "funding_stage", "stage", "series", "latest_funding_round",
-                "signal_type",
-                "investment_stage", "funding", "round",
+                "signal_type", "investment_stage", "funding", "round",
             )
         ).casefold()
-        series_match = re.search(r"series\s*([b-z])\b", stage_text)
+        series_match = re.search(r"series\\s*([b-z])\\b", stage_text)
         if not series_match:
-            series_match = re.search(r"\b([b-z])\s*round\b", stage_text)
+            series_match = re.search(r"\\b([b-z])\\s*round\\b", stage_text)
         if series_match and series_match.group(1) >= "b" and is_manufacturing:
             return True, "MANUFACTURING_SERIES_B_PLUS"
         if not is_manufacturing:
             return False, "NON_MANUFACTURING"
         return False, "FUNDING_STAGE_NOT_SERIES_B_PLUS"
     return False, "SOURCE_NOT_IN_TARGET_SCOPE"
-
-
 def append_raw_records_batched(repo, source, records):
     records = list(records or [])
     existing = repo._single_ssot_rows()
