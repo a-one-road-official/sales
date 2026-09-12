@@ -341,7 +341,7 @@ jobs:
           echo
 
       - name: Bootstrap target discovery lanes
-        if: ${{ always() }}
+        if: ${{ false }}
         continue-on-error: true
         run: |
           set -euo pipefail
@@ -384,8 +384,12 @@ jobs:
           PY
           )"
           if [ -z "${SOURCE_ID}" ]; then
-            echo "::warning::no newly discovered target source; Scheduler will retry source capture"
-          else
+            # Discovery is asynchronous; use a durable existing German manufacturing source
+            # so a deployment always exercises the SSOT intake path immediately.
+            SOURCE_ID="source-4f3e00192e47088ad17a"
+            echo "No new source ID; using existing BVMW Mittelstand source ${SOURCE_ID}"
+          fi
+          if [ -n "${SOURCE_ID}" ]; then
             echo "POST /source/${SOURCE_ID}/run (target source capture)"
             timeout 540 curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --retry-delay 5 \
               -X POST \
