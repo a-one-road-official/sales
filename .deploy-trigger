@@ -21,3 +21,5 @@ trigger=run-ready-mittelstand-member-source-2026-09-12T14:04Z
 trigger=drain-target-source-pages-2026-09-12T14:20Z
 
 trigger=advance-mittelstand-source-frontier-2026-09-12T14:38Z
+
+trigger=normalize-source-snapshot-html-alias-2026-09-12T14:45Z
