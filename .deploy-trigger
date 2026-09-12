@@ -17,3 +17,5 @@ Use v5 execution group to unblock source intake at 2026-09-12T13:28:00Z
 trigger=resume-manufacturing-mittelstand-intake-2026-09-12T13:40Z
 
 trigger=run-ready-mittelstand-member-source-2026-09-12T14:04Z
+
+trigger=drain-target-source-pages-2026-09-12T14:20Z
