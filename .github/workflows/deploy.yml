@@ -408,33 +408,63 @@ jobs:
       # After the primary member source is exhausted, advance registered
       # manufacturing Mittelstand sources one at a time. This keeps the SSOT
       # intake lane targeted and preserves source-level metrics/readback.
-      - name: Bootstrap additional Mittelstand source ticks
+      - name: Bootstrap selected manufacturing source runs
         if: ${{ always() }}
         continue-on-error: true
         run: |
           set -euo pipefail
-          for TICK in $(seq 1 6); do
-            echo "POST /sources/tick?lane=mittelstand&limit=1 tick=${TICK}"
-            RESPONSE="$(timeout 540 curl --silent --show-error --fail-with-body               -X POST               -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}"               -H "Content-Type: application/json"               "${SERVICE_URL}/sources/tick?lane=mittelstand&limit=1")"
-            echo "${RESPONSE}"
-            NEW_RAW="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("new_raw",0) or 0))' <<<"${RESPONSE}")"
-            WRITTEN="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("written_row_count",0) or 0))' <<<"${RESPONSE}")"
-            CANDIDATES="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("candidate_count",0) or 0))' <<<"${RESPONSE}")"
-            ERRORS="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("error_count",0) or 0))' <<<"${RESPONSE}")"
-            AUTH="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("auth_required",0) or 0))' <<<"${RESPONSE}")"
-            SYSTEM_ERRORS="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("system_error_sources",0) or 0))' <<<"${RESPONSE}")"
-            echo "mittelstand_tick=${TICK} candidate_count=${CANDIDATES} new_raw=${NEW_RAW} written_row_count=${WRITTEN} error_count=${ERRORS} auth_required=${AUTH} system_error_sources=${SYSTEM_ERRORS}"
-            if [ "${NEW_RAW}" -eq 0 ] && { [ "${ERRORS}" -gt 0 ] || [ "${AUTH}" -gt 0 ] || [ "${SYSTEM_ERRORS}" -gt 0 ]; }; then
-              echo "mittelstand_source_error_continue"
+          # Run only manufacturing / Mittelstand source IDs. External sends remain disabled.
+          TARGET_SOURCES=(
+            "source-57a87fe4e5b0e5f47ce6"  # GTMA engineering companies
+            "source-bd4a7f8ee571b9642a99"  # British turned parts manufacturers
+            "source-2802a28add80688359fb"  # VDW German machine tools
+            "source-fed809f6bf0909d0b367"  # VDMA machinery and equipment
+            "source-858f10b0cf765b3952b3"  # VDW members directory
+            "source-17ab0245081c0b5b92f5"  # SPECTARIS
+            "source-18751f4c00798a584415"  # ZVEI
+            "source-69e6c7db64320df05c27"  # SEMI manufacturing supply chain
+          )
+          for SOURCE_ID in "${TARGET_SOURCES[@]}"; do
+            echo "POST /source/${SOURCE_ID}/run"
+            if ! RESPONSE="$(timeout 480 curl --silent --show-error --fail-with-body --retry 1 --retry-all-errors --retry-delay 3               -X POST               -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}"               -H "Content-Type: application/json"               -d '{}'               "${SERVICE_URL}/source/${SOURCE_ID}/run")"; then
+              echo "source_run_error source_id=${SOURCE_ID}"
               continue
             fi
-            if [ "${NEW_RAW}" -eq 0 ]; then
-              echo "mittelstand_source_frontier_exhausted_or_zero_yield"
-              break
-            fi
+            echo "${RESPONSE}"
+            python - "${SOURCE_ID}" "${RESPONSE}" <<'PY'
+          import json
+          import sys
+          source_id, raw = sys.argv[1], sys.argv[2]
+          try:
+              data = json.loads(raw or "{}")
+          except Exception:
+              data = {}
+          def num(name):
+              try:
+                  return int(data.get(name, 0) or 0)
+              except Exception:
+                  return 0
+          print(
+              "selected_source="
+              + source_id
+              + " candidate_count="
+              + str(num("candidate_count"))
+              + " duplicate_count="
+              + str(num("duplicate_count"))
+              + " pending_append_count="
+              + str(num("pending_append_count"))
+              + " written_row_count="
+              + str(num("written_row_count"))
+              + " readback_match="
+              + str(bool(data.get("readback_match", False))).lower()
+              + " error_count="
+              + str(num("error_count"))
+              + " remaining_queue="
+              + str(num("remaining_queue"))
+          )
+          PY
           done
           echo
-
       - name: Dispatch qualification work after deploy
         if: ${{ false }}
         continue-on-error: true
