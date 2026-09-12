@@ -360,59 +360,18 @@ def install(cls):
         return {"source_id": sid, **state}
 
     def append_raw_records(self, source, records):
-        existing = rows(self)
-        names = {self._normalize_name(r.get("company_name") or r.get("LF_company_name") or "") for r in existing}
-        domains = {self._normalize_domain(r.get("LF_normalized_domain") or r.get("LF_domain") or r.get("website") or "") for r in existing}
-        names.discard("")
-        domains.discard("")
-        new_count = dup_count = 0
-        now = datetime.now(timezone.utc).isoformat()
-        for rec in records:
-            name = str(rec.get("company_name") or "").strip()
-            if not name:
-                continue
-            name_key = self._normalize_name(name)
-            domain = self._normalize_domain(rec.get("domain") or rec.get("website") or "")
-            if name_key in names or (domain and domain in domains):
-                dup_count += 1
-                continue
-            website = str(rec.get("website") or "").strip() or (f"https://{domain}" if domain else "")
-            lead_id = "lead-" + hashlib.sha256(f"{source.source_id}|{domain or name_key}".encode()).hexdigest()[:24]
-            intake = "NEEDS_DOMAIN" if not domain else (
-                "READY_FOR_MITTELSTAND_GATE"
-                if str(source.source_type).upper().startswith("MITTELSTAND_")
-                else "READY_FOR_GATE"
-            )
-            append_intake(self, {
-                "company_name": name,
-                "Status": "判定中",
-                "Category": "Factory",
-                "hq_country": rec.get("hq_country") or source.country or "",
-                "website": website,
-                "source": source.source_name or source.source_url or "LeadFactory",
-                "record_origin": "LeadFactory",
-                "LF_lead_id": lead_id,
-                "LF_company_name": name,
-                "LF_domain": domain,
-                "LF_website": website,
-                "LF_hq_country": rec.get("hq_country") or source.country or "",
-                "LF_source_type": source.source_type,
-                "LF_source_name": source.source_name,
-                "LF_source_url": source.source_url,
-                "LF_source_record_url": rec.get("source_record_url", source.crawl_url),
-                "LF_discovered_at": now,
-                "LF_last_seen_at": now,
-                "LF_screening_status": "PENDING",
-                "LF_normalized_domain": domain,
-                "LF_duplicate_state": "NEW",
-                "LF_intake_status": intake,
-                "LF_history": f"{now}|DISCOVERED|{intake}",
-            })
-            new_count += 1
-            names.add(name_key)
-            if domain:
-                domains.add(domain)
-        return new_count, dup_count
+        """Use the canonical intake gate for every source path.
+
+        The previous implementation wrote directly to the SSOT and bypassed
+        company-name validation plus the manufacturing/Mittelstand or
+        Series-B+ scope check. That bypass is what allowed unrelated consumer
+        and non-industrial companies to enter the lead table. Keep the SSOT
+        append implementation in one place so source_tick and batch intake
+        cannot diverge.
+        """
+        from single_sheet_batch_intake import append_raw_records_batched
+
+        return append_raw_records_batched(self, source, records)
 
     def find_raw_match(self, company_name, domain_or_website=""):
         row = find(self, company_name=company_name, domain=domain_or_website)
