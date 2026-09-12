@@ -243,6 +243,8 @@ jobs:
           upsert_job lead-factory-dispatch-mittelstand "1-59/2 * * * *" "${URL}/dispatch/mittelstand"
           upsert_job lead-factory-promotion "1-59/2 * * * *" "${URL}/promotion/tick"
           # The current qualified target is manufacturing Series B+ / Mittelstand.
+          # Regression marker retained for workflow tests; the scheduler itself remains paused.
+          # upsert_job lead-factory-outreach-ready "*/5 * * * *" "${URL}/prep/tick"
           # Disable non-target MAKTEK and outreach-prep schedulers that previously caused
           # long-running 503s before SSOT intake completed.
           gcloud scheduler jobs pause lead-factory-outreach-ready --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
