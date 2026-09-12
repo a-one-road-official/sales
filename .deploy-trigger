@@ -25,3 +25,5 @@ trigger=advance-mittelstand-source-frontier-2026-09-12T14:38Z
 trigger=normalize-source-snapshot-html-alias-2026-09-12T14:45Z
 
 trigger=continue-past-failed-mittelstand-source-2026-09-12T14:50Z
+
+trigger=continue-past-auth-blocked-mittelstand-source-2026-09-12T14:55Z
