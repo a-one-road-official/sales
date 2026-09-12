@@ -405,6 +405,29 @@ jobs:
             fi
           done
           echo
+      # After the primary member source is exhausted, advance registered
+      # manufacturing Mittelstand sources one at a time. This keeps the SSOT
+      # intake lane targeted and preserves source-level metrics/readback.
+      - name: Bootstrap additional Mittelstand source ticks
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          for TICK in $(seq 1 6); do
+            echo "POST /sources/tick?lane=mittelstand&limit=1 tick=${TICK}"
+            RESPONSE="$(timeout 540 curl --silent --show-error --fail-with-body               -X POST               -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}"               -H "Content-Type: application/json"               "${SERVICE_URL}/sources/tick?lane=mittelstand&limit=1")"
+            echo "${RESPONSE}"
+            NEW_RAW="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("new_raw",0) or 0))' <<<"${RESPONSE}")"
+            WRITTEN="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("written_row_count",0) or 0))' <<<"${RESPONSE}")"
+            CANDIDATES="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("candidate_count",0) or 0))' <<<"${RESPONSE}")"
+            echo "mittelstand_tick=${TICK} candidate_count=${CANDIDATES} new_raw=${NEW_RAW} written_row_count=${WRITTEN}"
+            if [ "${NEW_RAW}" -eq 0 ]; then
+              echo "mittelstand_source_frontier_exhausted_or_zero_yield"
+              break
+            fi
+          done
+          echo
+
       - name: Dispatch qualification work after deploy
         if: ${{ false }}
         continue-on-error: true
