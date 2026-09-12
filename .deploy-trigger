@@ -7,3 +7,4 @@ deploy 2026-09-12T11:35:00Z for Cloud Run target-lane scaling
 deploy 2026-09-12T12:00:00Z for durable multi-instance goal/source persistence
 deploy 2026-09-12T12:12:00Z for non-destructive domain fallback
 Target source priority and direct bootstrap at 2026-09-12T12:34:14.580Z
+Allow non-empty target capture at 2026-09-12T12:35:07.034Z
