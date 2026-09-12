@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import time
 import uuid
@@ -10,11 +11,87 @@ from models import Source
 from safety import canonicalize_url
 
 SSOT = "営業リスト＿Factory/BPO"
+PERSISTENT_CONFIG_SHEET = "SalesOS_Goal_Config"
 
 
 def install(cls):
     native_read = cls.read
     native_read_once = getattr(cls, "read_once", None)
+
+    def _persistent_runtime_config(self):
+        """Read durable runtime state from the existing goal-config tab."""
+        try:
+            values = native_read(self, f"'{PERSISTENT_CONFIG_SHEET}'!A2:B1000")
+        except Exception as exc:
+            print(
+                f"single-sheet-ssot:persistent-config-read-warning:{type(exc).__name__}:{exc}",
+                flush=True,
+            )
+            return {}
+        out = {}
+        for row in values or []:
+            if len(row) < 2:
+                continue
+            key = str(row[0] or "").strip()
+            if key.startswith("LEAD_FACTORY_"):
+                out[key] = str(row[1] or "")
+        return out
+
+    def persist_runtime_config(self, values):
+        """Upsert namespaced runtime state into an existing config tab."""
+        values = {
+            str(k): str(v)
+            for k, v in dict(values or {}).items()
+            if str(k).startswith("LEAD_FACTORY_")
+        }
+        if not values:
+            return
+        rows = native_read(self, f"'{PERSISTENT_CONFIG_SHEET}'!A2:B1000")
+        positions = {
+            str(row[0]).strip(): index
+            for index, row in enumerate(rows or [], start=2)
+            if row and str(row[0] or "").strip()
+        }
+        updates = []
+        appends = []
+        for key, value in values.items():
+            if key in positions:
+                updates.append({
+                    "range": f"'{PERSISTENT_CONFIG_SHEET}'!B{positions[key]}",
+                    "values": [[value]],
+                })
+            else:
+                appends.append([key, value])
+
+        def operation():
+            if updates:
+                self.svc.spreadsheets().values().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body={"valueInputOption": "RAW", "data": updates},
+                ).execute()
+            if appends:
+                self.svc.spreadsheets().values().append(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f"'{PERSISTENT_CONFIG_SHEET}'!A:B",
+                    valueInputOption="RAW",
+                    insertDataOption="INSERT_ROWS",
+                    body={"values": appends},
+                ).execute()
+
+        self._execute_write(operation)
+
+    def _persistent_json_records(self, prefix):
+        out = {}
+        for key, value in _persistent_runtime_config(self).items():
+            if not key.startswith(prefix):
+                continue
+            try:
+                record = json.loads(value)
+            except (TypeError, ValueError):
+                continue
+            if isinstance(record, dict):
+                out[key[len(prefix):]] = record
+        return out
 
     def _runtime_state(self):
         scrapers = getattr(self, "_single_sheet_scrapers", None)
@@ -71,6 +148,9 @@ def install(cls):
         for key, value in os.environ.items():
             if key.startswith(("LEAD_FACTORY_", "OUTREACH_")):
                 cfg[key] = str(value)
+        # Durable runtime rows override only their namespaced state. No new
+        # sheet is created and the SSOT remains the sole lead table.
+        cfg.update(_persistent_runtime_config(self))
         return cfg
 
     def headers(self):
@@ -181,7 +261,23 @@ def install(cls):
                 exhibitor_count=state.get("exhibitor_count"),
                 last_error=str(state.get("last_error") or ""),
             ))
-        dynamic = getattr(self, "_single_sheet_dynamic_sources", {})
+        dynamic = dict(getattr(self, "_single_sheet_dynamic_sources", {}) or {})
+        for sid, payload in _persistent_json_records(self, "LEAD_FACTORY_SOURCE_").items():
+            if sid in dynamic:
+                continue
+            dynamic[sid] = Source(
+                source_id=str(payload.get("source_id") or sid),
+                source_type=str(payload.get("source_type") or "EXHIBITION"),
+                source_name=str(payload.get("source_name") or ""),
+                source_url=str(payload.get("source_url") or ""),
+                country=str(payload.get("country") or ""),
+                event_year=str(payload.get("event_year") or ""),
+                exhibitor_directory_url=str(payload.get("exhibitor_directory_url") or ""),
+                last_crawled_at=str(payload.get("last_crawled_at") or ""),
+                crawl_status=str(payload.get("crawl_status") or "READY"),
+                exhibitor_count=payload.get("exhibitor_count"),
+                last_error=str(payload.get("last_error") or ""),
+            )
         for sid, source in dynamic.items():
             state = source_states.get(sid, {})
             out.append(Source(
@@ -224,6 +320,18 @@ def install(cls):
             crawl_status="READY",
         )
         self._single_sheet_dynamic_sources = dynamic
+        self.persist_runtime_config({
+            f"LEAD_FACTORY_SOURCE_{sid}": json.dumps({
+                "source_id": sid,
+                "source_type": candidate.get("source_type", "EXHIBITION"),
+                "source_name": candidate.get("source_name", ""),
+                "source_url": candidate.get("source_url", url),
+                "country": candidate.get("country", ""),
+                "event_year": str(candidate.get("event_year", "")),
+                "exhibitor_directory_url": candidate.get("exhibitor_directory_url", url),
+                "crawl_status": "READY",
+            }, ensure_ascii=False, sort_keys=True),
+        })
         return True, sid
 
     def update_source_crawl_state(self, source_id, **kwargs):
@@ -232,6 +340,23 @@ def install(cls):
         state = dict(source_states.get(sid, {}))
         state.update(kwargs)
         source_states[sid] = state
+        source = next((item for item in list_sources(self) if item.source_id == sid), None)
+        if source is not None:
+            self.persist_runtime_config({
+                f"LEAD_FACTORY_SOURCE_{sid}": json.dumps({
+                    "source_id": source.source_id,
+                    "source_type": source.source_type,
+                    "source_name": source.source_name,
+                    "source_url": source.source_url,
+                    "country": source.country,
+                    "event_year": source.event_year,
+                    "exhibitor_directory_url": source.exhibitor_directory_url,
+                    "last_crawled_at": state.get("last_crawled_at", source.last_crawled_at),
+                    "crawl_status": state.get("crawl_status", source.crawl_status),
+                    "exhibitor_count": state.get("exhibitor_count", source.exhibitor_count),
+                    "last_error": state.get("last_error", source.last_error),
+                }, ensure_ascii=False, sort_keys=True),
+            })
         return {"source_id": sid, **state}
 
     def append_raw_records(self, source, records):
@@ -347,6 +472,7 @@ def install(cls):
     cls._runtime_state = _runtime_state
     cls.enforce_sheet_contract = enforce_sheet_contract
     cls.get_config = get_config
+    cls.persist_runtime_config = persist_runtime_config
     cls.invalidate_config_cache = lambda self: None
     cls._single_ssot_headers = headers
     cls._single_ssot_rows = rows
@@ -513,6 +639,9 @@ def install(cls):
         current = dict(scrapers.get(source_id, {}))
         current.update(dict(row))
         scrapers[source_id] = current
+        self.persist_runtime_config({
+            f"LEAD_FACTORY_SCRAPER_{source_id}": json.dumps(current, ensure_ascii=False, sort_keys=True),
+        })
         print(
             f"single-sheet-ssot:scraper-registered:{source_id}:"
             f"{current.get('status', '')}:v{current.get('version', '')}",
@@ -522,7 +651,13 @@ def install(cls):
 
     def get_scraper(self, source_id):
         scrapers, _ = self._runtime_state()
-        row = scrapers.get(str(source_id or "").strip())
+        sid = str(source_id or "").strip()
+        row = scrapers.get(sid)
+        if not row:
+            persisted = _persistent_json_records(self, "LEAD_FACTORY_SCRAPER_").get(sid)
+            if persisted:
+                row = dict(persisted)
+                scrapers[sid] = row
         return dict(row) if row else None
 
     def update_scraper_health(self, source_id, **changes):
@@ -534,6 +669,9 @@ def install(cls):
         current = dict(current)
         current.update(changes)
         scrapers[sid] = current
+        self.persist_runtime_config({
+            f"LEAD_FACTORY_SCRAPER_{sid}": json.dumps(current, ensure_ascii=False, sort_keys=True),
+        })
         print(
             f"single-sheet-ssot:scraper-health:{sid}:"
             f"{current.get('status', '')}:{current.get('health_status', '')}",
