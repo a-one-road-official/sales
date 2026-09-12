@@ -14,6 +14,7 @@ SSOT = "営業リスト＿Factory/BPO"
 
 def install(cls):
     native_read = cls.read
+    native_read_once = getattr(cls, "read_once", None)
 
     def _runtime_state(self):
         scrapers = getattr(self, "_single_sheet_scrapers", None)
@@ -729,6 +730,15 @@ def install(cls):
             "SalesControl_Events!",
         )):
             return []
+        return native_read(self, range_)
+
+    def read_once(self, range_):
+        """Keep single-sheet mode from reading deleted technical tabs directly."""
+        ref = str(range_ or "").replace("'", "")
+        if ref.startswith("LeadFactory_"):
+            return read(self, range_)
+        if callable(native_read_once):
+            return native_read_once(self, range_)
         return native_read(self, range_)
 
     native_update_range = cls.update_range
