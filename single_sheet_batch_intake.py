@@ -88,15 +88,17 @@ def _target_scope_decision(rec: dict, source) -> tuple[bool, str]:
                 "signal_type", "investment_stage", "funding", "round",
             )
         ).casefold()
-        series_match = re.search(r"series\\s*([b-z])\\b", stage_text)
+        series_match = re.search(r"series\s*([b-z])\b", stage_text)
         if not series_match:
-            series_match = re.search(r"\\b([b-z])\\s*round\\b", stage_text)
+            series_match = re.search(r"\b([b-z])\s*round\b", stage_text)
         if series_match and series_match.group(1) >= "b" and is_manufacturing:
             return True, "MANUFACTURING_SERIES_B_PLUS"
         if not is_manufacturing:
             return False, "NON_MANUFACTURING"
         return False, "FUNDING_STAGE_NOT_SERIES_B_PLUS"
     return False, "SOURCE_NOT_IN_TARGET_SCOPE"
+
+
 def append_raw_records_batched(repo, source, records):
     records = list(records or [])
     existing = repo._single_ssot_rows()
