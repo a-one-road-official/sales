@@ -384,52 +384,38 @@ jobs:
           PY
           )"
           if [ -z "${SOURCE_ID}" ]; then
-            # Discovery is asynchronous; use a durable existing German manufacturing source
-            # so a deployment always exercises the SSOT intake path immediately.
+            # Discovery is asynchronous; use the durable FME manufacturing member source.
             SOURCE_ID="source-368aa12471b67c0a9525"
-            echo "No new source ID; using existing WSM German manufacturing source ${SOURCE_ID}"
+            echo "No new source ID; using existing manufacturing Mittelstand source ${SOURCE_ID}"
           fi
-          if [ -n "${SOURCE_ID}" ]; then
-            echo "POST /source/${SOURCE_ID}/run (target source capture)"
-            timeout 540 curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --retry-delay 5 \
-              -X POST \
-              -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
-              -H "Content-Type: application/json" \
-              -d '{}' \
-              "${SERVICE_URL}/source/${SOURCE_ID}/run" | tee /tmp/bootstrap-source.json
-            echo
-          fi
-
-      - name: Dispatch qualification work after deploy
-        if: ${{ always() }}
-        continue-on-error: true
-        run: |
-          echo "Dispatching qualification work to Cloud Tasks; outbound sending remains disabled."
-          for LANE in growth mittelstand; do
-            timeout 180 curl --silent --show-error --fail-with-body               -X POST               -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}"               -H "Content-Type: application/json"               "${SERVICE_URL}/dispatch/${LANE}" | tee "/tmp/dispatch-${LANE}.json" ||               echo "::warning::dispatch ${LANE} deferred; scheduler retry remains active"
-          done
-
-      - name: Activate and verify execution after deploy
-        if: ${{ always() }}
-        continue-on-error: true
-        run: |
-          echo "Starting direct recovery execution; this step is independent of ChatGPT session lifetime."
-          for ATTEMPT in 1 2 3 4 5 6; do
-            RESPONSE="$(timeout 30 curl --silent --show-error --fail-with-body \
-              -X POST \
-              -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
-              -H "Content-Type: application/json" \
-              "${SERVICE_URL}/failover/domain" || true)"
-            echo "activation_attempt=${ATTEMPT} response=${RESPONSE:0:1000}"
-            PROCESSED="$(python -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print(int(d.get("processed",0) or 0))' <<<"${RESPONSE}" 2>/dev/null || echo 0)"
-            if [ "${PROCESSED}" -gt 0 ]; then
-              echo "execution_started processed=${PROCESSED}"
-              exit 0
+          # Drain multiple source pages per deployment. Each call is idempotent at the
+          # SSOT boundary and advances the source checkpoint; duplicates are retained
+          # as metrics and never appended.
+          for ITERATION in $(seq 1 20); do
+            echo "POST /source/${SOURCE_ID}/run (target source capture iteration=${ITERATION})"
+            RESPONSE="$(timeout 540 curl --silent --show-error --fail-with-body --retry 2 --retry-all-errors --retry-delay 5               -X POST               -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}"               -H "Content-Type: application/json"               -d '{}'               "${SERVICE_URL}/source/${SOURCE_ID}/run")"
+            echo "${RESPONSE}"
+            WRITTEN="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("written_row_count",0) or 0))' <<<"${RESPONSE}")"
+            REMAINING="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("remaining_queue",0) or 0))' <<<"${RESPONSE}")"
+            CANDIDATES="$(python -c 'import json,sys; print(int(json.loads(sys.stdin.read() or "{}").get("candidate_count",0) or 0))' <<<"${RESPONSE}")"
+            echo "source_iteration=${ITERATION} candidate_count=${CANDIDATES} written_row_count=${WRITTEN} remaining_queue=${REMAINING}"
+            if [ "${REMAINING}" -eq 0 ] && [ "${WRITTEN}" -eq 0 ]; then
+              echo "source_checkpoint_exhausted_or_zero_yield"
+              break
             fi
-            sleep 10
           done
-          echo "::warning::deployment succeeded; direct recovery execution is queued for Scheduler retry"
-
+          echo
+      - name: Dispatch qualification work after deploy
+        if: ${{ false }}
+        continue-on-error: true
+        run: |
+          echo "Qualification dispatch is deferred while the 1,500-company SSOT intake drains."
+          echo "Domain resolution and Gate remain separate downstream KPIs; external sending stays disabled."
+      - name: Activate and verify execution after deploy
+        if: ${{ false }}
+        continue-on-error: true
+        run: |
+          echo "Activation is deferred during target-only SSOT intake; external sending remains disabled."
       - name: Publish runtime execution status
         if: ${{ always() }}
         continue-on-error: true
