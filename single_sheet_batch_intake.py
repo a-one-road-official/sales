@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from datetime import datetime, timezone
 
@@ -40,6 +41,49 @@ def _emit(metrics: dict) -> None:
     )
 
 
+def _target_scope_decision(rec: dict, source) -> tuple[bool, str]:
+    """Keep new intake limited to manufacturing Mittelstand or manufacturing Series B+."""
+    source_type = str(getattr(source, "source_type", "") or "").upper()
+    source_text = " ".join(
+        str(rec.get(key) or "") for key in (
+            "industry", "sector", "category", "description", "business_description",
+            "tags", "manufacturing", "company_type", "source_name",
+        )
+    ).casefold()
+    manufacturing_tokens = (
+        "manufactur", "machinery", "machine tool", "industrial", "factory",
+        "automation", "robot", "engineering", "production", "fertigung",
+        "maschinen", "industrie", "produzione", "fabrication",
+    )
+    is_manufacturing = any(token in source_text for token in manufacturing_tokens)
+    if source_type.startswith("MITTELSTAND_"):
+        source_name = str(getattr(source, "source_name", "") or "").casefold()
+        association_tokens = (
+            "vdma", "vdw", "swissmem", "ucimu", "metall", "metaltechnology",
+            "technology industries", "fme", "manufactur", "machine",
+            "industrial", "engineering", "maschinen", "industrie",
+        )
+        if is_manufacturing or any(token in source_name for token in association_tokens):
+            return True, "MANUFACTURING_MITTELSTAND"
+        return False, "NON_MANUFACTURING_MITTELSTAND"
+    if source_type.startswith(("GROWTH", "EXHIBITION")):
+        stage_text = " ".join(
+            str(rec.get(key) or "") for key in (
+                "funding_stage", "stage", "series", "latest_funding_round",
+                "investment_stage", "funding", "round",
+            )
+        ).casefold()
+        series_match = re.search(r"series\\s*([b-z])\\b", stage_text)
+        if not series_match:
+            series_match = re.search(r"\\b([b-z])\\s*round\\b", stage_text)
+        if series_match and series_match.group(1) >= "b" and is_manufacturing:
+            return True, "MANUFACTURING_SERIES_B_PLUS"
+        if not is_manufacturing:
+            return False, "NON_MANUFACTURING"
+        return False, "FUNDING_STAGE_NOT_SERIES_B_PLUS"
+    return False, "SOURCE_NOT_IN_TARGET_SCOPE"
+
+
 def append_raw_records_batched(repo, source, records):
     records = list(records or [])
     existing = repo._single_ssot_rows()
@@ -73,6 +117,8 @@ def append_raw_records_batched(repo, source, records):
     candidate_count = 0
     dropped_missing_name = 0
     dropped_invalid_name = 0
+    dropped_out_of_scope = 0
+    out_of_scope_reasons = {}
     duplicate_examples = []
     decision_examples = []
 
@@ -83,6 +129,11 @@ def append_raw_records_batched(repo, source, records):
             continue
         if not _is_valid_company_name(name, source.source_type, source.source_name):
             dropped_invalid_name += 1
+            continue
+        in_scope, scope_reason = _target_scope_decision(rec, source)
+        if not in_scope:
+            dropped_out_of_scope += 1
+            out_of_scope_reasons[scope_reason] = out_of_scope_reasons.get(scope_reason, 0) + 1
             continue
         candidate_count += 1
         name_key = repo._normalize_name(name)
@@ -172,6 +223,9 @@ def append_raw_records_batched(repo, source, records):
         "error_count": 0,
         "dropped_missing_name": dropped_missing_name,
         "dropped_invalid_name": dropped_invalid_name,
+        "dropped_out_of_scope": dropped_out_of_scope,
+        "out_of_scope_reasons": out_of_scope_reasons,
+        "target_scope": "MANUFACTURING_SERIES_B_PLUS_OR_MANUFACTURING_MITTELSTAND",
         "duplicate_examples": duplicate_examples,
         "decision_examples": decision_examples,
         "readback_match": False,
