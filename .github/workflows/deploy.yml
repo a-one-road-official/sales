@@ -386,7 +386,7 @@ jobs:
           if [ -z "${SOURCE_ID}" ]; then
             # Discovery is asynchronous; use a durable existing German manufacturing source
             # so a deployment always exercises the SSOT intake path immediately.
-            SOURCE_ID="source-132f8aa91c4428e9e729"
+            SOURCE_ID="source-368aa12471b67c0a9525"
             echo "No new source ID; using existing WSM German manufacturing source ${SOURCE_ID}"
           fi
           if [ -n "${SOURCE_ID}" ]; then
