@@ -783,6 +783,7 @@ def install(cls):
         return {"events_scanned": 0, "event_counts": {}, "failure_counts": {}, "last_events": []}
 
     cls.read = read
+    cls.read_once = read_once
     cls.update_range = update_range
     cls.update_message_draft = update_message_draft
     cls.update_approval_queue_for_draft = update_approval_queue_for_draft
