@@ -8,13 +8,19 @@ from production_controller import UTC, THROUGHPUT_MIN_PER_MINUTE, THROUGHPUT_TAR
 def install(cls):
     def _config(self):
         cfg = dict(self.sheets.get_config())
-        cfg.update(getattr(self, "_runtime_goal_config", {}))
+        # The existing config tab is authoritative across Cloud Run instances.
+        # Keep an in-process value only as a fallback for older test doubles.
+        for key, value in getattr(self, "_runtime_goal_config", {}).items():
+            cfg.setdefault(key, value)
         return cfg
 
     def _set_config(self, values):
         rendered = {str(k): str(v) for k, v in values.items()}
         current = dict(getattr(self, "_runtime_goal_config", {}))
         current.update(rendered)
+        persist = getattr(self.sheets, "persist_runtime_config", None)
+        if callable(persist):
+            persist(rendered)
         self._runtime_goal_config = current
         backing = getattr(self.sheets, "config", None)
         if isinstance(backing, dict):
