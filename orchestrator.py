@@ -455,16 +455,21 @@ class LeadFactory:
 
         expected_min = int(scraper.get("expected_min_count") or 0)
         actual = len(records)
+        coverage_warning = ""
         if actual == 0 or (expected_min > 0 and actual < max(1, int(expected_min * 0.70))):
+            # Coverage is a source-health signal, not an SSOT admission gate.
+            # The production contract admits any named, non-duplicate company;
+            # only a truly empty extraction is a source execution failure.
             failures = int(scraper.get("consecutive_failures") or 0) + 1
-            reason = f"coverage_drop:actual={actual},expected_min={expected_min}"
+            coverage_warning = f"coverage_drop:actual={actual},expected_min={expected_min}"
             self.sheets.update_scraper_health(
                 source.source_id,
                 health_status="DEGRADED",
                 consecutive_failures=failures,
-                last_error=reason,
+                last_error=coverage_warning,
             )
-            raise RuntimeError(reason)
+            if actual == 0:
+                raise RuntimeError(coverage_warning)
 
         new_count, dup_count = self.sheets.append_raw_records(source, records)
         intake = dict(getattr(self.sheets, "_last_intake_metrics", {}) or {})
