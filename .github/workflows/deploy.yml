@@ -242,9 +242,12 @@ jobs:
           upsert_job lead-factory-dispatch-growth "*/2 * * * *" "${URL}/dispatch/growth"
           upsert_job lead-factory-dispatch-mittelstand "1-59/2 * * * *" "${URL}/dispatch/mittelstand"
           upsert_job lead-factory-promotion "1-59/2 * * * *" "${URL}/promotion/tick"
-          upsert_job lead-factory-outreach-ready "*/5 * * * *" "${URL}/prep/tick"
+          # The current qualified target is manufacturing Series B+ / Mittelstand.
+          # Disable non-target MAKTEK and outreach-prep schedulers that previously caused
+          # long-running 503s before SSOT intake completed.
+          gcloud scheduler jobs pause lead-factory-outreach-ready --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
+          gcloud scheduler jobs pause lead-factory-maktek-full --location="$REGION" --project="$PROJECT" >/dev/null 2>&1 || true
           upsert_job lead-factory-control "4-59/10 * * * *" "${URL}/control/tick"
-          upsert_job lead-factory-maktek-full "0 */2 * * *" "${URL}/maktek/ingest"
 
           # Pause every historical sacrifice job, including run-scoped names.
           for NAME in $(gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' | sed 's#.*/##' | grep -E '^lead-factory-(approved-sacrifice|sacrifice)(-|$)' || true); do
@@ -303,6 +306,7 @@ jobs:
 
 
       - name: Bootstrap outreach Prompt refresh
+        if: ${{ false }}
         continue-on-error: true
         run: |
           echo "POST /prep/tick (internal outreach Prompt SSOT refresh)"
@@ -315,6 +319,8 @@ jobs:
           echo
 
       - name: Bootstrap deterministic MAKTEK raw capture
+        if: ${{ false }}
+        continue-on-error: true
         run: |
           set -euo pipefail
           echo "POST /maktek/ingest (SSOT intake with readback verification)"
@@ -328,6 +334,21 @@ jobs:
           test "${READBACK}" = "true"
           echo "MAKTEK SSOT intake verified: written_row_count=${WRITTEN} readback_match=${READBACK}"
           echo
+
+      - name: Bootstrap target discovery lanes
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          echo "Starting target-only discovery: manufacturing Series B+ and manufacturing Mittelstand."
+          for LANE in growth mittelstand; do
+            timeout 180 curl --fail-with-body --silent --show-error --retry 3 --retry-all-errors --retry-delay 3 \
+              -X POST \
+              -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
+              -H "Content-Type: application/json" \
+              "${SERVICE_URL}/discover/${LANE}" | tee "/tmp/discover-${LANE}.json" || \
+              echo "::warning::target discovery ${LANE} deferred; five-minute scheduler remains active"
+          done
 
       - name: Bootstrap promotion ledger reconciliation
         if: ${{ always() }}
