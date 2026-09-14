@@ -528,3 +528,85 @@ CONTACT (use exact email only if present; do not infer one):
         if not subject or not body:
             raise RuntimeError("draft_missing_subject_or_body")
         return {"subject": subject, "body": body}
+
+
+    def evaluate_crm_evidence(self, company_context: dict, evidence: list[dict]) -> dict:
+        """Extract buyer-side commercial facts from Gmail and meeting-note evidence.
+
+        The model only extracts facts. Stage/Yomi are derived deterministically by
+        crm_evidence_engine.py so seller-side optimism cannot promote forecast.
+        """
+        prompt = f"""
+You are the A-one road CRM Evidence Extraction Agent.
+
+Read the supplied Gmail messages and Google Drive meeting documents as a time-ordered evidence corpus for ONE company.
+Your task is fact extraction only. Do not assign CRM Stage, Yomi, probability, or deal status.
+
+Core rules:
+1. Distinguish BUYER statements from SELLER statements. Seller plans, proposals, suggested dates, pricing, forecasts, and optimism are never buyer commitment.
+2. A reply, meeting, discovery call, proposal, or estimate/quotation alone is PRE-FORECAST.
+3. Use the latest dated BUYER evidence when evidence conflicts. Example: an older positive meeting note is overridden by a later buyer email saying budget is unavailable.
+4. "Internal review" means the buyer explicitly says they are taking the offer/plan to colleagues, management, CEO, board, procurement, finance, or another decision process.
+5. "Decision maker review" requires evidence that an economic buyer / decision maker is reviewing or has been brought into the process.
+6. Budget CONFIRMED requires explicit buyer-side budget availability/approval. CHECKING means the buyer says budget is being checked/requested. UNAVAILABLE requires explicit lack of budget.
+7. Scope AGREED requires explicit buyer agreement to a materially defined scope. PARTIAL means concrete scope alignment exists but material items remain.
+8. Timeline CONFIRMED requires a concrete buyer-side target/start/decision date. TENTATIVE means a buyer-side approximate period. Seller-proposed dates do not count.
+9. Legal/procurement ACTIVE requires explicit buyer-side legal/procurement action.
+10. Contract SIGNED, PO ISSUED, payment RECEIVED/PROCESSING require explicit evidence. Never infer from silence.
+11. assessment_complete=true only when the corpus is sufficient to judge whether a buyer-side forecast commitment exists. If evidence is sparse/ambiguous, false.
+12. citations must point to the exact supplied evidence objects and quote only the shortest necessary phrase.
+
+Return ONLY JSON:
+{{
+  "assessment_complete": true,
+  "buyer_signals": {{
+    "human_reply": false,
+    "meeting_held": false,
+    "proposal_requested": false,
+    "proposal_reviewed": false,
+    "internal_review": false,
+    "decision_maker_review": false,
+    "budget": "CONFIRMED|CHECKING|UNAVAILABLE|UNKNOWN",
+    "scope": "AGREED|PARTIAL|UNKNOWN",
+    "timeline": "CONFIRMED|TENTATIVE|UNKNOWN",
+    "legal": "ACTIVE|NONE",
+    "procurement": "ACTIVE|NONE",
+    "contract": "SIGNED|REVIEW|NONE",
+    "po": "ISSUED|PENDING|NONE",
+    "payment": "RECEIVED|PROCESSING|NONE",
+    "paused": false,
+    "declined": false
+  }},
+  "latest_buyer_statement_at": "",
+  "decision_reason": "one concise factual explanation",
+  "next_action": "next internal action, if supported",
+  "due": "YYYY-MM-DD or empty",
+  "risk": "concise current risk",
+  "summary": "concise latest commercial state",
+  "citations": [
+    {{
+      "source_type": "GMAIL|DRIVE_DOC",
+      "source_id": "",
+      "source_url": "",
+      "date": "",
+      "actor": "BUYER|SELLER|MIXED",
+      "quote": "short exact evidence"
+    }}
+  ]
+}}
+
+COMPANY CONTEXT:
+{json.dumps(company_context, ensure_ascii=False)[:12000]}
+
+EVIDENCE:
+{json.dumps(evidence, ensure_ascii=False)[:110000]}
+"""
+        resp = self.client.responses.create(model=self.model, input=prompt)
+        data = self._json(resp.output_text)
+        if not isinstance(data, dict):
+            raise RuntimeError("crm_evidence_result_not_object")
+        if not isinstance(data.get("buyer_signals"), dict):
+            data["buyer_signals"] = {}
+        if not isinstance(data.get("citations"), list):
+            data["citations"] = []
+        return data
