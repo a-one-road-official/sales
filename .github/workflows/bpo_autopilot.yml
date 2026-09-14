@@ -1,90 +1,24 @@
-name: Sales/GTM outbound autopilot (auto-start, durable 10-batch loop)
+name: EMERGENCY STOP — all autonomous Google Cloud automation
 
 on:
   push:
-    branches:
-      - main
-    # Start/restart only when the shared outbound runtime changes.
-    # EC/form-audit pushes must not reset a live Sales/GTM batch.
+    branches: [main]
     paths:
       - '.github/workflows/bpo_autopilot.yml'
-      - 'main.py'
-      - 'outreach_autopilot.py'
-      - 'outreach_execution.py'
-      - 'outreach_stability.py'
-      - 'sacrifice_failure_loop.py'
-      - 'sacrifice_web_research.py'
-      - 'sales_leads_*.py'
-      - 'safe_fetch.py'
-      - 'sheets_repo.py'
-      - 'drive_repo.py'
-      - 'llm.py'
-      - 'models.py'
-      - 'settings.py'
-      - 'runtime.py'
-      - 'gate_*.py'
-      - 'notifier.py'
-      - 'observability.py'
-      - 'requirements.txt'
   workflow_dispatch:
-    inputs:
-      execute_sales_gtm:
-        description: "Keep the approved Sales/GTM outbound autopilot running"
-        required: false
-        default: true
-        type: boolean
-      target_successes:
-        description: "Successful Sales/GTM sends required before completion"
-        required: false
-        default: "2500"
-        type: string
-      max_attempts:
-        description: "Maximum unique send attempts before source-capacity stop"
-        required: false
-        default: "4000"
-        type: string
-      job_id:
-        description: "Optional idempotent job identifier"
-        required: false
-        default: ""
-        type: string
+
 permissions:
   contents: read
   id-token: write
 
-concurrency:
-  group: lead-factory-sales-gtm-autopilot
-  cancel-in-progress: false
-
 jobs:
-  sales-gtm-autopilot:
-    # Startup is automatic for the approved Sales/GTM lane; Factory and SSOT sends remain disabled by runtime gates.
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.execute_sales_gtm == true) }}
+  stop:
     runs-on: ubuntu-latest
-      # Actions deploys and observes the worker. Cloud Run continues the job.
-    timeout-minutes: 60
     env:
       PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       REGION: asia-northeast1
-      # Stable service identity: the runtime outlives this Actions invocation.
-      SERVICE: aone-bpo-autopilot
       RUNTIME_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      OPENAI_SECRET: aone-openai-api-key
-      TARGET_SUCCESS_INPUT: ${{ inputs.target_successes || '2500' }}
-      MAX_ATTEMPTS_INPUT: ${{ inputs.max_attempts || '4000' }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Python compile check
-        run: python -m compileall .
-
-      - name: Run tests
-        run: |
-          pip install -r requirements.txt
-          pytest -q
-
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
         with:
@@ -92,112 +26,46 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Generate internal runtime token
-        run: |
-          TOKEN="$(openssl rand -hex 32)"
-          echo "::add-mask::$TOKEN"
-          echo "INTERNAL_TOKEN=$TOKEN" >> "$GITHUB_ENV"
-
-      - name: Configure Docker auth
-        run: gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
-
-      - name: Inspect Gmail delegation prerequisites
-        continue-on-error: true
+      - name: Disable Vertex AI API
         run: |
           set +e
-          echo "Runtime service account: $RUNTIME_SA"
-          echo "Service accounts visible to the deploy identity:"
-          gcloud iam service-accounts list --project="$PROJECT" --format="value(email)"
-          echo "Gmail/OAuth/credential-related Secret Manager names visible to the deploy identity:"
-          gcloud secrets list --project="$PROJECT" --format="value(name)" | grep -Ei "gmail|oauth|credential|service|google" || true
-          echo "Runtime service-account IAM policy:"
-          gcloud iam service-accounts get-iam-policy "$RUNTIME_SA" --project="$PROJECT" --format="yaml(bindings)" || true
-          echo "Attempting the required self-signing grant:"
-          gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
-            --member="serviceAccount:$RUNTIME_SA" \
-            --role="roles/iam.serviceAccountTokenCreator" \
-            --project="$PROJECT" \
-            --quiet
-          echo "Gmail delegation prerequisite inspection completed; runtime will fail closed if no usable backend is available."
+          gcloud services disable aiplatform.googleapis.com --project="$PROJECT" --force || true
 
-      - name: Build and push the shared application image
+      - name: Pause all Lead Factory schedulers
         run: |
-          IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
-          docker build -t "$IMAGE" .
-          docker push "$IMAGE"
-
-      - name: Deploy approved Sales/GTM runtime
-        run: |
-          set -euo pipefail
-          IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
-          gcloud run deploy "$SERVICE" \
-            --image="$IMAGE" \
-            --region="$REGION" \
-            --platform=managed \
-            --service-account="$RUNTIME_SA" \
-            --allow-unauthenticated \
-            --timeout=540 \
-            --concurrency=1 \
-            --min=1 \
-            --max=1 \
-            --no-cpu-throttling \
-            --cpu=2 \
-            --memory=2Gi \
-            --update-env-vars="^|^GOOGLE_CLOUD_PROJECT=${PROJECT}|GCP_PROJECT=${PROJECT}|LEAD_FACTORY_SPREADSHEET_ID=1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo|LEAD_FACTORY_DRIVE_ROOT_FOLDER_ID=14JY0cfJrNM9uteVmPOQ-SDoYKkSrEX3E|LEAD_FACTORY_DRIVE_SCRAPERS_FOLDER_ID=1c5vE9oAGMXn209JKIyGonJ7pZ4-1bplk|LEAD_FACTORY_OPENAI_SECRET=${OPENAI_SECRET}|LEAD_FACTORY_INTERNAL_TOKEN=${INTERNAL_TOKEN}|LEAD_FACTORY_DRIVE_IMPERSONATE=admin@a1-road.com|LEAD_FACTORY_GMAIL_IMPERSONATE=admin@a1-road.com|LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT=${RUNTIME_SA}|OUTREACH_PROMPT_DOC_TITLE=outreach_prompt_production_v1|LEAD_FACTORY_LIST_ONLY_LOCK=FALSE|LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=TRUE|LEAD_FACTORY_SEND_MODE=ENABLED|LEAD_FACTORY_GMAIL_MODE=SEND|LEAD_FACTORY_EXPLICIT_SEND_APPROVAL=TRUE|OUTREACH_AUTOPILOT_LANE=SALES_GTM|OUTREACH_ALLOWED_LANES=SALES_GTM|OUTREACH_SACRIFICE_LANES=SALES_GTM|OUTREACH_BPO_SEND_ENABLED=FALSE|OUTREACH_SALES_GTM_SEND_ENABLED=TRUE|OUTREACH_FAST_SALES_GTM_MODE=TRUE|OUTREACH_FORM_AUDIT_TEMPLATE_ONLY=TRUE|OUTREACH_FAST_SALES_GTM_EMAIL_FIRST=TRUE|OUTREACH_SALES_GTM_RETRY_FAILED=TRUE|OUTREACH_FAST_SALES_GTM_CONTACT_RESEARCH=TRUE|OUTREACH_FORM_ACTION_TIMEOUT_MS=7000|OUTREACH_SITE_REQUEST_TIMEOUT_SECONDS=12|OUTREACH_LLM_TIMEOUT_MS=30000|OUTREACH_AUTOPILOT_BATCH_RETRIES=8|OUTREACH_LIVE_SOURCE_MAX_ROW=6401|OUTREACH_EXECUTION_LOG_MAX_ROW=6000|OUTREACH_SACRIFICE_SEND_ENABLED=FALSE|OUTREACH_FACTORY_SEND_ENABLED=FALSE|OUTREACH_SSOT_SEND_ENABLED=FALSE|LEAD_FACTORY_FACTORY_SEND_ENABLED=FALSE|OUTREACH_AUTOPILOT_ENABLED=TRUE|OUTREACH_AUTOPILOT_AUTOSTART=TRUE|OUTREACH_AUTOPILOT_JOB_ID=sales-gtm-auto-${GITHUB_RUN_ID}|OUTREACH_SALES_GTM_TARGET_SUCCESS=${TARGET_SUCCESS_INPUT}|OUTREACH_SALES_GTM_MAX_ATTEMPTS=${MAX_ATTEMPTS_INPUT}|OUTREACH_STABLE_BATCHES_REQUIRED=3|OUTREACH_STABLE_BATCH_MIN_SUCCESS=5|OUTREACH_CRITICAL_ERROR_RESETS=TRUE|OUTREACH_AUTONOMY_SUPERVISOR_ENABLED=FALSE|LEAD_FACTORY_ALLOW_DELETE=FALSE|LEAD_FACTORY_INTERNAL_NOTIFY_ENABLED=FALSE|LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED=FALSE|LEAD_FACTORY_SHEETS_READ_MIN_INTERVAL_SECONDS=0.5|LEAD_FACTORY_SHEETS_READ_CACHE_TTL_SECONDS=10|LEAD_FACTORY_SHEETS_WRITE_MIN_INTERVAL_SECONDS=0.25" \
-            --project="$PROJECT"
-          URL="$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format='value(status.url)')"
-          test -n "$URL"
-          echo "SERVICE_URL=$URL" >> "$GITHUB_ENV"
-
-      - name: Verify Sales/GTM runtime gate
-        run: |
-          set -euo pipefail
-          curl --fail-with-body --silent --show-error --max-time 60 \
-            -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
-            "${SERVICE_URL}/healthz/deep" \
-            -o /tmp/sales-gtm-health.json
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          result = json.loads(Path("/tmp/sales-gtm-health.json").read_text())
-          print(json.dumps(result, ensure_ascii=False, indent=2))
-          assert result.get("autopilot_lane") == "SALES_GTM", result
-          assert result.get("sales_gtm_send") is True, result
-          assert result.get("bpo_send") is False, result
-          assert result.get("factory_send") is False, result
-          assert result.get("ssot_send") is False, result
-          PY
-          echo "Sales/GTM is enabled; BPO, Factory and SSOT sends are disabled."
-
-      - name: Confirm automatic Sales/GTM autopilot startup
-        run: |
-          set -euo pipefail
-          for attempt in $(seq 1 12); do
-            curl --fail-with-body --silent --show-error --max-time 60 \
-              -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
-              "${SERVICE_URL}/outreach/sales-gtm-autopilot/status" \
-              -o /tmp/sales-gtm-status.json
-            STATUS="$(python -c 'import json; print(json.load(open("/tmp/sales-gtm-status.json")).get("status", "UNKNOWN"))')"
-            python -m json.tool /tmp/sales-gtm-status.json | tail -80
-            case "$STATUS" in
-              COMPLETED_TARGET)
-                exit 0
-                ;;
-              SOURCE_CAPACITY_SHORTFALL|SOURCE_EXHAUSTED|TARGET_NOT_REACHED|FAILED|BLOCKED|PAUSED_SAFETY|STOPPED)
-                echo "Sales/GTM autopilot ended with status=$STATUS" >&2
-                exit 1
-                ;;
-              NO_JOB)
-                if [ "$attempt" -ge 3 ]; then
-                  echo "Sales/GTM autopilot did not auto-start" >&2
-                  exit 1
-                fi
-                ;;
-            esac
-            sleep 10
+          set +e
+          for JOB in $(gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' --filter='name:lead-factory' | sed 's#.*/##'); do
+            [ -n "$JOB" ] || continue
+            echo "Pausing $JOB"
+            gcloud scheduler jobs pause "$JOB" --location="$REGION" --project="$PROJECT" || true
           done
-          echo "Sales/GTM autopilot is running on ${SERVICE_URL}; Cloud Run remains active after this workflow exits."
 
+      - name: Pause Lead Factory task queues
+        run: |
+          set +e
+          for QUEUE in lead-factory-workers lead-factory-priority-workers; do
+            gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT" || true
+          done
 
-# The fixed Cloud Run service is intentionally retained. The durable job stops itself
-# at COMPLETED_TARGET, SOURCE_CAPACITY_SHORTFALL, TARGET_NOT_REACHED, or PAUSED_SAFETY.
+      - name: Stop autonomous Cloud Run services
+        run: |
+          set +e
+          gcloud run services update aone-lead-factory \
+            --region="$REGION" --project="$PROJECT" \
+            --min=0 --cpu-throttling \
+            --update-env-vars=LEAD_FACTORY_ENABLED=FALSE,LEAD_FACTORY_HUMAN_REVIEW_ENABLED=FALSE,LEAD_FACTORY_AUTONOMY_MODE=PAUSED,LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_SEND_MODE=DISABLED,OUTREACH_AUTOPILOT_ENABLED=FALSE,OUTREACH_AUTOPILOT_AUTOSTART=FALSE || true
+          gcloud run services update aone-bpo-autopilot \
+            --region="$REGION" --project="$PROJECT" \
+            --min=0 --cpu-throttling \
+            --update-env-vars=LEAD_FACTORY_ENABLED=FALSE,LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_SEND_MODE=DISABLED,LEAD_FACTORY_GMAIL_MODE=DRAFT_ONLY,OUTREACH_AUTOPILOT_ENABLED=FALSE,OUTREACH_AUTOPILOT_AUTOSTART=FALSE,OUTREACH_SALES_GTM_SEND_ENABLED=FALSE || true
+
+      - name: Verify stopped state
+        run: |
+          echo '--- scheduler states ---'
+          gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --filter='name:lead-factory' --format='table(name.basename(),state)' || true
+          echo '--- task queues ---'
+          for QUEUE in lead-factory-workers lead-factory-priority-workers; do
+            gcloud tasks queues describe "$QUEUE" --location="$REGION" --project="$PROJECT" --format='yaml(name,state)' || true
+          done
+          echo '--- services ---'
+          gcloud run services list --region="$REGION" --project="$PROJECT" --filter='metadata.name:(aone-lead-factory OR aone-bpo-autopilot)' --format='table(metadata.name,status.latestReadyRevisionName)' || true
