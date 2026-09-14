@@ -17,6 +17,19 @@ LOGISTICS = (
     "freight", "delivery", "shipping", "procurement", "inventory",
     "物流", "配送", "倉庫", "輸送", "貨物", "調達", "在庫",
 )
+CONSUMER_EDUCATION = (
+    "childcare", "child care", "daycare", "early learning", "preschool",
+    "children", "kids", "k-12", "k12", "student", "students", "parents",
+    "families", "tutoring", "school", "homework", "teen", "youth",
+    "幼児", "子ども", "児童", "学生", "保護者", "家庭", "塾", "学校",
+)
+INDUSTRIAL_EDUCATION = (
+    "workforce", "employee", "employees", "operator training",
+    "industrial training", "manufacturing training", "factory training",
+    "safety training", "upskilling", "reskilling", "職業訓練", "従業員",
+    "技能", "現場教育", "製造教育",
+)
+REVIEW_RULE_VERSION = "2026-09-14-v2"
 
 PROMPT = """
 You are A-one road's one-company fresh research worker.
@@ -91,6 +104,25 @@ def _is_logistics(result: dict) -> bool:
     return any(term in low for term in LOGISTICS)
 
 
+def _is_consumer_education(result: dict) -> bool:
+    terms = " ".join(
+        _text(result.get(key))
+        for key in (
+            "what_it_solves", "industrial_connection", "subcategory",
+            "category", "reason", "japan_distributor_status",
+        )
+    )
+    terms += " " + " ".join(
+        _text(x)
+        for key in ("vertical_terms", "customer_types")
+        for x in (result.get(key, []) or [])
+    )
+    low = terms.lower()
+    consumer = any(term in low for term in CONSUMER_EDUCATION)
+    industrial = any(term in low for term in INDUSTRIAL_EDUCATION)
+    return consumer and not industrial and not _is_logistics(result)
+
+
 def _normalize(result: dict) -> dict:
     official = _url(result.get("official_url"))
     evidence = []
@@ -102,18 +134,23 @@ def _normalize(result: dict) -> dict:
         return {"status": "RESEARCH_ERROR", "error": "official_url_not_confirmed"}
 
     logistics = _is_logistics(result)
+    consumer_education = _is_consumer_education(result)
     category = _text(result.get("category"))
     if category not in CATEGORIES:
         category = "その他"
     raw_keep = result.get("keep_in_factory")
     if isinstance(raw_keep, str):
         raw_keep = raw_keep.strip().lower() in {"true", "yes", "1"}
-    keep = bool(raw_keep) or logistics
+    keep = (bool(raw_keep) or logistics) and not consumer_education
     if keep:
         category = "Factory"
+    if consumer_education:
+        category = "その他"
     subcategory = _text(result.get("subcategory"))
     if logistics:
         subcategory = "Industrial Logistics / SCM"
+    elif consumer_education:
+        subcategory = "Education / Childcare"
     if not subcategory:
         subcategory = "Industrial Technology / B2B Infrastructure" if keep else "Non-AUMS"
     confidence = _text(result.get("confidence")).title()
@@ -129,7 +166,9 @@ def _normalize(result: dict) -> dict:
         "keep_in_factory": keep,
         "category": category,
         "subcategory": subcategory,
-        "eligibility": _text(result.get("eligibility")).upper() or ("PASS" if keep else "FAIL"),
+        "eligibility": "FAIL" if consumer_education else (
+            _text(result.get("eligibility")).upper() or ("PASS" if keep else "FAIL")
+        ),
         "reason": _text(result.get("reason")),
         "japan_status": _text(result.get("japan_status")).upper() or "UNKNOWN",
         "japan_distributor_status": _text(result.get("japan_distributor_status")) or "UNKNOWN",
@@ -196,9 +235,9 @@ def _write(factory, sheet: str, headers: list[str], number: int, changes: dict) 
 def _reason(old: str, review_date: str, value: dict) -> str:
     detail = value["reason"] or value["industrial_connection"] or value["what_it_solves"]
     line = (
-        "[全社再調査 {}] 公式URL確認: {} | {} | 分類={}/{} | Factory維持={}"
+        "[全社再調査 {} rules={}] 公式URL確認: {} | {} | 分類={}/{} | Factory維持={}"
     ).format(
-        review_date, value["official_url"], detail, value["category"],
+        review_date, REVIEW_RULE_VERSION, value["official_url"], detail, value["category"],
         value["subcategory"], "YES" if value["keep_in_factory"] else "NO",
     )
     old = _text(old)
@@ -267,7 +306,10 @@ def run_human_ssot_review_tick(factory, limit: int | None = None) -> dict:
     candidates = [
         value for value in rows
         if _text(value.get("company_name"))
-        and _text(value.get("reviewed_at")) != review_date
+        and (
+            _text(value.get("reviewed_at")) != review_date
+            or REVIEW_RULE_VERSION not in _text(value.get("ステータス理由"))
+        )
         and not _text(value.get("reviewed_at")).startswith("IN_PROGRESS:")
     ][:requested]
     if not candidates:
@@ -291,7 +333,13 @@ def run_human_ssot_review_tick(factory, limit: int | None = None) -> dict:
     remaining = 0
     for value in factory.sheets.read("'{}'!A2:V".format(sheet)):
         padded = list(value) + [""] * max(0, len(headers) - len(value))
-        if _text(padded[0]) and _text(padded[headers.index("reviewed_at")]) != review_date:
+        if (
+            _text(padded[0])
+            and (
+                _text(padded[headers.index("reviewed_at")]) != review_date
+                or REVIEW_RULE_VERSION not in _text(padded[headers.index("ステータス理由")])
+            )
+        ):
             remaining += 1
     return {
         "status": "PROGRESS",
