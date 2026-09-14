@@ -58,7 +58,7 @@ def test_personal_childcare_is_not_factory():
         "industrial_connection": "Personal education and childcare",
         "keep_in_factory": True,
         "category": "Factory",
-        "subcategory": "Education",
+        "subcategory": "Industrial Logistics / SCM",
         "eligibility": "PASS",
         "reason": "Consumer childcare service",
         "confidence": "High",
