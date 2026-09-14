@@ -105,7 +105,10 @@ def _normalize(result: dict) -> dict:
     category = _text(result.get("category"))
     if category not in CATEGORIES:
         category = "その他"
-    keep = bool(result.get("keep_in_factory")) or logistics
+    raw_keep = result.get("keep_in_factory")
+    if isinstance(raw_keep, str):
+        raw_keep = raw_keep.strip().lower() in {"true", "yes", "1"}
+    keep = bool(raw_keep) or logistics
     if keep:
         category = "Factory"
     subcategory = _text(result.get("subcategory"))
