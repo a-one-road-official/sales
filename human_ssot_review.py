@@ -21,15 +21,19 @@ CONSUMER_EDUCATION = (
     "childcare", "child care", "daycare", "early learning", "preschool",
     "children", "kids", "k-12", "k12", "student", "students", "parents",
     "families", "tutoring", "school", "homework", "teen", "youth",
-    "幼児", "子ども", "児童", "学生", "保護者", "家庭", "塾", "学校",
+    "education", "edtech", "learning platform", "online course", "courses",
+    "learner", "learners", "teacher", "teachers", "university", "bootcamp",
+    "academic", "early childhood", "parent education",
+    "幼児", "子ども", "児童", "学生", "保護者", "家庭", "塾", "学校", "教育",
 )
 INDUSTRIAL_EDUCATION = (
     "workforce", "employee", "employees", "operator training",
     "industrial training", "manufacturing training", "factory training",
-    "safety training", "upskilling", "reskilling", "職業訓練", "従業員",
-    "技能", "現場教育", "製造教育",
+    "safety training", "upskilling", "reskilling", "corporate training",
+    "business training", "professional development", "workplace",
+    "職業訓練", "従業員", "技能", "現場教育", "製造教育",
 )
-REVIEW_RULE_VERSION = "2026-09-14-v2"
+REVIEW_RULE_VERSION = "2026-09-14-v3"
 
 PROMPT = """
 You are A-one road's one-company fresh research worker.
@@ -95,12 +99,10 @@ def _url(value: Any) -> str:
 
 
 def _is_logistics(result: dict) -> bool:
-    terms = " ".join(
-        _text(result.get(key))
-        for key in ("what_it_solves", "industrial_connection", "subcategory", "category")
-    )
-    terms += " " + " ".join(_text(x) for x in result.get("vertical_terms", []) or [])
-    low = terms.lower()
+    # Use the factual solution description as the primary signal. Model reasons
+    # often repeat the full eligibility rubric, which creates false logistics hits.
+    primary = _text(result.get("what_it_solves"))
+    low = primary.lower()
     return any(term in low for term in LOGISTICS)
 
 
@@ -151,6 +153,8 @@ def _normalize(result: dict) -> dict:
         subcategory = "Industrial Logistics / SCM"
     elif consumer_education:
         subcategory = "Education / Childcare"
+    elif subcategory == "Industrial Logistics / SCM":
+        subcategory = "Industrial Technology / B2B Infrastructure" if keep else "Non-AUMS"
     if not subcategory:
         subcategory = "Industrial Technology / B2B Infrastructure" if keep else "Non-AUMS"
     confidence = _text(result.get("confidence")).title()
