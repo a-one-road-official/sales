@@ -30,6 +30,7 @@ from sales_leads_sacrifice_run import run_ten_sacrifice_batch
 from observability import failure_code, record_event
 from sheets_repo import SheetsRepo
 from single_sheet_batch_intake import append_raw_records_batched
+from human_ssot_review import run_human_ssot_review_tick
 SheetsRepo.append_raw_records = append_raw_records_batched
 
 
@@ -315,6 +316,19 @@ def ops_status():
             "autopilot_lane": _autopilot_lane(),
             "bpo_autopilot": get_bpo_autopilot().status(),
         }
+    except Exception as exc:
+        _fail(exc)
+
+
+
+
+@app.post("/human-ssot/review/tick")
+def human_ssot_review_tick():
+    try:
+        return run_human_ssot_review_tick(
+            get_factory(),
+            limit=int(os.getenv("LEAD_FACTORY_HUMAN_REVIEW_BATCH_SIZE", "6") or 6),
+        )
     except Exception as exc:
         _fail(exc)
 
