@@ -45,3 +45,25 @@ def test_non_logistics_string_false_does_not_force_factory():
     })
     assert value["keep_in_factory"] is False
     assert value["category"] == "その他"
+
+    
+
+def test_personal_childcare_is_not_factory():
+    value = _normalize({
+        "official_url": "https://dosteducation.com",
+        "evidence_urls": ["https://dosteducation.com/"],
+        "what_it_solves": "Early learning and childcare support for children and families",
+        "vertical_terms": ["children", "early learning"],
+        "customer_types": ["parents", "families"],
+        "industrial_connection": "Personal education and childcare",
+        "keep_in_factory": True,
+        "category": "Factory",
+        "subcategory": "Education",
+        "eligibility": "PASS",
+        "reason": "Consumer childcare service",
+        "confidence": "High",
+    })
+    assert value["keep_in_factory"] is False
+    assert value["category"] == "その他"
+    assert value["subcategory"] == "Education / Childcare"
+    assert value["eligibility"] == "FAIL"
