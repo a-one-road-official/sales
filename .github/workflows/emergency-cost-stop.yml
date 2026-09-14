@@ -1,0 +1,63 @@
+name: EMERGENCY STOP Google Cloud automation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/emergency-cost-stop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: asia-northeast1
+      RUNTIME_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+    steps:
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Pause all Lead Factory schedulers
+        run: |
+          set +e
+          gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' --filter='name:lead-factory' | while read -r JOB; do
+            [ -n "$JOB" ] || continue
+            echo "Pausing $JOB"
+            gcloud scheduler jobs pause "$JOB" --location="$REGION" --project="$PROJECT" || true
+          done
+
+      - name: Pause Lead Factory task queues
+        run: |
+          set +e
+          for QUEUE in lead-factory-workers lead-factory-priority-workers; do
+            gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT" || true
+          done
+
+      - name: Disable Vertex and outbound runtimes
+        run: |
+          set +e
+          gcloud run services update aone-lead-factory \
+            --region="$REGION" --project="$PROJECT" \
+            --min=0 --cpu-throttling \
+            --update-env-vars=LEAD_FACTORY_ENABLED=FALSE,LEAD_FACTORY_HUMAN_REVIEW_ENABLED=FALSE,LEAD_FACTORY_AUTONOMY_MODE=PAUSED,LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_SEND_MODE=DISABLED,OUTREACH_AUTOPILOT_ENABLED=FALSE,OUTREACH_AUTOPILOT_AUTOSTART=FALSE
+          gcloud run services update aone-bpo-autopilot \
+            --region="$REGION" --project="$PROJECT" \
+            --min=0 --cpu-throttling \
+            --update-env-vars=LEAD_FACTORY_ENABLED=FALSE,LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_SEND_MODE=DISABLED,LEAD_FACTORY_GMAIL_MODE=DRAFT_ONLY,OUTREACH_AUTOPILOT_ENABLED=FALSE,OUTREACH_AUTOPILOT_AUTOSTART=FALSE,OUTREACH_SALES_GTM_SEND_ENABLED=FALSE
+
+      - name: Verify emergency stop
+        run: |
+          echo '--- scheduler states ---'
+          gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --filter='name:lead-factory' --format='table(name,state)' || true
+          echo '--- Cloud Run services ---'
+          gcloud run services describe aone-lead-factory --region="$REGION" --project="$PROJECT" --format='yaml(status.latestReadyRevisionName,spec.template.metadata.annotations)' || true
+          gcloud run services describe aone-bpo-autopilot --region="$REGION" --project="$PROJECT" --format='yaml(status.latestReadyRevisionName,spec.template.metadata.annotations)' || true
