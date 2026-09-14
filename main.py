@@ -31,6 +31,7 @@ from observability import failure_code, record_event
 from sheets_repo import SheetsRepo
 from single_sheet_batch_intake import append_raw_records_batched
 from human_ssot_review import run_human_ssot_review_tick
+from crm_evidence_engine import run_crm_evidence_tick
 SheetsRepo.append_raw_records = append_raw_records_batched
 
 
@@ -328,6 +329,17 @@ def human_ssot_review_tick():
         return run_human_ssot_review_tick(
             get_factory(),
             limit=int(os.getenv("LEAD_FACTORY_HUMAN_REVIEW_BATCH_SIZE", "6") or 6),
+        )
+    except Exception as exc:
+        _fail(exc)
+
+
+@app.post("/crm/evidence/tick")
+def crm_evidence_tick():
+    try:
+        return run_crm_evidence_tick(
+            get_factory(),
+            limit=int(os.getenv("CRM_EVIDENCE_BATCH_SIZE", "12") or 12),
         )
     except Exception as exc:
         _fail(exc)
