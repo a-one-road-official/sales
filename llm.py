@@ -13,6 +13,10 @@ class _GeminiResponses:
         self._client = client
 
     def create(self, model: str, input: str, tools=None):
+        # Budget circuit: Vertex is opt-in and remains unavailable by default.
+        # Deterministic intake never reaches this boundary.
+        if os.getenv("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE").upper() != "TRUE":
+            raise RuntimeError("vertex_disabled_by_budget")
         use_search = bool(tools)
         config = types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())] if use_search else None,
