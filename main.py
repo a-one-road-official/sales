@@ -32,6 +32,7 @@ from sheets_repo import SheetsRepo
 from single_sheet_batch_intake import append_raw_records_batched
 from human_ssot_review import run_human_ssot_review_tick
 from crm_evidence_engine import run_crm_evidence_tick
+from crawler_pipeline.runner import run_bounded_batch
 SheetsRepo.append_raw_records = append_raw_records_batched
 
 
@@ -344,7 +345,7 @@ def crm_evidence_tick():
     except Exception as exc:
         _fail(exc)
 
-
+\n@app.post("/deterministic/crawl")\ndef deterministic_crawl(payload: dict):\n    """Vertex-free bounded intake. Internal token middleware protects this endpoint."""\n    try:\n        return run_bounded_batch(get_factory(), payload)\n    except ValueError as exc:\n        raise HTTPException(status_code=400, detail=str(exc))\n    except Exception as exc:\n        _fail(exc)\n\n
 @app.post("/autonomy/start")
 def autonomy_start(body: dict):
     try:
