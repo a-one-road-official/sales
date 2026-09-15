@@ -535,10 +535,23 @@ def install(cls):
             "LF_error": error,
             "LF_history": f"{now}|GATE|{status}",
         }
+        # CRM Status is owned by the sales workflow. Gate screening may only set the
+        # initial Status for a brand-new intake row that is still in 判定中.
+        # Never let re-screening overwrite an existing human/CRM Status.
+        current_status = str(row.get("Status") or "").strip()
+        intake_status = str(row.get("LF_intake_status") or "").strip().upper()
+        fresh_intake = (
+            current_status in {"", "判定中"}
+            and intake_status in {"", "NEEDS_DOMAIN", "READY_FOR_GATE", "READY_FOR_MITTELSTAND_GATE"}
+        )
         if status in {"GO", "PASS"}:
-            changes.update({"Status": "未接触", "added_at": now, "LF_intake_status": "PROMOTED_TO_SALES"})
+            changes.update({"added_at": now, "LF_intake_status": "PROMOTED_TO_SALES"})
+            if fresh_intake:
+                changes["Status"] = "未接触"
         elif status in {"NO", "NO-GO", "FAIL"}:
-            changes.update({"Status": "対象外", "LF_intake_status": "SCREENED_NO_GO"})
+            changes.update({"LF_intake_status": "SCREENED_NO_GO"})
+            if fresh_intake:
+                changes["Status"] = "対象外"
         update(self, row["row_number"], changes)
 
     def append_dict(self, sheet, row):
