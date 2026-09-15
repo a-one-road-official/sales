@@ -345,7 +345,17 @@ def crm_evidence_tick():
     except Exception as exc:
         _fail(exc)
 
-\n@app.post("/deterministic/crawl")\ndef deterministic_crawl(payload: dict):\n    """Vertex-free bounded intake. Internal token middleware protects this endpoint."""\n    try:\n        return run_bounded_batch(get_factory(), payload)\n    except ValueError as exc:\n        raise HTTPException(status_code=400, detail=str(exc))\n    except Exception as exc:\n        _fail(exc)\n\n
+
+@app.post("/deterministic/crawl")
+def deterministic_crawl(payload: dict):
+    """Vertex-free bounded intake. Internal token middleware protects this endpoint."""
+    try:
+        return run_bounded_batch(get_factory(), payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        _fail(exc)
+
 @app.post("/autonomy/start")
 def autonomy_start(body: dict):
     try:
