@@ -34,7 +34,7 @@ jobs:
       - name: Install deterministic crawler dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
       - name: Run bounded crawl
-        run: python -m crawler_pipeline.cli --input "${{ inputs.input_path }}" --output "${{ inputs.output_path }}"
+        run: python -m crawler_pipeline.cli --input "${{ inputs.input_path }}" --output "${{ inputs.output_path }}" --offset "${{ inputs.offset }}" --limit "${{ inputs.limit }}"
       - name: Publish crawl artifact
         uses: actions/upload-artifact@v4
         with:
