@@ -454,12 +454,15 @@ def run_crm_evidence_tick(factory, *, limit: int = 12) -> dict:
                 "Stage": decision.stage,
                 "Yomi": decision.yomi,
                 "Probability": decision.probability,
-                "Status": decision.status,
                 "AI_Updated": now,
                 "Yomi_Reason": decision.yomi_reason,
                 "Yomi_Source": decision.yomi_source,
                 "Yomi_Stale": "FALSE",
             }
+            # Freeze automatic CRM Status movement by default. Re-enable only through
+            # an explicit runtime authorization after the Status ownership model is fixed.
+            if _truthy(os.getenv("CRM_EVIDENCE_ALLOW_STATUS_WRITE", "FALSE")):
+                fields["Status"] = decision.status
             if decision.next_action:
                 fields["Next_Action"] = decision.next_action
             if decision.due:
