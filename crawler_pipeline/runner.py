@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from models import Source
 
+from .browser import render_company
 from .intake import write_go_to_ssot
 from .pipeline import crawl_company
 from .storage import CrawlStore
@@ -45,9 +46,26 @@ def run_bounded_batch(factory, payload: dict) -> dict:
         for future in as_completed(futures):
             item = futures[future]
             try:
-                results.append(future.result())
+                result = future.result()
+                body = str(result.get("evidence", {}).get("body") or "")
+                title = str(result.get("evidence", {}).get("title") or "")
+                if len(body) < 160 or not title:
+                    try:
+                        result = render_company(
+                            str(item.get("company_name") or ""),
+                            str(item.get("url") or item.get("website") or ""),
+                        )
+                    except Exception as render_exc:
+                        result["render_error"] = f"{type(render_exc).__name__}:{render_exc}"
+                results.append(result)
             except Exception as exc:
-                errors.append({"company_name": item.get("company_name"), "url": item.get("url") or item.get("website"), "error": f"{type(exc).__name__}:{exc}"})
+                try:
+                    results.append(render_company(
+                        str(item.get("company_name") or ""),
+                        str(item.get("url") or item.get("website") or ""),
+                    ))
+                except Exception as render_exc:
+                    errors.append({"company_name": item.get("company_name"), "url": item.get("url") or item.get("website"), "error": f"{type(exc).__name__}:{exc}", "render_error": f"{type(render_exc).__name__}:{render_exc}"})
     store = CrawlStore(str(payload.get("sqlite_path") or "artifacts/crawl.sqlite3"))
     try:
         store.upsert_many(results, datetime.now(timezone.utc).isoformat())
