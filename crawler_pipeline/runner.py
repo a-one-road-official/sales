@@ -25,7 +25,7 @@ def run_bounded_batch(factory, payload: dict) -> dict:
     source_data = payload.get("source") or {}
     source = Source(
         source_id=str(source_data.get("source_id") or "deterministic-manual"),
-        source_type=str(source_data.get("source_type") or "GROWTH_DETERMINISTIC"),
+        source_type=str(source_data.get("source_type") or "MITTELSTAND_DETERMINISTIC"),
         source_name=str(source_data.get("source_name") or "Deterministic OSS crawler"),
         source_url=str(source_data.get("source_url") or ""),
         country=str(source_data.get("country") or ""),
