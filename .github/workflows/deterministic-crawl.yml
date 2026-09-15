@@ -1,0 +1,43 @@
+name: Deterministic OSS crawl (Vertex disabled)
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_path:
+        description: Repository-relative JSONL input containing company_name and url
+        required: true
+        type: string
+      output_path:
+        description: Repository-relative JSONL output path
+        required: true
+        default: artifacts/deterministic-crawl.jsonl
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERTEX_ALLOWED: "FALSE"
+      LEAD_FACTORY_ALLOW_EXTERNAL_WRITE: "FALSE"
+      LEAD_FACTORY_SEND_MODE: DRAFT_ONLY
+      LEAD_FACTORY_LIST_ONLY_LOCK: "TRUE"
+      MAX_DAILY_COMPANIES: "1500"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deterministic crawler dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Run bounded crawl
+        run: python -m crawler_pipeline.cli --input "${{ inputs.input_path }}" --output "${{ inputs.output_path }}"
+      - name: Publish crawl artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deterministic-crawl-result
+          path: ${{ inputs.output_path }}
+          if-no-files-found: error
