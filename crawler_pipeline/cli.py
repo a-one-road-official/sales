@@ -13,7 +13,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run bounded Vertex-free company intake")
     parser.add_argument("--input", required=True, help="JSONL with company_name and url")
     parser.add_argument("--output", required=True, help="JSONL output path")
-    parser.add_argument("--offset", type=int, default=0, help="Zero-based input offset")\n    parser.add_argument("--limit", type=int, default=MAX_DAILY_COMPANIES, help="Maximum companies in one run")
+    parser.add_argument("--offset", type=int, default=0, help="Zero-based input offset")
+    parser.add_argument("--limit", type=int, default=MAX_DAILY_COMPANIES, help="Maximum companies in one run")
     args = parser.parse_args()
     records = []
     with open(args.input, encoding="utf-8") as handle:
