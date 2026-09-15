@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from playwright.sync_api import sync_playwright
 
-from .pipeline import extract_evidence
+from .pipeline import classify_evidence, extract_evidence
 
 
 MAX_RENDERED_BYTES = 1_000_000
@@ -31,6 +31,6 @@ def render_company(company_name: str, url: str) -> dict:
                 200,
                 datetime.now(timezone.utc).isoformat(),
             )
-            return {"evidence": evidence.to_dict(), "decision": __import__("crawler_pipeline.pipeline", fromlist=["classify_evidence"]).classify_evidence(evidence), "render_mode": "PLAYWRIGHT"}
+            return {"evidence": evidence.to_dict(), "decision": classify_evidence(evidence), "render_mode": "PLAYWRIGHT"}
         finally:
             browser.close()
