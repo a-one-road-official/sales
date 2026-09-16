@@ -721,7 +721,18 @@ def run_ten_sacrifice_batch(
                     and _cfg_truthy(cfg, "OUTREACH_FAST_SALES_GTM_EMAIL_FIRST")
                     and bool(email)
                 )
-                if (preferred_form or (not email and form_links)) and not prefer_email_over_form:
+                prefer_public_form = (
+                    normalized_lane == "EC_SACRIFICE"
+                    and _cfg_truthy(cfg, "OUTREACH_PREFER_PUBLIC_FORM")
+                )
+                if (
+                    (
+                        preferred_form
+                        or (not email and form_links)
+                        or (prefer_public_form and form_links)
+                    )
+                    and not prefer_email_over_form
+                ):
                     form_contact = {
                         **research,
                         "email": SENDER_EMAIL,
