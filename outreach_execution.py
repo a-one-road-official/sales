@@ -52,10 +52,18 @@ def _gmail_credentials(sender: str):
     if hasattr(creds, "with_subject"):
         return creds.with_subject(sender)
 
-    signing_service_account = (
-        str(os.getenv("LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT") or "").strip()
-        or str(os.getenv("LEAD_FACTORY_TASKS_SERVICE_ACCOUNT") or "").strip()
-        or str(getattr(creds, "service_account_email", "") or "").strip()
+    signing_candidates = (
+        str(os.getenv("LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT") or "").strip(),
+        str(os.getenv("LEAD_FACTORY_TASKS_SERVICE_ACCOUNT") or "").strip(),
+        str(getattr(creds, "service_account_email", "") or "").strip(),
+    )
+    signing_service_account = next(
+        (
+            value
+            for value in signing_candidates
+            if value and value.strip().lower() != "default"
+        ),
+        "",
     )
     if not signing_service_account:
         raise RuntimeError("gmail_delegation_service_account_missing")
