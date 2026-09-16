@@ -1,5 +1,5 @@
 name: Deploy paused SSOT history repair
-# redeploy: geo-source-balance-2026-09-16
+# redeploy: ssot-history-lane-balance-2026-09-16
 
 on:
   push:
