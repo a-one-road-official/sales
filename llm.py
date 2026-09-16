@@ -54,7 +54,17 @@ class _GeminiCompatClient:
 class LLM:
     def __init__(self, model: str):
         self.model = model or os.getenv("LEAD_FACTORY_GEMINI_MODEL", "gemini-2.5-flash")
-        self.client = _GeminiCompatClient()
+        # Keep the Vertex client lazy so deterministic lanes never instantiate or
+        # call Vertex after the budget circuit is closed.
+        self._client = None
+
+    @property
+    def client(self):
+        if os.getenv("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE").upper() != "TRUE":
+            raise RuntimeError("vertex_disabled_by_budget")
+        if self._client is None:
+            self._client = _GeminiCompatClient()
+        return self._client
 
     @staticmethod
     def _json(text: str):
