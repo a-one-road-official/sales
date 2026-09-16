@@ -1,2 +1,2 @@
 Playwright-only EC sacrifice trigger. Vertex remains forbidden by policy.
-Explicit execute retry for bounded Kimonix sacrifice canary after string gate fix 2026-09-16T14:xxZ.
+Explicit execute retry for bounded Kimonix sacrifice canary after HTTPX dependency fix 2026-09-16T14:xxZ.
