@@ -162,8 +162,15 @@ def _live_bpo_rows(sheets) -> list[dict]:
         raise RuntimeError(
             f"bpo_live_source_read_failed:{type(exc).__name__}:{exc}"
         ) from exc
+    contacted_rows = (
+        sheets.contacted_sales_row_numbers()
+        if hasattr(sheets, "contacted_sales_row_numbers")
+        else set()
+    )
     normalized = []
     for row in source_rows:
+        if int(row.get("row_number") or 0) in contacted_rows:
+            continue
         category = str(
             row.get("Category")
             or row.get("category")
@@ -229,8 +236,15 @@ def _live_sales_gtm_rows(sheets) -> list[dict]:
         raise RuntimeError(
             f"sales_gtm_live_source_read_failed:{type(exc).__name__}:{exc}"
         ) from exc
+    contacted_rows = (
+        sheets.contacted_sales_row_numbers()
+        if hasattr(sheets, "contacted_sales_row_numbers")
+        else set()
+    )
     normalized = []
     for row in source_rows:
+        if int(row.get("row_number") or 0) in contacted_rows:
+            continue
         category = str(
             row.get("Category")
             or row.get("category")
