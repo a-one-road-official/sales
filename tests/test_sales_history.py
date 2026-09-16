@@ -39,6 +39,28 @@ def test_fresh_gate_row_can_enter_uncontacted():
     assert guarded_status("判定中", "未接触", row=row, source="GATE") == "未接触"
 
 
+def test_crm_evidence_cannot_silently_promote_status():
+    row = {"Status": "送付済み"}
+    assert guarded_status("送付済み", "返信あり", row=row, source="CRM_EVIDENCE") == "送付済み"
+    assert guarded_status("送付済み", "商談化", row=row, source="CRM_EVIDENCE_ENGINE") == "送付済み"
+
+
+def test_unknown_automation_source_cannot_promote_status():
+    row = {"Status": "未接触"}
+    assert guarded_status("未接触", "商談化", row=row, source="SYSTEM") == "未接触"
+
+
+def test_verified_outbound_can_establish_first_contact_only():
+    row = {"Status": "未接触"}
+    assert guarded_status("未接触", "送付済み", row=row, source="OUTBOUND_EXECUTION") == "送付済み"
+    assert guarded_status("送付済み", "返信あり", row={"Status": "送付済み"}, source="OUTBOUND_EXECUTION") == "送付済み"
+
+
+def test_human_can_move_status_explicitly():
+    row = {"Status": "送付済み"}
+    assert guarded_status("送付済み", "返信あり", row=row, source="HUMAN") == "返信あり"
+
+
 def test_history_append_is_idempotent():
     first = append_history("", {
         "status": "SENT",
