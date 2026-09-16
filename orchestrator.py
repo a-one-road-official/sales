@@ -716,6 +716,34 @@ class LeadFactory:
         if lane_key:
             if lane_key not in {"GROWTH", "MITTELSTAND"}:
                 raise ValueError(f"unsupported_lane:{lane_key}")
+
+            if str(cfg.get("LEAD_FACTORY_LANE_BALANCE_ENABLED", "TRUE")).upper() == "TRUE":
+                from source_universe import lane_balance_decision
+                sample_size = int(cfg.get("LEAD_FACTORY_LANE_BALANCE_SAMPLE_SIZE", "500") or 500)
+                target = float(cfg.get("LEAD_FACTORY_GROWTH_SHARE_TARGET", "0.50") or 0.50)
+                tolerance = float(cfg.get("LEAD_FACTORY_LANE_BALANCE_TOLERANCE", "0.08") or 0.08)
+                min_sample = int(cfg.get("LEAD_FACTORY_LANE_BALANCE_MIN_SAMPLE", "100") or 100)
+                mix = self.sheets.recent_lane_mix(sample_size=sample_size)
+                balance = lane_balance_decision(
+                    lane_key,
+                    sampled=int(mix.get("sampled", 0) or 0),
+                    growth_share=float(mix.get("growth_share", 0.0) or 0.0),
+                    target_growth_share=target,
+                    tolerance=tolerance,
+                    min_sample=min_sample,
+                )
+                if balance.get("hold"):
+                    return {
+                        "status": "LANE_BALANCE_HOLD",
+                        "lane": lane_key,
+                        "recent_mix": mix,
+                        "balance": balance,
+                        "new_raw": 0,
+                        "duplicates": 0,
+                        "errors": 0,
+                        "sources_processed": 0,
+                    }
+
             limit = int(limit if limit is not None else (cfg.get("SUPPLY_SOURCE_CRAWL_MAX_PER_TICK", "4") or 4))
             recrawl = int(cfg.get("SOURCE_RECRAWL_AFTER_MINUTES", "1440") or 1440)
             sources = self.sheets.sources_for_crawl(
