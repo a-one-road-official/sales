@@ -1823,6 +1823,8 @@ class SheetsRepo:
             else "READY_FOR_GATE"
         ) if duplicate_state == "NEW" else "SKIP"
         canonical_website = str(website or f"https://{domain}").strip()
+        from source_universe import normalize_country
+        hq_country = normalize_country(hq_country)
 
         p_formula = q_formula = r_formula = False
         if preserve_formulas:
