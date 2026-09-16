@@ -1,4 +1,4 @@
-Bulk sacrifice execution requested at 2026-09-16T14:16:36.274Z
+Bulk sacrifice execution requested at 2026-09-16T14:18:45.444Z
 Scope: EC_SACRIFICE and BPO only.
 Runtime: existing Playwright/form executor plus Gmail first-party email path.
 Vertex: forbidden.
