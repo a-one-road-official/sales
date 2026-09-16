@@ -1,21 +1,16 @@
-name: EC sacrifice batch (Playwright-only; Vertex forbidden)
+name: 生贄 bulk outbound (Playwright/email; Vertex forbidden)
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "preflight checks access/schema; execute may research, append to sacrifice, and submit public forms"
+        description: "preflight checks the isolated workbook; execute runs the approved sacrifice lanes"
         required: true
         type: choice
         options:
           - preflight
           - execute
-        default: preflight
-      manifest:
-        description: "bounded JSON manifest path"
-        required: true
-        type: string
-        default: data/sacrifice_oss_campaign.json
+        default: execute
   push:
     branches: [main]
     paths:
@@ -26,20 +21,55 @@ permissions:
   id-token: write
 
 concurrency:
-  group: ec-sacrifice-playwright
+  group: sacrifice-bulk-outbound
   cancel-in-progress: false
 
 jobs:
-  sacrifice:
-    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'RUN_EC_PLAYWRIGHT') }}
+  sacrifice-bulk:
+    if: >-
+      ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'execute')
+      || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'RUN_SACRIFICE_BULK')) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     env:
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       SACRIFICE_SPREADSHEET_ID: 1QBZKoN82O-SrFUnWaHBQtvflcdMT1gDp-QMPtZvLsEk
+      LEAD_FACTORY_SPREADSHEET_ID: 1QBZKoN82O-SrFUnWaHBQtvflcdMT1gDp-QMPtZvLsEk
+      LEAD_FACTORY_CONFIG_SHEET: Settings
+      LEAD_FACTORY_HUMAN_SSOT_SHEET: 営業リスト_Vendor
+      LEAD_FACTORY_SACRIFICE_SOURCE_PATH: data/sales_leads_ec_sacrifice.json
       LEAD_FACTORY_VERTEX_ALLOWED: FALSE
+      LEAD_FACTORY_ALLOW_EXTERNAL_WRITE: TRUE
+      LEAD_FACTORY_SEND_MODE: ENABLED
+      LEAD_FACTORY_EXPLICIT_SEND_APPROVAL: TRUE
+      LEAD_FACTORY_LIST_ONLY_LOCK: FALSE
+      LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME: TRUE
+      LEAD_FACTORY_GMAIL_IMPERSONATE: admin@a1-road.com
+      LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      OUTREACH_EXECUTION_LOG_SHEET: outreach_engine_log
+      OUTREACH_EXECUTION_LOG_MAX_ROW: "1000"
+      OUTREACH_ALLOWED_LANES: "EC_SACRIFICE,BPO"
+      OUTREACH_SACRIFICE_LANES: "EC_SACRIFICE,BPO"
+      OUTREACH_SACRIFICE_TARGET_COMPANIES: "*"
+      OUTREACH_SACRIFICE_SEND_ENABLED: TRUE
+      OUTREACH_BPO_SEND_ENABLED: TRUE
+      OUTREACH_SALES_GTM_SEND_ENABLED: FALSE
+      OUTREACH_FACTORY_SEND_ENABLED: FALSE
+      OUTREACH_SSOT_SEND_ENABLED: FALSE
       OUTREACH_SITE_FETCH_MODE: PLAYWRIGHT
       OUTREACH_SITE_RPS: "0.5"
-      OUTREACH_PLAYWRIGHT_FORM_ONLY: "TRUE"
+      OUTREACH_SITE_MAX_PAGES: "3"
+      OUTREACH_PLAYWRIGHT_FORM_ONLY: TRUE
+      OUTREACH_PREFER_PUBLIC_FORM: TRUE
+      OUTREACH_FORM_AUDIT_TEMPLATE_ONLY: TRUE
+      OUTREACH_DETERMINISTIC_DRAFT: TRUE
+      OUTREACH_AUTOFIX_GENERATION: FALSE
+      OUTREACH_SACRIFICE_CONSUME_FAILED: TRUE
+      OUTREACH_BPO_RETRY_FAILED: FALSE
+      OUTREACH_AUTOPILOT_ENABLED: FALSE
+      OUTREACH_AUTOPILOT_AUTOSTART: FALSE
+      LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED: FALSE
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -53,52 +83,151 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Install isolated OSS runtime
+      - name: Install isolated runtime and Chromium
         run: |
           set -euo pipefail
-          python -m pip install --disable-pip-version-check -r requirements-sacrifice.txt
+          python -m pip install --disable-pip-version-check -r requirements.txt
           python -m playwright install --with-deps chromium
 
-      - name: Verify this lane cannot call Vertex
+      - name: Verify Vertex boundary and compile Playwright runtime
         run: |
           set -euo pipefail
           python - <<'PY'
-          from pathlib import Path
+          import os
           import re
-          paths = [
-              "sacrifice_sheet_pipeline.py", "sacrifice_web_research.py",
-              "browser_fetch.py", "form_execution.py", "sales_leads_sacrifice.py",
-          ]
-          patterns = re.compile(r"google\.genai|google\.generativeai|vertexai|aiplatform")
-          hits = []
-          for name in paths:
-              for number, line in enumerate(Path(name).read_text(encoding="utf-8").splitlines(), 1):
-                  if patterns.search(line):
-                      hits.append(f"{name}:{number}:{line}")
-          if hits:
-              raise SystemExit("forbidden paid AI import found:\n" + "\n".join(hits))
-          print("vertex_import_scan=clean")
+          from pathlib import Path
+          from llm import VERTEX_FORBIDDEN
+          if os.environ.get("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE") != "FALSE":
+              raise SystemExit("vertex_policy_env_not_false")
+          if not VERTEX_FORBIDDEN:
+              raise SystemExit("vertex_boundary_not_forbidden")
+          forbidden = re.compile(r"google\\.genai|google\\.generativeai|vertexai|aiplatform")
+          for name in ("sacrifice_web_research.py", "browser_fetch.py", "form_execution.py", "sales_leads_sacrifice_run.py", "outreach_execution.py"):
+              hits = [f"{name}:{n}" for n, line in enumerate(Path(name).read_text(encoding="utf-8").splitlines(), 1) if forbidden.search(line)]
+              if hits:
+                  raise SystemExit("paid_ai_reference_in_send_path:" + ",".join(hits))
+          print("vertex_allowed=false")
+          print("vertex_boundary=hard_forbidden")
+          print("paid_ai_send_path_scan=clean")
           PY
-          python -m py_compile sacrifice_sheet_pipeline.py sacrifice_web_research.py browser_fetch.py form_execution.py sales_leads_sacrifice.py
+          python -m py_compile main.py sheets_repo.py outreach_execution.py form_execution.py sales_leads_sacrifice.py sales_leads_sacrifice_run.py sacrifice_web_research.py browser_fetch.py
 
-      - name: Preflight exact sacrifice workbook and schema
+      - name: Preflight exact sacrifice workbook
         run: |
           set -euo pipefail
           python sacrifice_sheet_pipeline.py --preflight
 
-      - name: Execute bounded research, append, and public-form outreach
-        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'execute') || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'RUN_EC_PLAYWRIGHT_EXECUTE')) }}
-        env:
-          SACRIFICE_EXPLICIT_SEND_APPROVAL: "TRUE"
-          MANIFEST_PATH: ${{ inputs.manifest || 'data/sacrifice_oss_campaign.json' }}
+      - name: Start isolated local sacrifice runtime
         run: |
           set -euo pipefail
-          python sacrifice_sheet_pipeline.py --execute --manifest "${MANIFEST_PATH}"
+          token="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          echo "LEAD_FACTORY_INTERNAL_TOKEN=${token}" >> "${GITHUB_ENV}"
+          nohup python -m uvicorn main:app --host 127.0.0.1 --port 8080 > runtime.log 2>&1 &
+          echo $! > runtime.pid
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/healthz > /tmp/healthz.json; then
+              cat /tmp/healthz.json
+              exit 0
+            fi
+            sleep 2
+          done
+          cat runtime.log
+          exit 1
 
-      - name: Upload bounded result audit
+      - name: Execute all eligible sacrifice lanes in bounded sequential batches
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          token = os.environ["LEAD_FACTORY_INTERNAL_TOKEN"]
+          base = "http://127.0.0.1:8080"
+          lanes = ["EC_SACRIFICE", "BPO"]
+          max_batches = 30
+          summaries = []
+
+          def call(lane, sequence):
+              payload = json.dumps({
+                  "lane": lane,
+                  "limit": 10,
+                  "batch_id": f"bulk-{lane.lower()}-{sequence:03d}",
+              }).encode("utf-8")
+              request = urllib.request.Request(
+                  base + "/outreach/sales-leads-sacrifice-run",
+                  data=payload,
+                  headers={
+                      "Content-Type": "application/json",
+                      "X-Aone-Internal-Token": token,
+                  },
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=900) as response:
+                      return json.loads(response.read().decode("utf-8"))
+              except urllib.error.HTTPError as exc:
+                  body = exc.read().decode("utf-8", errors="replace")
+                  raise RuntimeError(f"{lane} batch {sequence} HTTP {exc.code}: {body[:4000]}") from exc
+
+          for lane in lanes:
+              for sequence in range(1, max_batches + 1):
+                  result = call(lane, sequence)
+                  compact = {
+                      "lane": lane,
+                      "sequence": sequence,
+                      "run_id": result.get("run_id"),
+                      "attempted": result.get("attempted", 0),
+                      "success_count": result.get("success_count", 0),
+                      "email_success_count": result.get("email_success_count", 0),
+                      "form_success_count": result.get("form_success_count", 0),
+                      "failure_count": result.get("failure_count", 0),
+                      "source_remaining_count": result.get("source_remaining_count"),
+                      "external_action": result.get("external_action"),
+                      "vertex_allowed": result.get("vertex_allowed"),
+                      "production_ssot_touched": result.get("production_ssot_touched"),
+                  }
+                  summaries.append(compact)
+                  print(json.dumps(compact, ensure_ascii=False), flush=True)
+                  if int(result.get("attempted", 0) or 0) == 0:
+                      break
+                  if int(result.get("source_remaining_count", 0) or 0) <= 0:
+                      break
+                  time.sleep(1)
+
+          Path = __import__("pathlib").Path
+          Path("bulk-summary.json").write_text(
+              json.dumps(summaries, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          totals = {
+              "lanes": lanes,
+              "batches": len(summaries),
+              "attempted": sum(int(x.get("attempted", 0) or 0) for x in summaries),
+              "success_count": sum(int(x.get("success_count", 0) or 0) for x in summaries),
+              "email_success_count": sum(int(x.get("email_success_count", 0) or 0) for x in summaries),
+              "form_success_count": sum(int(x.get("form_success_count", 0) or 0) for x in summaries),
+              "failure_count": sum(int(x.get("failure_count", 0) or 0) for x in summaries),
+              "vertex_allowed": any(x.get("vertex_allowed") for x in summaries),
+              "production_ssot_touched": any(x.get("production_ssot_touched") for x in summaries),
+          }
+          print(json.dumps({"totals": totals}, ensure_ascii=False), flush=True)
+          PY
+
+      - name: Stop isolated runtime
+        if: ${{ always() }}
+        run: |
+          set +e
+          if [ -f runtime.pid ]; then kill "$(cat runtime.pid)" 2>/dev/null || true; fi
+
+      - name: Upload bulk audit
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: ec-sacrifice-${{ github.run_id }}
-          path: sacrifice-result.json
+          name: sacrifice-bulk-${{ github.run_id }}
+          path: |
+            bulk-summary.json
+            runtime.log
           if-no-files-found: ignore
