@@ -37,8 +37,6 @@ SALES_HISTORY_FIELDS = (
     LAST_OUTBOUND_RECIPIENT_FIELD,
 )
 
-# Higher values are later sales facts. Internal workers may only move forward;
-# an explicit human correction remains available through source=HUMAN.
 SALES_STATUS_RANK = {
     "": 0, "未接触": 0, "判定中": 0,
     "送付済み": 1, "送信済み": 1, "送信済み（非製造）": 1, "DM済": 1,
@@ -50,6 +48,21 @@ TERMINAL_STATUSES = {"拒否", "合意・契約締結", "受注"}
 
 SUCCESS_EVENT_STATUSES = {"SENT", "FORM_SENT"}
 SUCCESS_EVENT_TYPES = {"NEW_DM", "OUTBOUND_SENT", "FORM_SENT", "MANUAL_SEND"}
+
+# Automatic systems may record evidence freely, but CRM lifecycle ownership is
+# intentionally narrow. Actual outbound delivery can establish "contacted".
+# Higher-value lifecycle states require an explicit human/user write.
+HUMAN_STATUS_SOURCES = {"HUMAN", "MANUAL", "USER"}
+FACTUAL_SEND_SOURCES = {
+    "OUTBOUND_EXECUTION", "OUTBOUND_EXECUTOR", "GMAIL_BACKFILL",
+    "GMAIL_BACKFILL_STRICT_V1", "EMAIL_EXECUTION", "FORM_EXECUTION",
+}
+FROZEN_STATUS_SOURCES = {
+    "GATE", "RESEARCH", "CLASSIFICATION", "SINGLE_SHEET",
+    "CRM_EVIDENCE", "CRM_EVIDENCE_ENGINE", "HUMAN_SSOT_REVIEW",
+    "AI", "AUTOMATION", "SYSTEM_INFERENCE",
+}
+SEND_LEVEL_STATUSES = {"送付済み", "送信済み", "送信済み（非製造）", "DM済"}
 
 
 def text(value: Any) -> str:
@@ -95,7 +108,6 @@ def append_history(existing: Any, event: dict, *, max_events: int = 200) -> str:
 
 
 def history_has_event(existing: Any, event: dict) -> bool:
-    """Return whether an event is already present by its stable event key."""
     normalized = {str(k): v for k, v in dict(event or {}).items() if v not in (None, "")}
     key = _event_key(normalized)
     return bool(key and any(_event_key(item) == key for item in parse_history(existing)))
@@ -121,7 +133,12 @@ def status_rank(value: Any) -> int:
 
 
 def guarded_status(current: Any, requested: Any, *, row: dict | None = None, source: str = "") -> str:
-    """Central fail-closed Status policy for all internal workers."""
+    """Central fail-closed Status policy for every internal writer.
+
+    Evidence engines may update evidence/Stage/Yomi fields, but they cannot silently
+    promote CRM lifecycle Status. Actual send history may establish the first-contact
+    fact. Any later lifecycle progression requires source=HUMAN/MANUAL/USER.
+    """
     current_value = text(current)
     requested_value = text(requested)
     row = dict(row or {})
@@ -129,32 +146,39 @@ def guarded_status(current: Any, requested: Any, *, row: dict | None = None, sou
         row["Status"] = current_value
 
     source_key = text(source).upper()
-    if source_key in {"HUMAN", "MANUAL", "USER"}:
+    if source_key in HUMAN_STATUS_SOURCES:
         return requested_value
 
-    # Screening may initialize a still-unassigned row, but it cannot
-    # classify or overwrite an established CRM lifecycle fact.
-    if source_key in {"GATE", "RESEARCH", "CLASSIFICATION", "SINGLE_SHEET"}:
-        if source_key == "GATE" and current_value == "判定中" and requested_value == "未接触":
-            return requested_value
-        return current_value
-
+    # Existing factual contact evidence can heal a corrupted/uncontacted display.
     contacted = has_contact_history(row)
     if contacted and requested_value in UNTOUCHED_STATUSES:
         return current_value if current_value in CONTACTED_STATUSES else "送付済み"
     if contacted and requested_value in CLASSIFICATION_STATUSES:
         return current_value if current_value in CONTACTED_STATUSES else "送付済み"
 
+    # Gate is allowed only to initialize an untouched screened row.
+    if source_key == "GATE" and current_value == "判定中" and requested_value == "未接触":
+        return requested_value
+
+    if source_key in FROZEN_STATUS_SOURCES:
+        return current_value
+
+    # A verified outbound execution/backfill may establish first contact, and only
+    # first contact. It cannot infer replies, meetings, forecast or won states.
+    if source_key in FACTUAL_SEND_SOURCES:
+        if current_value in UNTOUCHED_STATUSES and requested_value in SEND_LEVEL_STATUSES:
+            return requested_value
+        return current_value
+
     if current_value in TERMINAL_STATUSES and requested_value != current_value:
         return current_value
 
-    # Prevent any internal worker from moving a durable sales fact backward.
-    if current_value in SALES_STATUS_RANK and requested_value in SALES_STATUS_RANK:
-        if status_rank(requested_value) < status_rank(current_value):
-            return current_value
-
-    return requested_value
-
+    # Unknown internal sources are fail-closed for lifecycle promotion. Keeping the
+    # same value is harmless; any requested change must be reviewed or use a known
+    # factual/human source above.
+    if requested_value != current_value:
+        return current_value
+    return current_value
 
 
 def history_event_from_execution(record: dict) -> dict:
