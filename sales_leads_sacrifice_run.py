@@ -165,43 +165,51 @@ def _execution_log_max_row() -> int:
     return max(100, min(50000, value))
 
 
+def _execution_log_sheet() -> str:
+    return str(
+        os.getenv("OUTREACH_EXECUTION_LOG_SHEET", "LeadFactory_ExecutionLog")
+        or "LeadFactory_ExecutionLog"
+    ).strip() or "LeadFactory_ExecutionLog"
+
+
 def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
     if sheets is None:
         raise RuntimeError("sacrifice_attempt_history_unavailable")
     normalized_lane = str(lane or "EC_SACRIFICE").strip().upper()
-    if normalized_lane in {"BPO", "SALES_GTM"}:
-        try:
-            rows = _read_sheet_dicts_once(
-                sheets,
-                "LeadFactory_ExecutionLog",
-                "O",
-                max_row=_execution_log_max_row(),
-            )
-        except Exception as exc:
-            raise RuntimeError(
-                f"{normalized_lane.lower()}_attempt_history_unavailable:{type(exc).__name__}:{exc}"
-            ) from exc
-    else:
-        last_error = None
-        rows = None
-        for attempt in range(5):
-            try:
-                rows = sheets._rows_as_dicts("LeadFactory_ExecutionLog", "O")
-                break
-            except Exception as exc:
-                last_error = exc
-                if attempt < 4:
-                    time.sleep(2 * (attempt + 1))
-        if rows is None:
-            raise RuntimeError("sacrifice_attempt_history_unavailable") from last_error
+    log_sheet = _execution_log_sheet()
+    try:
+        rows = _read_sheet_dicts_once(
+            sheets,
+            log_sheet,
+            "U",
+            max_row=_execution_log_max_row(),
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"{normalized_lane.lower()}_attempt_history_unavailable:{type(exc).__name__}:{exc}"
+        ) from exc
+
     consumed = set()
+    consume_failed = str(
+        os.getenv("OUTREACH_SACRIFICE_CONSUME_FAILED", "FALSE") or ""
+    ).strip().upper() in {"TRUE", "1", "YES", "ON"}
+    successful_statuses = {
+        "SENT", "FORM_SENT", "SENT_UNVERIFIED",
+        "DUPLICATE_BLOCKED", "FORM_UNCONFIRMED",
+    }
+    terminal_statuses = successful_statuses | {
+        "FAILED", "FORM_FAILED", "BLOCKED", "BLOCKED_PREFLIGHT",
+        "IDEMPOTENCY_LOOKUP_FAILED", "STALE_PROMPT",
+        "PROMPT_LIVE_READ_UNAVAILABLE", "PROMPT_PREFLIGHT",
+    }
+
     for row in rows or []:
         row_lane = str(row.get("lane") or "").strip().upper()
-        if normalized_lane in {"BPO", "SALES_GTM"}:
-            if row_lane != normalized_lane:
-                continue
-        elif "SACRIFICE" not in row_lane:
+        if normalized_lane in {"BPO", "SALES_GTM"} and row_lane != normalized_lane:
             continue
+        if normalized_lane == "EC_SACRIFICE" and row_lane and row_lane != normalized_lane:
+            continue
+
         status = str(row.get("status") or "").strip().upper()
         form_url = str(row.get("form_url") or "").strip()
         confirmation = str(row.get("confirmation") or "").strip()
@@ -216,11 +224,11 @@ def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
         )
         if status == "FORM_FAILED" and thank_you_evidence:
             status = "FORM_SENT"
-        ambiguous_submission = status == "FORM_FAILED" and bool(
-            re.search(r"SUBMISSION_ATTEMPTED", confirmation, re.I)
-        )
-        if ambiguous_submission:
+        if status == "FORM_FAILED" and re.search(
+            r"SUBMISSION_ATTEMPTED", confirmation, re.I
+        ):
             status = "FORM_UNCONFIRMED"
+
         source_row = str(row.get("source_row") or "").strip()
         if not source_row:
             draft_id = str(row.get("draft_id") or "").strip()
@@ -228,25 +236,24 @@ def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
                 source_row = draft_id.rsplit(":", 1)[-1]
         if not source_row:
             continue
+
         source_identity = str(
             row.get("source_key")
             or _source_identity(source_row, row.get("company_name"))
         ).strip()
         if normalized_lane in {"BPO", "SALES_GTM"}:
-            # A new runtime generation must be able to retry failed work after
-            # an execution fix. Successful/ambiguous outcomes remain consumed
-            # so the retry cannot duplicate a message or an uncertain form.
             retry_failed = str(
                 os.getenv(f"OUTREACH_{normalized_lane}_RETRY_FAILED", "FALSE")
+                or ""
             ).strip().upper() in {"TRUE", "1", "YES", "ON"}
             if status in {"FAILED", "FORM_FAILED"} and retry_failed:
                 continue
             if status:
                 consumed.add(source_identity or source_row)
             continue
-        if status not in {"SENT", "FORM_SENT", "SENT_UNVERIFIED", "DUPLICATE_BLOCKED", "FORM_UNCONFIRMED"}:
-            continue
-        consumed.add(source_row)
+
+        if status in successful_statuses or (consume_failed and status in terminal_statuses):
+            consumed.add(source_row)
     return consumed
 
 
@@ -373,11 +380,20 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
         "recipient": recipient,
         "executed_at": datetime.now(timezone.utc).isoformat(),
     }
+    if _execution_log_sheet() == "outreach_engine_log":
+        record = {
+            **record,
+            "timestamp": record["executed_at"],
+            "website": (result.get("audit") or {}).get("official_website", ""),
+            "email": recipient,
+            "error_message": reason,
+            "stage": "BATCH_ATTEMPT",
+        }
     try:
         existing = _read_sheet_dicts_once(
             sheets,
-            "LeadFactory_ExecutionLog",
-            "O",
+            _execution_log_sheet(),
+            "U",
             max_row=_execution_log_max_row(),
         )
         if any(str(row.get("idempotency_key") or "") == key for row in existing):
@@ -387,7 +403,7 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
     last_error = None
     for attempt in range(4):
         try:
-            sheets.append_dict("LeadFactory_ExecutionLog", record)
+            sheets.append_dict(_execution_log_sheet(), record)
             return
         except Exception as exc:
             last_error = exc
@@ -544,7 +560,8 @@ def run_ten_sacrifice_batch(
         for value in re.split(r"[|,]", str(os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES") or ""))
         if value.strip()
     }
-    if target_names:
+    target_all = bool(target_names & {"*", "ALL", "ALL_COMPANIES"})
+    if target_names and not target_all:
         pool = [
             item for item in pool
             if re.sub(r"[^a-z0-9]+", "", str(item.get("company_name") or "").lower()) in target_names
