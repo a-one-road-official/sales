@@ -902,6 +902,9 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
 
     result["trigger"] = "SCHEDULER" if scheduled else "DIRECT"
     result["send_enabled"] = execute_external
+    result["vertex_allowed"] = _config_truthy(
+        cfg.get("LEAD_FACTORY_VERTEX_ALLOWED", os.getenv("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE"))
+    )
     result["lane"] = lane
     return result
 
