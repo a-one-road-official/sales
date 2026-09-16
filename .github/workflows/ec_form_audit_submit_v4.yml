@@ -14,7 +14,8 @@ concurrency:
 
 jobs:
   remaining:
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'Run EC form audit v4') }}
+    # Customer-facing EC form submission is permanently disabled pending a separate human-approved change.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     env:
       PROJECT: ${{ secrets.GCP_PROJECT_ID }}
