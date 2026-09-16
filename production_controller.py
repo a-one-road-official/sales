@@ -1,14 +1,22 @@
 from __future__ import annotations
 
-import math
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from cost_guard import (
+    autonomous_capacity_allowed,
+    budget_snapshot,
+    daily_rollover_allowed,
+)
 
 
 UTC = timezone.utc
 JST = timezone(timedelta(hours=9))
-THROUGHPUT_MIN_PER_MINUTE = 30
-THROUGHPUT_TARGET_PER_MINUTE = 60
+# 1,500 qualified leads/day averages ~1.04/minute. Historical values of 30/60
+# per minute made a healthy daily plan look permanently starved and triggered
+# unnecessary capacity expansion.
+THROUGHPUT_MIN_PER_MINUTE = 0.5
+THROUGHPUT_TARGET_PER_MINUTE = 1.5
 THROUGHPUT_WINDOW_MINUTES = 5
 THROUGHPUT_LONG_WINDOW_MINUTES = 10
 GOAL_KEYS = {
@@ -30,11 +38,11 @@ def _dt(value: str) -> datetime | None:
 
 
 class QualifiedLeadProductionController:
-    """Persistent daily Qualified-Lead SLO controller.
+    """Persistent Qualified-Lead SLO controller with budget-first execution gates.
 
-    Goal, baseline and report state live in Config so a Cloud Run restart cannot
-    reset the production requirement. Gate evaluation is delegated unchanged to
-    the factory.
+    Goal metadata may persist across restarts. The goal itself never authorizes paid
+    compute, extra workers, or automatic next-day production. Those require separate,
+    explicit budget flags in cost_guard.py.
     """
 
     def __init__(self, factory):
@@ -69,11 +77,6 @@ class QualifiedLeadProductionController:
         )
 
     def _queue_counts(self) -> dict[str, int]:
-        def count(range_name: str, predicate=None) -> int:
-            rows = self.sheets.read(range_name)
-            if predicate is None:
-                return sum(1 for r in rows if r and any(str(x).strip() for x in r))
-            return sum(1 for r in rows if predicate(r))
         raw = self.sheets.read("LeadFactory_Raw!A2:R")
         domain = sum(1 for r in raw if len(r) > 17 and str(r[17]).upper() == "NEEDS_DOMAIN")
         gate = sum(1 for r in raw if len(r) > 17 and str(r[17]).upper() in {"READY_FOR_GATE", "READY_FOR_MITTELSTAND_GATE"})
@@ -81,11 +84,14 @@ class QualifiedLeadProductionController:
             "raw_backlog": len([r for r in raw if r and str(r[0]).strip()]),
             "domain_backlog": domain,
             "gate_backlog": gate,
-            "active_sources": len([s for s in self.sheets.list_sources() if str(s.crawl_status).upper() not in {"ERROR", "CIRCUIT_OPEN", "AUTH_REQUIRED"}]),
+            "active_sources": len([
+                s for s in self.sheets.list_sources()
+                if str(s.crawl_status).upper() not in {"ERROR", "CIRCUIT_OPEN", "AUTH_REQUIRED"}
+            ]),
         }
 
     def _throughput_metrics(self) -> dict[str, Any]:
-        """Measure qualified SSOT promotions over short control windows."""
+        """Measure output for visibility; it cannot spend money on its own."""
         now = datetime.now(UTC)
         windows = {5: 0, 10: 0}
         latest_finished = None
@@ -112,16 +118,20 @@ class QualifiedLeadProductionController:
         ten = windows[10]
         five_rate = five / 5.0
         ten_rate = ten / 10.0
-        breach = five < THROUGHPUT_MIN_PER_MINUTE * 5 or ten < 100
+        five_min = THROUGHPUT_MIN_PER_MINUTE * 5
+        ten_min = THROUGHPUT_MIN_PER_MINUTE * 10
+        breach = five < five_min or ten < ten_min
         return {
             "promoted_last_5m": five,
             "promoted_last_10m": ten,
             "qualified_per_minute_5m": round(five_rate, 2),
             "qualified_per_minute_10m": round(ten_rate, 2),
-            "throughput_minimum_5m": THROUGHPUT_MIN_PER_MINUTE * 5,
-            "throughput_minimum_10m": 100,
+            "throughput_minimum_5m": five_min,
+            "throughput_minimum_10m": ten_min,
             "throughput_target_5m": THROUGHPUT_TARGET_PER_MINUTE * 5,
-            "throughput_status": "THROUGHPUT_BREACH" if breach else ("ON_TARGET" if five >= THROUGHPUT_TARGET_PER_MINUTE * 5 else "ABOVE_MINIMUM"),
+            "throughput_status": "THROUGHPUT_BREACH" if breach else (
+                "ON_TARGET" if five >= THROUGHPUT_TARGET_PER_MINUTE * 5 else "ABOVE_MINIMUM"
+            ),
             "latest_promotion_at": latest_finished.isoformat() if latest_finished else "",
         }
 
@@ -173,6 +183,7 @@ class QualifiedLeadProductionController:
             "actual_velocity_per_hour": round(velocity, 3),
             "required_velocity_per_hour": round(required, 3),
             "eod_forecast": round(forecast, 3),
+            "budget": budget_snapshot(),
             **accounting,
             **metrics,
             **throughput,
@@ -187,8 +198,6 @@ class QualifiedLeadProductionController:
         if deadline and deadline <= now:
             raise ValueError("goal_deadline_must_be_future")
 
-        # A normal redeploy preserves an active goal; only an explicit one-time
-        # force_reset starts a fresh accounting window.
         existing_target = int(existing.get(GOAL_KEYS["target"], "0") or 0)
         existing_status = str(existing.get(GOAL_KEYS["status"], "")).upper()
         existing_deadline = _dt(existing.get(GOAL_KEYS["deadline"], ""))
@@ -227,7 +236,9 @@ class QualifiedLeadProductionController:
         return result
 
     def _rollover_daily_goal(self, previous: dict) -> dict:
-        """Start the next JST production day after reporting the prior day."""
+        """Start the next JST production day only after explicit budget authorization."""
+        if not daily_rollover_allowed():
+            return {**previous, "rollover": "DISABLED_BY_BUDGET"}
         previous_report = self._report(previous)
         now = datetime.now(UTC)
         jst_now = now.astimezone(JST)
@@ -256,25 +267,32 @@ class QualifiedLeadProductionController:
         goal_status = status["status"]
         if goal_status in {"TARGET_ACHIEVED", "DEADLINE_REACHED"}:
             deadline = _dt(self._config().get(GOAL_KEYS["deadline"], ""))
-            if deadline and datetime.now(UTC) >= deadline:
+            if deadline and datetime.now(UTC) >= deadline and daily_rollover_allowed():
                 return self._rollover_daily_goal(status)
+            status["rollover"] = "DISABLED_BY_BUDGET"
+            return status
         if goal_status in {"NO_GOAL", "USER_STOP", "REPORT_SENT"}:
             return status
         if status["remaining"] > 0 and status["hours_remaining"] > 0:
-            # Capacity expansion is deliberately isolated from the Gate. The
-            # factory may add sources/workers, while its authoritative Gate stays fixed.
-            throughput_breach = status.get("throughput_status") == "THROUGHPUT_BREACH"
-            if status["eod_forecast"] < status["target"] or throughput_breach:
-                action = self.factory.capacity_tick(status)
-                status["capacity_action"] = action
-            status["status"] = "AT_RISK" if status.get("capacity_action") else "RUNNING"
+            at_risk = status["eod_forecast"] < status["target"] or status.get("throughput_status") == "THROUGHPUT_BREACH"
+            if at_risk and autonomous_capacity_allowed():
+                status["capacity_action"] = self.factory.capacity_tick(status)
+                status["status"] = "AT_RISK"
+            elif at_risk:
+                status["capacity_action"] = {
+                    "status": "BLOCKED_BY_BUDGET",
+                    "reason": "LEAD_FACTORY_AUTONOMOUS_CAPACITY_EXPANSION requires explicit paid-cloud opt-in",
+                }
+                status["status"] = "AT_RISK_BUDGET_BLOCKED"
+            else:
+                status["status"] = "RUNNING"
             return status
         final_status = "TARGET_ACHIEVED" if status["remaining"] == 0 else "DEADLINE_REACHED"
         self._set_config({GOAL_KEYS["status"]: final_status})
         status["status"] = final_status
         status["report"] = self._report(status)
+        status["rollover"] = "ENABLED" if daily_rollover_allowed() else "DISABLED_BY_BUDGET"
         return status
-
 
 
 from single_sheet_controller_mode import install as _install_single_sheet_controller
