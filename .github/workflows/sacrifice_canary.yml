@@ -121,6 +121,7 @@ jobs:
         run: |
           set -euo pipefail
           token="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          export LEAD_FACTORY_INTERNAL_TOKEN="${token}"
           echo "LEAD_FACTORY_INTERNAL_TOKEN=${token}" >> "${GITHUB_ENV}"
           nohup python -m uvicorn main:app --host 127.0.0.1 --port 8080 > runtime.log 2>&1 &
           echo $! > runtime.pid
