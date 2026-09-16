@@ -500,6 +500,20 @@ class OutboundEmailExecutor:
             return {"status": prompt_check.get("status", "STALE_PROMPT"), "prompt_preflight": prompt_check}
 
         key = f"outbound:{lane.lower()}:{draft.get('draft_id','')}:{preflight['message_hash']}"
+        source_row = str(draft.get("source_row") or "").strip()
+        if (
+            self.sheets is not None
+            and source_row.isdigit()
+            and hasattr(self.sheets, "sales_row_has_contact_history")
+            and self.sheets.sales_row_has_contact_history(int(source_row))
+        ):
+            return {
+                "status": "DUPLICATE_BLOCKED",
+                "idempotency_key": key,
+                "lane": lane,
+                "recipient": str(draft.get("recipient") or "").strip(),
+                "reason": "ssot_contact_history",
+            }
         if key in self._sent_keys:
             return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "lane": lane, "recipient": str(draft.get("recipient") or "").strip()}
         sheet_idempotency_error = ""
@@ -604,6 +618,7 @@ class OutboundEmailExecutor:
         now = datetime.now(timezone.utc).isoformat()
         self._sent_keys.add(key)
         message_id = str(result.get("id") or "").strip()
+        thread_id = str(result.get("threadId") or "").strip()
         audit_log_error = ""
         if self.sheets:
             for attempt in range(4):
@@ -618,6 +633,7 @@ class OutboundEmailExecutor:
                         "status": "SENT",
                         "semantic_success": "PENDING_DELIVERY",
                         "message_id": message_id,
+                        "thread_id": thread_id,
                         "recipient": draft.get("recipient", ""),
                         "executed_at": now,
                     })
@@ -629,6 +645,7 @@ class OutboundEmailExecutor:
         response = {
             "status": "SENT",
             "message_id": message_id,
+            "thread_id": thread_id,
             "idempotency_key": key,
             "lane": lane,
             "recipient": str(draft.get("recipient") or "").strip(),
