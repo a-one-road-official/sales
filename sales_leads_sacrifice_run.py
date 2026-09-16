@@ -84,9 +84,13 @@ def _preferred_form_url(company_name: str, website: str, links: list[str]) -> st
         if host != root_host and not host.endswith("." + root_host):
             continue
         path = urlparse(value).path.lower()
-        score = sum(3 for marker in FORM_PATH_MARKERS if marker in path)
-        score -= sum(2 for marker in ("newsletter", "subscribe", "login", "signup") if marker in path)
-        score -= sum(1 for marker in ("pricing", "features", "product", "platform") if marker in path)
+        normalized_path = re.sub(r"[-_]+", " ", path)
+        def has_path_token(marker: str) -> bool:
+            token = re.sub(r"[-_]+", " ", marker)
+            return bool(re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", normalized_path))
+        score = sum(3 for marker in FORM_PATH_MARKERS if has_path_token(marker))
+        score -= sum(2 for marker in ("newsletter", "subscribe", "login", "signup") if has_path_token(marker))
+        score -= sum(1 for marker in ("pricing", "features", "product", "platform") if has_path_token(marker))
         if score > 0:
             candidates.append((score, value))
     return max(candidates, default=(0, ""))[1]

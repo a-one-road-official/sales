@@ -1,6 +1,7 @@
 import json
 
 from sales_leads_sacrifice import sacrifice_candidates, source_website_check
+from sales_leads_sacrifice_run import _preferred_form_url
 
 
 def test_sacrifice_candidates_only_selects_sales_leads_ec_snapshot():
@@ -26,3 +27,16 @@ def test_source_snapshot_is_valid_json():
         rows = json.load(handle)
     assert rows
     assert all(row.get("record_origin") == "SACRIFICE_EC" for row in rows)
+
+
+
+def test_form_selector_does_not_treat_salesforce_as_sales_page():
+    selected = _preferred_form_url(
+        "Algolia",
+        "https://www.algolia.com/",
+        [
+            "https://www.algolia.com/",
+            "https://www.algolia.com/search-solutions/salesforce-commerce-cloud",
+        ],
+    )
+    assert selected == ""
