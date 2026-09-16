@@ -1,0 +1,115 @@
+name: Priority geo growth intake once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/priority_geo_growth_intake_once.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  intake:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: asia-northeast1
+      SERVICE: aone-lead-factory
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Keep all customer-facing execution closed
+        run: |
+          set +e
+          for JOB in $(gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' --filter='name:lead-factory' | sed 's#.*/##'); do
+            [ -n "$JOB" ] || continue
+            gcloud scheduler jobs pause "$JOB" --location="$REGION" --project="$PROJECT" || true
+          done
+          for QUEUE in lead-factory-workers lead-factory-priority-workers; do
+            gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT" || true
+          done
+
+      - name: Resolve internal endpoint
+        run: |
+          set -euo pipefail
+          URL="$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format='value(status.url)')"
+          TOKEN="$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format=json | python -c 'import json,sys; d=json.load(sys.stdin); e=d.get("spec",{}).get("template",{}).get("spec",{}).get("containers",[{}])[0].get("env",[]); print(next((x.get("value","") for x in e if x.get("name")=="LEAD_FACTORY_INTERNAL_TOKEN"), ""))')"
+          test -n "$URL"
+          test -n "$TOKEN"
+          echo "::add-mask::$TOKEN"
+          echo "SERVICE_URL=$URL" >> "$GITHUB_ENV"
+          echo "INTERNAL_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Register priority growth sources
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error --max-time 180 \
+            -X POST -H "X-Aone-Internal-Token: $INTERNAL_TOKEN" \
+            -H "Content-Type: application/json" \
+            "$SERVICE_URL/discover/growth" | tee /tmp/discover-growth.json
+
+      - name: Run Israel Taiwan Korea growth source intake
+        run: |
+          set -euo pipefail
+          python - <<'PY' > /tmp/priority-source-ids.txt
+          import hashlib
+          from source_universe import BOOTSTRAP_SOURCES, PRIORITY_GEOGRAPHIES
+          from safety import canonicalize_url
+
+          for source in BOOTSTRAP_SOURCES:
+              if source.get("country") not in PRIORITY_GEOGRAPHIES:
+                  continue
+              if str(source.get("source_type","")).startswith("MITTELSTAND_"):
+                  continue
+              url = canonicalize_url(source.get("exhibitor_directory_url") or source.get("source_url") or "")
+              if not url:
+                  continue
+              sid = "source-" + hashlib.sha256(url.encode()).hexdigest()[:20]
+              print(source.get("country"), sid, source.get("source_name"), sep="\t")
+          PY
+
+          cat /tmp/priority-source-ids.txt
+          while IFS=$'\t' read -r COUNTRY SOURCE_ID SOURCE_NAME; do
+            [ -n "$SOURCE_ID" ] || continue
+            echo "=== $COUNTRY :: $SOURCE_NAME :: $SOURCE_ID ==="
+            for ITER in 1 2 3; do
+              set +e
+              RESPONSE="$(timeout 540 curl --silent --show-error --fail-with-body \
+                -X POST \
+                -H "X-Aone-Internal-Token: $INTERNAL_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d '{}' \
+                "$SERVICE_URL/source/$SOURCE_ID/run")"
+              RC=$?
+              set -e
+              echo "$RESPONSE"
+              if [ "$RC" -ne 0 ]; then
+                echo "source_run_failed country=$COUNTRY source=$SOURCE_ID iteration=$ITER"
+                break
+              fi
+              STATUS="$(python -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print(d.get("status",""))' <<<"$RESPONSE")"
+              WRITTEN="$(python -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); r=d.get("runtime") or {}; print(int(r.get("written_row_count",r.get("new_raw",0)) or 0))' <<<"$RESPONSE")"
+              echo "country=$COUNTRY iteration=$ITER status=$STATUS written=$WRITTEN"
+              if [ "$WRITTEN" -eq 0 ]; then
+                break
+              fi
+            done
+          done < /tmp/priority-source-ids.txt
+
+      - name: Confirm customer-facing paths remain closed
+        run: |
+          echo "Priority geo intake completed. Customer-facing send/form actions remained disabled and schedulers/queues remain paused."
