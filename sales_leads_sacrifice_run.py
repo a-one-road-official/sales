@@ -487,6 +487,12 @@ def _draft_with_auto_repair(
     fallback_meta: dict,
 ) -> tuple[dict, dict]:
     """Retry generation through a verified-site fallback selected by the loop."""
+    # Vertex/Gemini is forbidden for the EC lane. Keep this function safe even
+    # if a caller accidentally reaches it with the global budget flag closed.
+    if not _cfg_truthy(cfg, "LEAD_FACTORY_VERTEX_ALLOWED"):
+        fallback = _verified_site_draft(candidate, site)
+        fallback["autofix_reason"] = "vertex_forbidden_by_policy"
+        return fallback, dict(fallback_meta or {})
     try:
         return _draft_from_live_prompt(llm, drive, cfg, context, contact)
     except Exception as exc:
@@ -687,7 +693,8 @@ def run_ten_sacrifice_batch(
                     }
                     # Contact web search is only needed when the verified site
                     # exposes neither a public form nor a usable first-party email.
-                    contact_research_enabled = (
+                    vertex_allowed = _cfg_truthy(cfg, "LEAD_FACTORY_VERTEX_ALLOWED")
+                    contact_research_enabled = vertex_allowed and (
                         _cfg_truthy(cfg, "OUTREACH_FAST_SALES_GTM_CONTACT_RESEARCH")
                         or (not fast_sales_gtm_mode and not form_links)
                     )
