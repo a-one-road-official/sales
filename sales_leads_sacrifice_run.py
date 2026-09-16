@@ -555,12 +555,22 @@ def run_ten_sacrifice_batch(
         domain=target_domain,
         lane=normalized_lane,
     )
-    target_names = {
-        re.sub(r"[^a-z0-9]+", "", value.strip().lower())
-        for value in re.split(r"[|,]", str(os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES") or ""))
+    raw_target_names = [
+        value.strip()
+        for value in re.split(
+            r"[|,]",
+            str(os.getenv("OUTREACH_SACRIFICE_TARGET_COMPANIES") or ""),
+        )
         if value.strip()
+    ]
+    target_all = any(
+        value.upper() in {"*", "ALL", "ALL_COMPANIES"}
+        for value in raw_target_names
+    )
+    target_names = {
+        re.sub(r"[^a-z0-9]+", "", value.lower())
+        for value in raw_target_names
     }
-    target_all = bool(target_names & {"*", "ALL", "ALL_COMPANIES"})
     if target_names and not target_all:
         pool = [
             item for item in pool
