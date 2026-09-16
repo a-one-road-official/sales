@@ -1,2 +1,5 @@
-Playwright-only EC sacrifice trigger. Vertex remains forbidden by policy.
-Explicit execute retry for bounded Kimonix sacrifice canary after preallocated audit-slot fix 2026-09-16T14:xxZ.
+Bulk sacrifice execution requested at 2026-09-16T14:12:52Z.
+Scope: EC_SACRIFICE and BPO only.
+Runtime: existing Playwright/form executor plus Gmail first-party email path.
+Vertex: forbidden.
+Target workbook: sales_leads（生贄） only.
