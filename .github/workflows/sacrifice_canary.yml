@@ -49,6 +49,13 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
+      - name: Grant isolated runtime JWT signing permission
+        run: |
+          set -euo pipefail
+          gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
+            --member="serviceAccount:${RUNTIME_SA}" \
+            --role="roles/iam.serviceAccountTokenCreator" \
+            --project="${PROJECT}"
       - name: Generate isolated runtime token
         run: |
           set -euo pipefail
