@@ -1,5 +1,40 @@
 from __future__ import annotations
 
+PRIORITY_GEOGRAPHIES = ("Israel", "Taiwan", "South Korea")
+
+_COUNTRY_ALIASES = {
+    "israel": "Israel",
+    "イスラエル": "Israel",
+    "taiwan": "Taiwan",
+    "tayvan": "Taiwan",
+    "台湾": "Taiwan",
+    "south korea": "South Korea",
+    "korea": "South Korea",
+    "republic of korea": "South Korea",
+    "korea, south korea": "South Korea",
+    "韓国": "South Korea",
+    "usa": "United States",
+    "us": "United States",
+    "u.s.": "United States",
+    "united states": "United States",
+    "united states of america": "United States",
+    "米国": "United States",
+}
+
+def normalize_country(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return _COUNTRY_ALIASES.get(raw.casefold(), raw)
+
+def geo_priority(value: str) -> int:
+    country = normalize_country(value)
+    if country in PRIORITY_GEOGRAPHIES:
+        return 0
+    if country == "United States":
+        return 3
+    return 1
+
 # Public, high-yield company-list entry points. These are only bootstrap fuel.
 # The runtime continuously discovers additional sources with web search and stores
 # them in LeadFactory_Sources, so this list is intentionally small and stable.
@@ -131,6 +166,57 @@ BOOTSTRAP_SOURCES: tuple[dict, ...] = (
         "country": "",
         "event_year": "",
         "exhibitor_directory_url": "https://www.factoryautomationexpo.com/list-of-exhibitors/",
+    },
+
+    # Geographic replenishment: dedicated, primary list sources for the three
+    # underrepresented priority markets.
+    {
+        "source_type": "MITTELSTAND_ASSOCIATION",
+        "source_name": "Manufacturers Association of Israel Members",
+        "source_url": "https://industry.org.il/index.php?cs=3002&dir=site&op=category&page=modul_icons",
+        "country": "Israel",
+        "event_year": "",
+        "exhibitor_directory_url": "https://industry.org.il/index.php?cs=3002&dir=site&op=category&page=modul_icons",
+    },
+    {
+        "source_type": "GROWTH_DIRECTORY",
+        "source_name": "Startup Nation Finder Industry 4.0 Active Startups",
+        "source_url": "https://finder.startupnationcentral.org/startups/search?alltags=industry-4.0&status=Active",
+        "country": "Israel",
+        "event_year": "2026",
+        "exhibitor_directory_url": "https://finder.startupnationcentral.org/startups/search?alltags=industry-4.0&status=Active",
+    },
+    {
+        "source_type": "MITTELSTAND_EXHIBITION",
+        "source_name": "TIMTOS Taiwan Exhibitors",
+        "source_url": "https://www.timtos.com.tw/en/exhibitor/country-list-data/TW/list.html",
+        "country": "Taiwan",
+        "event_year": "2026",
+        "exhibitor_directory_url": "https://www.timtos.com.tw/en/exhibitor/country-list-data/TW/list.html",
+    },
+    {
+        "source_type": "GROWTH_EXHIBITION",
+        "source_name": "Automation Taipei Exhibitors",
+        "source_url": "https://automationtaipei.chanchao.com.tw/en/VisitorExhibitor",
+        "country": "Taiwan",
+        "event_year": "2026",
+        "exhibitor_directory_url": "https://automationtaipei.chanchao.com.tw/en/VisitorExhibitor",
+    },
+    {
+        "source_type": "MITTELSTAND_ASSOCIATION",
+        "source_name": "KOMMA Member Companies",
+        "source_url": "https://komma.org/user/member/membership_list",
+        "country": "South Korea",
+        "event_year": "",
+        "exhibitor_directory_url": "https://komma.org/user/member/membership_list",
+    },
+    {
+        "source_type": "GROWTH_EXHIBITION",
+        "source_name": "SIMTOS Exhibitor List",
+        "source_url": "https://www.simtos.org/eng/exhibitors/exhibitor_list.do",
+        "country": "South Korea",
+        "event_year": "2028",
+        "exhibitor_directory_url": "https://www.simtos.org/eng/exhibitors/exhibitor_list.do",
     },
 )
 
