@@ -23,6 +23,7 @@ LOG_TAB = "outreach_engine_log"
 ORIGIN = "sacrifice_oss_v1"
 PROMPT_HASH = "sacrifice_ec_prompt_v1"
 LOG_HEADERS = ["timestamp", "channel", "company_name", "website", "email", "status", "error_message", "subject", "body", "stage"]
+AUDIT_SLOTS = {"PRE_SEND": 1001, "POST_SEND": 1002}
 
 
 def now():
@@ -175,10 +176,20 @@ class SacrificeStore:
     def audit(self, seed, status, detail, *, stage="PIPELINE"):
         values = [now(), "form", seed["company_name"], seed["website"], "", status, "",
             seed.get("subject", ""), json.dumps(detail, ensure_ascii=False), stage]
-        # No retry: an uncertain append must not lead to a duplicate external send.
-        self.svc.spreadsheets().values().append(spreadsheetId=SACRIFICE_ID,
-            range=f"'{LOG_TAB}'!A:J", valueInputOption="RAW", insertDataOption="INSERT_ROWS",
+        # The workbook is already near Sheets' 10-million-cell limit because of
+        # legacy send_log rows. Reusing two preallocated audit rows avoids growing
+        # the workbook. Occupied slots fail closed; no retry can create a duplicate send.
+        if stage not in AUDIT_SLOTS:
+            raise ValueError("unsupported_audit_stage")
+        row_number = AUDIT_SLOTS[stage]
+        existing = self.values(LOG_TAB, f"A{row_number}:J{row_number}")
+        if any(str(cell).strip() for row in existing for cell in row):
+            raise RuntimeError("audit_slot_occupied")
+        self.svc.spreadsheets().values().update(spreadsheetId=SACRIFICE_ID,
+            range=f"'{LOG_TAB}'!A{row_number}:J{row_number}", valueInputOption="RAW",
             body={"values":[values]}).execute()
+        if self.values(LOG_TAB, f"A{row_number}:J{row_number}") != [values]:
+            raise RuntimeError("audit_readback_failed")
 
     def update_own_status(self, seed, status):
         found = self.existing(seed)
