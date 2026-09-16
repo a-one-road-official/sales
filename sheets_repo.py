@@ -640,7 +640,11 @@ class SheetsRepo:
             cached = _CONFIG_CACHE.get(cache_key)
             if cached and now - cached[0] < _CONFIG_CACHE_TTL_SECONDS:
                 return dict(cached[1])
-        rows = self.read("Config!A2:B1000")
+        sheet = str(
+            os.getenv("LEAD_FACTORY_CONFIG_SHEET", "Config")
+            or "Config"
+        ).strip() or "Config"
+        rows = self.read(f"'{sheet}'!A2:B1000")
         config = {str(r[0]): str(r[1]) for r in rows if len(r) >= 2 and r[0]}
         with _CONFIG_CACHE_LOCK:
             _CONFIG_CACHE[cache_key] = (time.monotonic(), config)
@@ -1087,9 +1091,16 @@ class SheetsRepo:
 
     def _human_ssot_config(self) -> tuple[str, int]:
         cfg = self.get_config()
-        sheet = cfg.get("LEAD_FACTORY_HUMAN_SSOT_SHEET", "営業リスト＿Factory/BPO")
+        sheet = str(
+            os.getenv("LEAD_FACTORY_HUMAN_SSOT_SHEET")
+            or cfg.get("LEAD_FACTORY_HUMAN_SSOT_SHEET", "営業リスト＿Factory/BPO")
+        ).strip() or "営業リスト＿Factory/BPO"
         try:
-            min_row = int(cfg.get("LEAD_FACTORY_HUMAN_APPEND_MIN_ROW", "2887") or 2887)
+            min_row = int(
+                os.getenv("LEAD_FACTORY_HUMAN_APPEND_MIN_ROW")
+                or cfg.get("LEAD_FACTORY_HUMAN_APPEND_MIN_ROW", "2887")
+                or 2887
+            )
         except Exception:
             min_row = 2887
         return sheet, max(2, min_row)
