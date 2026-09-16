@@ -35,6 +35,47 @@ def geo_priority(value: str) -> int:
         return 3
     return 1
 
+def lane_balance_decision(
+    lane: str,
+    *,
+    sampled: int,
+    growth_share: float,
+    target_growth_share: float = 0.50,
+    tolerance: float = 0.08,
+    min_sample: int = 100,
+) -> dict:
+    lane_key = str(lane or "").strip().upper()
+    if lane_key not in {"GROWTH", "MITTELSTAND"}:
+        raise ValueError(f"unsupported_lane:{lane_key}")
+    if int(sampled) < int(min_sample):
+        return {"hold": False, "reason": "sample_too_small"}
+    low = max(0.0, float(target_growth_share) - float(tolerance))
+    high = min(1.0, float(target_growth_share) + float(tolerance))
+    share = float(growth_share)
+    if lane_key == "MITTELSTAND" and share < low:
+        return {
+            "hold": True,
+            "reason": "growth_underrepresented",
+            "growth_share": share,
+            "target_low": low,
+            "target_high": high,
+        }
+    if lane_key == "GROWTH" and share > high:
+        return {
+            "hold": True,
+            "reason": "mittelstand_underrepresented",
+            "growth_share": share,
+            "target_low": low,
+            "target_high": high,
+        }
+    return {
+        "hold": False,
+        "reason": "within_balance_band",
+        "growth_share": share,
+        "target_low": low,
+        "target_high": high,
+    }
+
 # Public, high-yield company-list entry points. These are only bootstrap fuel.
 # The runtime continuously discovers additional sources with web search and stores
 # them in LeadFactory_Sources, so this list is intentionally small and stable.
