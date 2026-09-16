@@ -2,6 +2,20 @@ name: EC sacrifice batch (Playwright-only; Vertex forbidden)
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "preflight checks access/schema; execute may research, append to sacrifice, and submit public forms"
+        required: true
+        type: choice
+        options:
+          - preflight
+          - execute
+        default: preflight
+      manifest:
+        description: "bounded JSON manifest path"
+        required: true
+        type: string
+        default: data/sacrifice_oss_campaign.json
   push:
     branches: [main]
     paths:
@@ -16,29 +30,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  send:
+  sacrifice:
     if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'RUN_EC_PLAYWRIGHT') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     env:
-      PROJECT: ${{ secrets.GCP_PROJECT_ID }}
-      REGION: asia-northeast1
-      RUNTIME_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      SPREADSHEET_ID: 1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo
-      DRIVE_ROOT_FOLDER_ID: 14JY0cfJrNM9uteVmPOQ-SDoYKkSrEX3E
-      SACRIFICE_SERVICE: aone-sacrifice-playwright-${{ github.run_id }}
-      TARGET_COMPANIES: "Abnormal AI|ChannelEngine|CommerceIQ|Fit Analytics|Narvar|Workato|Alokai|Tapcart|RetailNext|Plytix"
+      SACRIFICE_SPREADSHEET_ID: 1QBZKoN82O-SrFUnWaHBQtvflcdMT1gDp-QMPtZvLsEk
+      LEAD_FACTORY_VERTEX_ALLOWED: FALSE
+      OUTREACH_SITE_FETCH_MODE: PLAYWRIGHT
+      OUTREACH_SITE_RPS: "0.5"
+      OUTREACH_PLAYWRIGHT_FORM_ONLY: "TRUE"
+      PYTHONUNBUFFERED: "1"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Compile and focused tests
-        run: |
-          set -euo pipefail
-          python -m compileall .
-          pip install -r requirements.txt
-          pytest -q tests/test_outreach_execution.py tests/test_sales_leads_sacrifice.py
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
@@ -47,94 +53,40 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Generate isolated runtime token
+      - name: Install isolated OSS runtime
         run: |
           set -euo pipefail
-          TOKEN="$(openssl rand -hex 32)"
-          echo "::add-mask::${TOKEN}"
-          echo "SACRIFICE_TOKEN=${TOKEN}" >> "${GITHUB_ENV}"
+          python -m pip install --disable-pip-version-check -r requirements-sacrifice.txt
+          python -m playwright install --with-deps chromium
 
-      - name: Configure Docker and build image
+      - name: Verify this lane cannot call Vertex
         run: |
           set -euo pipefail
-          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
-          gcloud artifacts repositories describe aone-lead-factory --location="${REGION}" --project="${PROJECT}" >/dev/null 2>&1 ||             gcloud artifacts repositories create aone-lead-factory --repository-format=docker --location="${REGION}" --project="${PROJECT}"
-          IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
-          docker build -t "${IMAGE}" .
-          docker push "${IMAGE}"
-          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+          if rg -n --glob '*.py' 'google\.genai|google\.generativeai|vertexai|aiplatform' \
+            sacrifice_sheet_pipeline.py sacrifice_web_research.py browser_fetch.py form_execution.py sales_leads_sacrifice.py; then
+            echo "forbidden paid AI import found"
+            exit 1
+          fi
+          python -m py_compile sacrifice_sheet_pipeline.py sacrifice_web_research.py browser_fetch.py form_execution.py sales_leads_sacrifice.py
 
-      - name: Deploy isolated Playwright runtime
+      - name: Preflight exact sacrifice workbook and schema
         run: |
           set -euo pipefail
-          gcloud run deploy "${SACRIFICE_SERVICE}"             --image="${IMAGE}"             --region="${REGION}"             --platform=managed             --service-account="${RUNTIME_SA}"             --allow-unauthenticated             --timeout=540             --memory=2Gi             --cpu=2             --concurrency=1             --min=0             --max=1             --cpu-throttling             --update-env-vars="GOOGLE_CLOUD_PROJECT=${PROJECT},GCP_PROJECT=${PROJECT},LEAD_FACTORY_SPREADSHEET_ID=${SPREADSHEET_ID},LEAD_FACTORY_DRIVE_ROOT_FOLDER_ID=${DRIVE_ROOT_FOLDER_ID},LEAD_FACTORY_INTERNAL_TOKEN=${SACRIFICE_TOKEN},LEAD_FACTORY_GMAIL_IMPERSONATE=admin@a1-road.com,LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT=${RUNTIME_SA},LEAD_FACTORY_TASKS_SERVICE_ACCOUNT=${RUNTIME_SA},LEAD_FACTORY_DRIVE_IMPERSONATE=admin@a1-road.com,LEAD_FACTORY_SACRIFICE_SOURCE_PATH=/app/data/sales_leads_ec_sacrifice.json,OUTREACH_SACRIFICE_TARGET_COMPANIES=${TARGET_COMPANIES},LEAD_FACTORY_VERTEX_ALLOWED=FALSE,LEAD_FACTORY_ENABLED=FALSE,LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=TRUE,LEAD_FACTORY_LIST_ONLY_LOCK=FALSE,LEAD_FACTORY_SEND_MODE=ENABLED,LEAD_FACTORY_EXPLICIT_SEND_APPROVAL=TRUE,LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME=TRUE,OUTREACH_ALLOWED_LANES=EC_SACRIFICE,OUTREACH_SACRIFICE_LANES=EC_SACRIFICE,OUTREACH_SACRIFICE_SEND_ENABLED=TRUE,OUTREACH_SITE_FETCH_MODE=PLAYWRIGHT,OUTREACH_PLAYWRIGHT_FORM_ONLY=TRUE,OUTREACH_PREFER_PUBLIC_FORM=TRUE,OUTREACH_FORM_AUDIT_TEMPLATE_ONLY=TRUE,OUTREACH_DETERMINISTIC_DRAFT=TRUE,OUTREACH_AUTOFIX_GENERATION=FALSE,OUTREACH_AUTOPILOT_ENABLED=FALSE,LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED=FALSE,LEAD_FACTORY_FACTORY_SEND_ENABLED=FALSE,OUTREACH_FACTORY_SEND_ENABLED=FALSE,OUTREACH_BPO_SEND_ENABLED=FALSE,OUTREACH_SALES_GTM_SEND_ENABLED=FALSE,OUTREACH_SSOT_SEND_ENABLED=FALSE,LEAD_FACTORY_DIRECT_ADAPTER_FALLBACK_ENABLED=TRUE,LEAD_FACTORY_INTERNAL_NOTIFY_ENABLED=FALSE,LEAD_FACTORY_SHEETS_READ_MIN_INTERVAL_SECONDS=1.05,LEAD_FACTORY_SHEETS_READ_CACHE_TTL_SECONDS=10,LEAD_FACTORY_SHEETS_WRITE_MIN_INTERVAL_SECONDS=1.05"             --project="${PROJECT}"
-          URL="$(gcloud run services describe "${SACRIFICE_SERVICE}" --region="${REGION}" --project="${PROJECT}" --format='value(status.url)')"
-          test -n "${URL}"
-          echo "SACRIFICE_URL=${URL}" >> "${GITHUB_ENV}"
+          python sacrifice_sheet_pipeline.py --preflight
 
-      - name: Verify Vertex prohibition and isolated outbound gate
+      - name: Execute bounded research, append, and public-form outreach
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'execute' }}
+        env:
+          SACRIFICE_EXPLICIT_SEND_APPROVAL: TRUE
+          MANIFEST_PATH: ${{ inputs.manifest }}
         run: |
           set -euo pipefail
-          curl --fail-with-body --retry 10 --retry-all-errors --retry-delay 3             -H "X-Aone-Internal-Token: ${SACRIFICE_TOKEN}"             -o /tmp/deep-health.json "${SACRIFICE_URL}/healthz/deep"
-          python - <<'PY'
-          import json
-          data = json.load(open("/tmp/deep-health.json", encoding="utf-8"))
-          assert data["ok"] is True, data
-          assert data["vertex_allowed"] is False, data
-          assert data["gemini_vertex_ready"] is False, data
-          assert data["external_write"] is True, data
-          print(json.dumps(data, ensure_ascii=False, indent=2))
-          PY
-          curl --fail-with-body --retry 10 --retry-all-errors --retry-delay 3             -H "X-Aone-Internal-Token: ${SACRIFICE_TOKEN}"             "${SACRIFICE_URL}/outreach/prompt-status"
+          python sacrifice_sheet_pipeline.py --execute --manifest "${MANIFEST_PATH}"
 
-      - name: Execute one Playwright EC batch
-        run: |
-          set -euo pipefail
-          BATCH_ID="ec-playwright-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          BODY="$(python - "${BATCH_ID}" <<'PY'
-          import json
-          import sys
-          print(json.dumps({
-              "limit": 10,
-              "execute_external": True,
-              "lane": "EC_SACRIFICE",
-              "batch_id": sys.argv[1],
-          }))
-          PY
-          )"
-          curl --fail-with-body --max-time 1800 --retry 1 --retry-all-errors --retry-delay 4             -X POST             -H "X-Aone-Internal-Token: ${SACRIFICE_TOKEN}"             -H "Content-Type: application/json"             --data "${BODY}"             -o /tmp/ec-playwright-result.json             "${SACRIFICE_URL}/outreach/sales-leads-sacrifice-run"
-          cat /tmp/ec-playwright-result.json
-          python - <<'PY'
-          import json
-          from collections import Counter
-          data = json.load(open("/tmp/ec-playwright-result.json", encoding="utf-8"))
-          assert data.get("lane") == "EC_SACRIFICE", data
-          assert data.get("send_enabled") is True, data
-          results = data.get("results") or []
-          assert len(results) <= 10, data
-          print("batch_id=", data.get("batch_id"))
-          print("attempted=", data.get("attempted"))
-          print("statuses=", dict(Counter(str(row.get("status") or "UNKNOWN") for row in results)))
-          for row in results:
-              form_result = row.get("form_execution") or {}
-              print({
-                  "company_name": row.get("company_name"),
-                  "status": row.get("status"),
-                  "form_url": form_result.get("form_url"),
-                  "submission_attempted": form_result.get("submission_attempted", False),
-                  "reason": form_result.get("reason") or row.get("error_message") or row.get("stage"),
-              })
-          PY
-
-      - name: Upload per-attempt audit
+      - name: Upload bounded result audit
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: ec-playwright-${{ github.run_id }}
-          path: /tmp/ec-playwright-result.json
+          name: ec-sacrifice-${{ github.run_id }}
+          path: sacrifice-result.json
           if-no-files-found: ignore
-
-      - name: Delete isolated runtime
-        if: ${{ always() }}
-        run: |
-          gcloud run services delete "${SACRIFICE_SERVICE}" --region="${REGION}" --project="${PROJECT}" --quiet || true
