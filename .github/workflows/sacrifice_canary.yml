@@ -1,16 +1,116 @@
-name: EC sacrifice canary (disabled - A1 list only)
+name: EC sacrifice isolated send
 
+# Manual kickoff only. Once started, the batch is automatic and restricted to
+# the EC_SACRIFICE lane. SSOT/BPO/Factory lanes remain disabled.
 on:
   workflow_dispatch:
+    inputs:
+      target_companies:
+        description: "Pipe-separated company names from the sacrifice snapshot"
+        required: true
+        type: string
+      limit:
+        description: "Maximum companies for this run (1-10)"
+        required: false
+        default: "10"
+        type: string
 
 permissions:
   contents: read
+  id-token: write
+
+concurrency:
+  group: ec-sacrifice-isolated-send
+  cancel-in-progress: false
 
 jobs:
-  disabled:
+  send:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: asia-northeast1
+      SERVICE: aone-bpo-autopilot
+      TARGET_COMPANIES: ${{ inputs.target_companies }}
+      BATCH_LIMIT: ${{ inputs.limit || '10' }}
+
     steps:
-      - name: A1 fail-closed interlock
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Resolve deployed runtime
+        shell: bash
         run: |
-          echo "A1 interlock: EC sacrifice execution is disabled."
-          echo "No external email, form submission, invitation, or CRM notification is executed."
+          set -euo pipefail
+          URL="$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format='value(status.url)')"
+          gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format=json > /tmp/aone-service.json
+          TOKEN="$(python - /tmp/aone-service.json <<'PY'
+          import json
+          import sys
+
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          stack = [data]
+          token = ""
+          while stack:
+              value = stack.pop()
+              if isinstance(value, dict):
+                  if value.get("name") == "LEAD_FACTORY_INTERNAL_TOKEN" and value.get("value"):
+                      token = str(value["value"])
+                      break
+                  stack.extend(value.values())
+              elif isinstance(value, list):
+                  stack.extend(value)
+          print(token)
+          PY
+          )"
+          test -n "$URL"
+          test -n "$TOKEN"
+          test -n "$TARGET_COMPANIES"
+          echo "::add-mask::$TOKEN"
+          echo "SERVICE_URL=$URL" >> "$GITHUB_ENV"
+          echo "INTERNAL_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Run isolated automatic batch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          restore() {
+            set +e
+            gcloud run services update "$SERVICE"               --region="$REGION" --project="$PROJECT"               --min=0 --cpu-throttling               --update-env-vars=LEAD_FACTORY_ENABLED=FALSE,LEAD_FACTORY_VERTEX_ALLOWED=FALSE,LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_LIST_ONLY_LOCK=TRUE,LEAD_FACTORY_SEND_MODE=DISABLED,LEAD_FACTORY_EXPLICIT_SEND_APPROVAL=FALSE,LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME=FALSE,OUTREACH_ALLOWED_LANES=,OUTREACH_SACRIFICE_LANES=,OUTREACH_SACRIFICE_SEND_ENABLED=FALSE,OUTREACH_BPO_SEND_ENABLED=FALSE,OUTREACH_SALES_GTM_SEND_ENABLED=FALSE,OUTREACH_FACTORY_SEND_ENABLED=FALSE,OUTREACH_SSOT_SEND_ENABLED=FALSE,OUTREACH_AUTOPILOT_ENABLED=FALSE,OUTREACH_AUTOPILOT_AUTOSTART=FALSE
+          }
+          trap restore EXIT
+
+          gcloud run services update "$SERVICE"             --region="$REGION" --project="$PROJECT"             --min=0 --cpu-throttling             --update-env-vars="LEAD_FACTORY_ENABLED=TRUE,LEAD_FACTORY_VERTEX_ALLOWED=FALSE,LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=TRUE,LEAD_FACTORY_LIST_ONLY_LOCK=FALSE,LEAD_FACTORY_SEND_MODE=ENABLED,LEAD_FACTORY_EXPLICIT_SEND_APPROVAL=TRUE,LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME=TRUE,OUTREACH_ALLOWED_LANES=EC_SACRIFICE,OUTREACH_SACRIFICE_LANES=EC_SACRIFICE,OUTREACH_SACRIFICE_SEND_ENABLED=TRUE,OUTREACH_BPO_SEND_ENABLED=FALSE,OUTREACH_SALES_GTM_SEND_ENABLED=FALSE,OUTREACH_FACTORY_SEND_ENABLED=FALSE,OUTREACH_SSOT_SEND_ENABLED=FALSE,OUTREACH_DETERMINISTIC_DRAFT=TRUE,OUTREACH_AUTOPILOT_ENABLED=FALSE,OUTREACH_AUTOPILOT_AUTOSTART=FALSE,OUTREACH_SACRIFICE_TARGET_COMPANIES=$TARGET_COMPANIES"
+
+          PAYLOAD="$(python - <<'PY'
+          import json, os
+          print(json.dumps({
+              "lane": "EC_SACRIFICE",
+              "limit": int(os.environ["BATCH_LIMIT"]),
+              "dry_run": False,
+          }))
+          PY
+          )"
+          RESPONSE="$(curl --fail-with-body --silent --show-error --max-time 120             -X POST             -H "X-Aone-Internal-Token: $INTERNAL_TOKEN"             -H "Content-Type: application/json"             --data "$PAYLOAD"             "$SERVICE_URL/outreach/sales-leads-sacrifice-run")"
+          echo "$RESPONSE"
+          python - "$RESPONSE" <<'PY'
+          import json, sys
+          data = json.loads(sys.argv[1])
+          assert data.get("lane") == "EC_SACRIFICE", data
+          assert data.get("production_ssot_touched") is False, data
+          assert data.get("send_enabled") is True, data
+          assert data.get("vertex_allowed") is not True, data
+          print(json.dumps({
+              "status": data.get("status"),
+              "attempted": data.get("attempted"),
+              "success_count": data.get("success_count"),
+              "email_success_count": data.get("email_success_count"),
+              "form_success_count": data.get("form_success_count"),
+              "production_ssot_touched": data.get("production_ssot_touched"),
+              "send_enabled": data.get("send_enabled"),
+          }, ensure_ascii=False))
+          PY
