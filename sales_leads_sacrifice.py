@@ -138,9 +138,13 @@ def _read_sheet_dicts_once(
 
 
 def _live_bpo_rows(sheets) -> list[dict]:
-    """Read explicit BPO rows from the existing SSOT when available."""
+    """Read explicit BPO rows from the shared SSOT when the runtime is not isolated."""
     global _BPO_LIVE_CACHE, _BPO_LIVE_CACHE_AT
     if sheets is None:
+        return []
+    # The sacrifice workbook has no production SSOT tab. Keep the BPO lane on
+    # its curated catalog and never probe the production workbook from this path.
+    if str(getattr(sheets, "spreadsheet_id", "") or "").strip() == "1QBZKoN82O-SrFUnWaHBQtvflcdMT1gDp-QMPtZvLsEk":
         return []
     try:
         ttl = max(10, min(900, int(os.getenv("OUTREACH_BPO_LIVE_CACHE_SECONDS", "120") or 120)))
