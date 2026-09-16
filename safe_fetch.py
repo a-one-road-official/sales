@@ -8,6 +8,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
+from cost_guard import is_cloud_run, paid_cloud_allowed
 from safety import same_host_or_subdomain
 
 
@@ -36,9 +37,6 @@ class Snapshot:
             "status_code": self.status_code,
             "content_type": self.content_type,
             "text": self.text,
-            # Generated adapters in the existing source registry use both
-            # snapshot["text"] and snapshot["html"]; keep one canonical payload
-            # while preserving backward compatibility for both contracts.
             "html": self.text,
             "links": self.links,
             "network": self.network or [],
@@ -56,13 +54,14 @@ class TrustedFetcher:
 
     Generated adapters never receive network access. This trusted fetcher enforces
     GET/HEAD only, same-source navigation, rate limits, byte limits and request budgets.
+    Cloud Run network work is additionally gated by explicit paid-cloud authorization.
     """
 
     def __init__(self, source_url: str, rps: float, max_requests: int, max_bytes: int):
         self.source_url = source_url
         self.rps = max(rps, 0.05)
-        self.max_requests = max_requests
-        self.max_bytes = max_bytes
+        self.max_requests = max(0, min(int(max_requests or 0), 5000))
+        self.max_bytes = max(1, min(int(max_bytes or 1), 8 * 1024 * 1024))
         self.requests = 0
         self._last = 0.0
         self.client = httpx.Client(
@@ -80,6 +79,8 @@ class TrustedFetcher:
         self._last = time.monotonic()
 
     def fetch(self, url: str) -> Snapshot:
+        if is_cloud_run() and not paid_cloud_allowed():
+            raise RequestBudgetExceeded("paid_cloud_disabled:http_fetch")
         if self.requests >= self.max_requests:
             raise RequestBudgetExceeded("request_budget_exceeded")
         if not same_host_or_subdomain(url, self.source_url):
@@ -97,7 +98,17 @@ class TrustedFetcher:
                 u = urljoin(str(r.url), a.get("href", ""))
                 if same_host_or_subdomain(u, self.source_url):
                     links.append(u)
-        return Snapshot(url=url, final_url=str(r.url), status_code=r.status_code, content_type=ctype, text=text, links=list(dict.fromkeys(links))[:5000], network=[], api_payloads=[], title="")
+        return Snapshot(
+            url=url,
+            final_url=str(r.url),
+            status_code=r.status_code,
+            content_type=ctype,
+            text=text,
+            links=list(dict.fromkeys(links))[:5000],
+            network=[],
+            api_payloads=[],
+            title="",
+        )
 
     @staticmethod
     def auth_required(snapshot: Snapshot) -> tuple[bool, str]:
