@@ -1,0 +1,90 @@
+name: Deploy paused SSOT history repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/deploy_paused_repair.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-paused-ssot-history-repair
+  cancel-in-progress: true
+
+jobs:
+  deploy-paused:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      REGION: asia-northeast1
+      SERVICE: aone-lead-factory
+      RUNTIME_SA: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile and test
+        run: |
+          python -m compileall .
+          pip install -r requirements.txt
+          pytest -q
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Keep all autonomous execution paused
+        run: |
+          set +e
+          for JOB in $(gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' --filter='name:lead-factory' | sed 's#.*/##'); do
+            [ -n "$JOB" ] || continue
+            gcloud scheduler jobs pause "$JOB" --location="$REGION" --project="$PROJECT" || true
+          done
+          for QUEUE in lead-factory-workers lead-factory-priority-workers; do
+            gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT" || true
+          done
+
+      - name: Build paused repair image
+        run: |
+          set -euo pipefail
+          gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Deploy code with every execution gate closed
+        run: |
+          set -euo pipefail
+          gcloud run deploy "$SERVICE" \
+            --image="$IMAGE" \
+            --region="$REGION" \
+            --platform=managed \
+            --service-account="$RUNTIME_SA" \
+            --allow-unauthenticated \
+            --timeout=540 \
+            --memory=2Gi \
+            --concurrency=1 \
+            --min=0 \
+            --max=1 \
+            --cpu-throttling \
+            --update-env-vars="LEAD_FACTORY_ENABLED=FALSE,LEAD_FACTORY_AUTONOMY_MODE=PAUSED,LEAD_FACTORY_VERTEX_ALLOWED=FALSE,LEAD_FACTORY_ALLOW_EXTERNAL_WRITE=FALSE,LEAD_FACTORY_LIST_ONLY_LOCK=TRUE,LEAD_FACTORY_HUMAN_REVIEW_ENABLED=FALSE,LEAD_FACTORY_SEND_MODE=DISABLED,LEAD_FACTORY_EXPLICIT_SEND_APPROVAL=FALSE,LEAD_FACTORY_FACTORY_SEND_ENABLED=FALSE,OUTREACH_AUTOPILOT_ENABLED=FALSE,OUTREACH_AUTOPILOT_AUTOSTART=FALSE,OUTREACH_FACTORY_SEND_ENABLED=FALSE,OUTREACH_SSOT_SEND_ENABLED=FALSE,OUTREACH_BPO_SEND_ENABLED=FALSE,OUTREACH_SACRIFICE_SEND_ENABLED=FALSE,OUTREACH_SALES_GTM_SEND_ENABLED=FALSE,CRM_EVIDENCE_ALLOW_STATUS_WRITE=FALSE" \
+            --project="$PROJECT"
+
+      - name: Verify paused production revision
+        run: |
+          set -euo pipefail
+          gcloud run services describe "$SERVICE" \
+            --region="$REGION" --project="$PROJECT" \
+            --format="yaml(status.latestReadyRevisionName,spec.template.spec.containers[0].env)"
+          echo "Repair code deployed. Schedulers, queues, outbound writes, CRM Status writes, human review, and autonomy remain paused."
