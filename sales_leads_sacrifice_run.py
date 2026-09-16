@@ -808,9 +808,15 @@ def run_ten_sacrifice_batch(
                         "recipient_verified": True,
                         "contact_confidence": research.get("confidence", "HIGH"),
                     }
-                    if fast_sales_gtm_mode:
+                    deterministic_draft = (
+                        normalized_lane == "EC_SACRIFICE"
+                        and _cfg_truthy(cfg, "OUTREACH_DETERMINISTIC_DRAFT")
+                    )
+                    if fast_sales_gtm_mode or deterministic_draft:
                         draft = _verified_site_draft(candidate, site)
                         prompt_meta = dict(prompt_meta or {})
+                        if deterministic_draft:
+                            prompt_meta["generation_mode"] = "DETERMINISTIC_TEMPLATE"
                     else:
                         draft, prompt_meta = _draft_with_auto_repair(
                             llm, drive, cfg, context, contact, candidate, site, prompt_meta
@@ -871,7 +877,14 @@ def run_ten_sacrifice_batch(
                             raise RuntimeError("sacrifice_executor_not_configured")
                         execution = executor.execute(row, cfg)
                         if execution.get("status") == "STALE_PROMPT":
-                            draft, prompt_meta = _draft_from_live_prompt(llm, drive, cfg, context, contact)
+                            if deterministic_draft:
+                                _, prompt_meta = drive.read_live_prompt_by_title(prompt_title)
+                                draft = _verified_site_draft(candidate, site)
+                                prompt_meta["generation_mode"] = "DETERMINISTIC_TEMPLATE"
+                            else:
+                                draft, prompt_meta = _draft_from_live_prompt(
+                                    llm, drive, cfg, context, contact
+                                )
                             row.update(
                                 subject=draft["subject"],
                                 body=draft["body"],
