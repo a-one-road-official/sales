@@ -1179,7 +1179,7 @@ class SheetsRepo:
                     changes["営業メール宛先"] = event.get("recipient")
             changes["営業メール状態"] = "SENT"
             current = str(row.get("Status") or "").strip()
-            if current not in CONTACTED_STATUSES:
+            if current in {"", "未接触", "判定中"}:
                 changes["Status"] = "送付済み"
 
         self._narrow_update_sales_fields(row_number, changes)
