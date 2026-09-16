@@ -38,6 +38,8 @@ class _GeminiResponses:
 
 class _GeminiCompatClient:
     def __init__(self):
+        if VERTEX_FORBIDDEN:
+            raise RuntimeError("vertex_forbidden_by_policy")
         project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
         location = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
         if not project:
