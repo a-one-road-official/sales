@@ -132,8 +132,11 @@ def guarded_status(current: Any, requested: Any, *, row: dict | None = None, sou
     if source_key in {"HUMAN", "MANUAL", "USER"}:
         return requested_value
 
-    # Gate, research, and classification never own CRM lifecycle facts.
+    # Screening may initialize a still-unassigned row, but it cannot
+    # classify or overwrite an established CRM lifecycle fact.
     if source_key in {"GATE", "RESEARCH", "CLASSIFICATION", "SINGLE_SHEET"}:
+        if source_key == "GATE" and current_value == "判定中" and requested_value == "未接触":
+            return requested_value
         return current_value
 
     contacted = has_contact_history(row)
