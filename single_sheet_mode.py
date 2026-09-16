@@ -191,8 +191,13 @@ def install(cls):
     def update(self, row_number, changes):
         hs = headers(self)
         index = {h: i for i, h in enumerate(hs) if h}
+        normalized = dict(changes or {})
+        if "Status" in normalized and hasattr(self, "_guard_sales_status_change"):
+            normalized["Status"] = self._guard_sales_status_change(
+                int(row_number), normalized["Status"], source="SINGLE_SHEET"
+            )
         data = []
-        for key, value in changes.items():
+        for key, value in normalized.items():
             if key not in index:
                 continue
             col = self._column_letter(index[key] + 1)
@@ -555,6 +560,11 @@ def install(cls):
         update(self, row["row_number"], changes)
 
     def append_dict(self, sheet, row):
+        if sheet == "LeadFactory_ExecutionLog":
+            if not hasattr(self, "record_sales_history_event"):
+                raise RuntimeError("sales_history_writer_missing")
+            self.record_sales_history_event(dict(row or {}))
+            return
         if sheet in {"LeadFactory_MetaLog", "LeadFactory_TriggerSignals", "LeadFactory_ScraperTests", "SalesControl_Events"}:
             print(f"single-sheet-ssot:{sheet}:{row}", flush=True)
             return
@@ -749,6 +759,8 @@ def install(cls):
             row = find(self, lead_id=key)
             if not row or key in drafted or str(row.get("Status") or "") != "未接触":
                 continue
+            if hasattr(self, "sales_row_has_contact_history") and self.sales_row_has_contact_history(int(row["row_number"])):
+                continue
             out.append(candidate)
             if len(out) >= max(0, int(limit)):
                 break
@@ -853,12 +865,25 @@ def install(cls):
                 s.event_year or "", s.exhibitor_directory_url or s.source_url, "", "",
                 s.crawl_status or "READY", s.exhibitor_count or "", s.last_error or "",
             ] for s in list_sources(self)]
+        if ref.startswith("LeadFactory_ExecutionLog!"):
+            execution_headers = [
+                "idempotency_key", "draft_id", "source_row", "company_name", "lane",
+                "channel", "status", "semantic_success", "message_id", "recipient",
+                "executed_at", "subject", "body", "form_url", "confirmation",
+            ]
+            projected = self.sales_history_rows() if hasattr(self, "sales_history_rows") else []
+            rows_out = [[item.get(h, "") for h in execution_headers] for item in projected]
+            if "1:1" in ref:
+                return [execution_headers]
+            if "A1:" in ref:
+                return [execution_headers] + rows_out
+            return rows_out
         if ref.startswith((
             "LeadFactory_GateResults!", "LeadFactory_MittelstandResults!", "LeadFactory_RunLog!",
             "LeadFactory_MetaLog!", "LeadFactory_Suppressions!", "LeadFactory_Scrapers!",
             "LeadFactory_ScraperTests!", "LeadFactory_AccessRequests!", "LeadFactory_TriggerSignals!",
             "LeadFactory_ContactResearch!", "LeadFactory_MessageDrafts!", "LeadFactory_ApprovalQueue!",
-            "LeadFactory_PromotionLedger!", "LeadFactory_ExecutionLog!", "LeadFactory_ExecutionBatches!",
+            "LeadFactory_PromotionLedger!", "LeadFactory_ExecutionBatches!",
             "SalesControl_Events!",
         )):
             return []
