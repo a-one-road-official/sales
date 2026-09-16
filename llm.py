@@ -8,14 +8,19 @@ from google import genai
 from google.genai import types
 
 
+# Vertex AI is disabled at the policy boundary for this runtime generation.
+# No environment variable may re-enable it accidentally.
+VERTEX_FORBIDDEN = True
+
+
 class _GeminiResponses:
     def __init__(self, client):
         self._client = client
 
     def create(self, model: str, input: str, tools=None):
-        # Budget circuit: Vertex is opt-in and remains unavailable by default.
+        # Policy circuit: Vertex remains unavailable for this runtime generation.
         # Deterministic intake never reaches this boundary.
-        if os.getenv("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE").upper() != "TRUE":
+        if VERTEX_FORBIDDEN or os.getenv("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE").upper() != "TRUE":
             raise RuntimeError("vertex_disabled_by_budget")
         use_search = bool(tools)
         config = types.GenerateContentConfig(
@@ -54,13 +59,13 @@ class _GeminiCompatClient:
 class LLM:
     def __init__(self, model: str):
         self.model = model or os.getenv("LEAD_FACTORY_GEMINI_MODEL", "gemini-2.5-flash")
-        # Keep the Vertex client lazy so deterministic lanes never instantiate or
-        # call Vertex after the budget circuit is closed.
+        # The client is retained only for compatibility; the policy circuit blocks
+        # every construction and call before a Vertex request can be made.
         self._client = None
 
     @property
     def client(self):
-        if os.getenv("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE").upper() != "TRUE":
+        if VERTEX_FORBIDDEN or os.getenv("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE").upper() != "TRUE":
             raise RuntimeError("vertex_disabled_by_budget")
         if self._client is None:
             self._client = _GeminiCompatClient()
