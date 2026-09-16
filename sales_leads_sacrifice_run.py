@@ -590,12 +590,21 @@ def run_ten_sacrifice_batch(
                     "source": "first_party_domain_catalog",
                 }
             elif evidence.get("status") == "MISMATCH_REJECTED":
-                if fast_sales_gtm_mode:
-                    # Do not spend an unbounded resolver call on a
-                    # low-confidence source URL in the throughput lane.
+                vertex_budget_closed = not _cfg_truthy(cfg, "LEAD_FACTORY_VERTEX_ALLOWED")
+                if fast_sales_gtm_mode or (
+                    normalized_lane == "EC_SACRIFICE" and vertex_budget_closed
+                ):
+                    # A sacrifice run must never spend Vertex budget to repair
+                    # an untrusted source URL. The browser/HTML verifier may
+                    # still inspect an explicit first-party URL, but a
+                    # mismatch is terminal until a human repairs the source.
                     result["domain_resolution"] = {
                         "status": "MISMATCH_REJECTED",
-                        "source": "fast_sales_gtm_mode",
+                        "source": (
+                            "vertex_budget_fail_closed"
+                            if vertex_budget_closed
+                            else "fast_sales_gtm_mode"
+                        ),
                     }
                     site_url = ""
                 else:
@@ -746,6 +755,10 @@ def run_ten_sacrifice_batch(
                     if (
                         _cfg_truthy(cfg, "OUTREACH_FORM_AUDIT_TEMPLATE_ONLY")
                         or fast_sales_gtm_mode
+                        or (
+                            normalized_lane == "EC_SACRIFICE"
+                            and not _cfg_truthy(cfg, "LEAD_FACTORY_VERTEX_ALLOWED")
+                        )
                     ):
                         draft = _verified_site_draft(candidate, site)
                         prompt_meta = dict(prompt_meta or {})
@@ -825,7 +838,10 @@ def run_ten_sacrifice_batch(
                     }
                     deterministic_draft = (
                         normalized_lane == "EC_SACRIFICE"
-                        and _cfg_truthy(cfg, "OUTREACH_DETERMINISTIC_DRAFT")
+                        and (
+                            _cfg_truthy(cfg, "OUTREACH_DETERMINISTIC_DRAFT")
+                            or not _cfg_truthy(cfg, "LEAD_FACTORY_VERTEX_ALLOWED")
+                        )
                     )
                     if fast_sales_gtm_mode or deterministic_draft:
                         draft = _verified_site_draft(candidate, site)
