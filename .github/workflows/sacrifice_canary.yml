@@ -101,7 +101,7 @@ jobs:
               raise SystemExit("vertex_policy_env_not_false")
           if not VERTEX_FORBIDDEN:
               raise SystemExit("vertex_boundary_not_forbidden")
-          forbidden = re.compile(r"google\\.genai|google\\.generativeai|vertexai|aiplatform")
+          forbidden = re.compile(r"google\.genai|google\.generativeai|vertexai|aiplatform")
           for name in ("sacrifice_web_research.py", "browser_fetch.py", "form_execution.py", "sales_leads_sacrifice_run.py", "outreach_execution.py"):
               hits = [f"{name}:{n}" for n, line in enumerate(Path(name).read_text(encoding="utf-8").splitlines(), 1) if forbidden.search(line)]
               if hits:
