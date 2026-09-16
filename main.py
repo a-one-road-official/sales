@@ -247,11 +247,13 @@ def healthz():
 def deep_healthz():
     # Probe only process/config readiness. Do not instantiate Sheets, Drive or
     # Gemini here; production APIs are exercised by the autonomous tick.
+    vertex_allowed = os.getenv("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE").upper() == "TRUE"
     return {
         "ok": True,
         "service": "aone-lead-factory",
         "factory_enabled": os.getenv("LEAD_FACTORY_ENABLED", "TRUE").upper() == "TRUE",
-        "gemini_vertex_ready": bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")),
+        "gemini_vertex_ready": bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")) and vertex_allowed,
+        "vertex_allowed": vertex_allowed,
         "external_write": os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE").upper() == "TRUE",
         "autopilot_lane": _autopilot_lane(),
         "bpo_send": _outbound_send_enabled("BPO"),
