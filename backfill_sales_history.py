@@ -169,18 +169,6 @@ def main() -> None:
         candidate = None
         basis = ""
 
-        if recipient:
-            exact = by_email.get(recipient, [])
-            if len(exact) == 1:
-                candidate = exact[0]
-                basis = "exact_email"
-
-        if candidate is None and recipient_domain and recipient_domain not in GENERIC_EMAIL_DOMAINS:
-            domain_rows = by_domain.get(recipient_domain, [])
-            if len(domain_rows) == 1:
-                candidate = domain_rows[0]
-                basis = "unique_domain"
-
         message_rows = by_message_id.get(str(msg.get("id") or "").strip(), [])
         if len(message_rows) == 1:
             candidate = message_rows[0]
