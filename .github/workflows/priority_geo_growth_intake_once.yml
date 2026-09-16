@@ -1,10 +1,15 @@
 name: Priority geo growth intake once
 
+# Budget-sensitive Cloud Run intake is operator-only. Ordinary pushes can never
+# start this workflow. Paid execution requires an explicit checkbox each run.
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/priority_geo_growth_intake_once.yml"
+  workflow_dispatch:
+    inputs:
+      confirm_paid_cloud:
+        description: "I explicitly authorize this one bounded Cloud Run intake"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -12,7 +17,9 @@ permissions:
 
 jobs:
   intake:
+    if: ${{ inputs.confirm_paid_cloud == true }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       REGION: asia-northeast1
@@ -33,7 +40,7 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Keep all customer-facing execution closed
+      - name: Keep recurring and customer-facing execution closed
         run: |
           set +e
           for JOB in $(gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' --filter='name:lead-factory' | sed 's#.*/##'); do
@@ -55,6 +62,13 @@ jobs:
           echo "SERVICE_URL=$URL" >> "$GITHUB_ENV"
           echo "INTERNAL_TOKEN=$TOKEN" >> "$GITHUB_ENV"
 
+      - name: Temporarily authorize this bounded Cloud Run operation
+        run: |
+          set -euo pipefail
+          gcloud run services update "$SERVICE" \
+            --region="$REGION" --project="$PROJECT" \
+            --update-env-vars=LEAD_FACTORY_PAID_CLOUD_ALLOWED=TRUE,LEAD_FACTORY_PAID_AI_ALLOWED=FALSE,LEAD_FACTORY_VERTEX_ALLOWED=FALSE,LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED=FALSE,LEAD_FACTORY_AUTONOMOUS_CAPACITY_EXPANSION=FALSE,LEAD_FACTORY_AUTO_ROLLOVER_DAILY_GOAL=FALSE,LEAD_FACTORY_ALLOW_HTTP_SELF_FALLBACK=FALSE >/dev/null
+
       - name: Register priority growth sources
         run: |
           set -euo pipefail
@@ -63,7 +77,7 @@ jobs:
             -H "Content-Type: application/json" \
             "$SERVICE_URL/discover/growth" | tee /tmp/discover-growth.json
 
-      - name: Run Israel Taiwan Korea growth source intake
+      - name: Run one bounded pass for Israel Taiwan Korea sources
         run: |
           set -euo pipefail
           python - <<'PY' > /tmp/priority-source-ids.txt
@@ -74,7 +88,7 @@ jobs:
           for source in BOOTSTRAP_SOURCES:
               if source.get("country") not in PRIORITY_GEOGRAPHIES:
                   continue
-              if str(source.get("source_type","")).startswith("MITTELSTAND_"):
+              if str(source.get("source_type", "")).startswith("MITTELSTAND_"):
                   continue
               url = canonicalize_url(source.get("exhibitor_directory_url") or source.get("source_url") or "")
               if not url:
@@ -83,34 +97,30 @@ jobs:
               print(source.get("country"), sid, source.get("source_name"), sep="\t")
           PY
 
-          cat /tmp/priority-source-ids.txt
+          # One attempt per source. Historical 3x retries could multiply Cloud Run work.
           while IFS=$'\t' read -r COUNTRY SOURCE_ID SOURCE_NAME; do
             [ -n "$SOURCE_ID" ] || continue
             echo "=== $COUNTRY :: $SOURCE_NAME :: $SOURCE_ID ==="
-            for ITER in 1 2 3; do
-              set +e
-              RESPONSE="$(timeout 540 curl --silent --show-error --fail-with-body \
-                -X POST \
-                -H "X-Aone-Internal-Token: $INTERNAL_TOKEN" \
-                -H "Content-Type: application/json" \
-                -d '{}' \
-                "$SERVICE_URL/source/$SOURCE_ID/run")"
-              RC=$?
-              set -e
-              echo "$RESPONSE"
-              if [ "$RC" -ne 0 ]; then
-                echo "source_run_failed country=$COUNTRY source=$SOURCE_ID iteration=$ITER"
-                break
-              fi
-              STATUS="$(python -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print(d.get("status",""))' <<<"$RESPONSE")"
-              WRITTEN="$(python -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); r=d.get("runtime") or {}; print(int(r.get("written_row_count",r.get("new_raw",0)) or 0))' <<<"$RESPONSE")"
-              echo "country=$COUNTRY iteration=$ITER status=$STATUS written=$WRITTEN"
-              if [ "$WRITTEN" -eq 0 ]; then
-                break
-              fi
-            done
+            timeout 240 curl --silent --show-error --fail-with-body \
+              -X POST \
+              -H "X-Aone-Internal-Token: $INTERNAL_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{}' \
+              "$SERVICE_URL/source/$SOURCE_ID/run" || true
           done < /tmp/priority-source-ids.txt
 
-      - name: Confirm customer-facing paths remain closed
+      - name: Revoke paid-cloud authorization and keep everything paused
+        if: ${{ always() }}
         run: |
-          echo "Priority geo intake completed. Customer-facing send/form actions remained disabled and schedulers/queues remain paused."
+          set +e
+          gcloud run services update "$SERVICE" \
+            --region="$REGION" --project="$PROJECT" \
+            --min=0 --cpu-throttling \
+            --update-env-vars=LEAD_FACTORY_PAID_CLOUD_ALLOWED=FALSE,LEAD_FACTORY_PAID_AI_ALLOWED=FALSE,LEAD_FACTORY_VERTEX_ALLOWED=FALSE,LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED=FALSE,LEAD_FACTORY_AUTONOMOUS_CAPACITY_EXPANSION=FALSE,LEAD_FACTORY_AUTO_ROLLOVER_DAILY_GOAL=FALSE,LEAD_FACTORY_ALLOW_HTTP_SELF_FALLBACK=FALSE >/dev/null || true
+          for JOB in $(gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' --filter='name:lead-factory' | sed 's#.*/##'); do
+            [ -n "$JOB" ] || continue
+            gcloud scheduler jobs pause "$JOB" --location="$REGION" --project="$PROJECT" || true
+          done
+          for QUEUE in lead-factory-workers lead-factory-priority-workers; do
+            gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT" || true
+          done
