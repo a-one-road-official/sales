@@ -37,6 +37,17 @@ SALES_HISTORY_FIELDS = (
     LAST_OUTBOUND_RECIPIENT_FIELD,
 )
 
+# Higher values are later sales facts. Internal workers may only move forward;
+# an explicit human correction remains available through source=HUMAN.
+SALES_STATUS_RANK = {
+    "": 0, "未接触": 0, "判定中": 0,
+    "送付済み": 1, "送信済み": 1, "送信済み（非製造）": 1, "DM済": 1,
+    "リマイン1": 2, "リマイン2": 3,
+    "返信あり": 4, "商談化": 5, "商談中": 5, "劣後": 5,
+    "拒否": 6, "合意・契約締結": 7, "受注": 8,
+}
+TERMINAL_STATUSES = {"拒否", "合意・契約締結", "受注"}
+
 SUCCESS_EVENT_STATUSES = {"SENT", "FORM_SENT"}
 SUCCESS_EVENT_TYPES = {"NEW_DM", "OUTBOUND_SENT", "FORM_SENT", "MANUAL_SEND"}
 
@@ -83,6 +94,13 @@ def append_history(existing: Any, event: dict, *, max_events: int = 200) -> str:
     return json.dumps(history[-max_events:], ensure_ascii=False, separators=(",", ":"))
 
 
+def history_has_event(existing: Any, event: dict) -> bool:
+    """Return whether an event is already present by its stable event key."""
+    normalized = {str(k): v for k, v in dict(event or {}).items() if v not in (None, "")}
+    key = _event_key(normalized)
+    return bool(key and any(_event_key(item) == key for item in parse_history(existing)))
+
+
 def is_contact_event(event: dict) -> bool:
     status = text(event.get("status")).upper()
     event_type = text(event.get("event_type") or event.get("action_type")).upper()
@@ -98,7 +116,12 @@ def has_contact_history(row: dict) -> bool:
     return any(is_contact_event(item) for item in parse_history(row.get(HISTORY_FIELD)))
 
 
+def status_rank(value: Any) -> int:
+    return SALES_STATUS_RANK.get(text(value), 0)
+
+
 def guarded_status(current: Any, requested: Any, *, row: dict | None = None, source: str = "") -> str:
+    """Central fail-closed Status policy for all internal workers."""
     current_value = text(current)
     requested_value = text(requested)
     row = dict(row or {})
@@ -106,25 +129,29 @@ def guarded_status(current: Any, requested: Any, *, row: dict | None = None, sou
         row["Status"] = current_value
 
     source_key = text(source).upper()
-    contacted = has_contact_history(row)
+    if source_key in {"HUMAN", "MANUAL", "USER"}:
+        return requested_value
 
-    # Gate/research/classification processes never own an established CRM Status.
-    if source_key in {"GATE", "RESEARCH", "CLASSIFICATION"} and current_value not in {"", "判定中"}:
+    # Gate, research, and classification never own CRM lifecycle facts.
+    if source_key in {"GATE", "RESEARCH", "CLASSIFICATION", "SINGLE_SHEET"}:
         return current_value
 
-    # Once any durable contact event exists, the record can never become untouched again.
+    contacted = has_contact_history(row)
     if contacted and requested_value in UNTOUCHED_STATUSES:
-        if current_value in CONTACTED_STATUSES:
-            return current_value
-        return "送付済み"
-
-    # Classification outcomes are separate from sales progression after contact.
+        return current_value if current_value in CONTACTED_STATUSES else "送付済み"
     if contacted and requested_value in CLASSIFICATION_STATUSES:
-        if current_value in CONTACTED_STATUSES:
+        return current_value if current_value in CONTACTED_STATUSES else "送付済み"
+
+    if current_value in TERMINAL_STATUSES and requested_value != current_value:
+        return current_value
+
+    # Prevent any internal worker from moving a durable sales fact backward.
+    if current_value in SALES_STATUS_RANK and requested_value in SALES_STATUS_RANK:
+        if status_rank(requested_value) < status_rank(current_value):
             return current_value
-        return "送付済み"
 
     return requested_value
+
 
 
 def history_event_from_execution(record: dict) -> dict:

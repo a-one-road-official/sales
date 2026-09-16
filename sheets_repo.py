@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import threading
 import time
 import uuid
@@ -31,6 +32,7 @@ from sales_history import (
     guarded_status,
     has_contact_history,
     history_event_from_execution,
+    history_has_event,
     is_contact_event,
     parse_history,
 )
@@ -49,6 +51,16 @@ SOURCE_HEADERS = [
     "exhibitor_count","last_error",
 ]
 
+
+
+ACTION_EVENT_SHEET = "SalesOS_Action_Events"
+ACTION_EVENT_HEADERS = [
+    # Keep the first eleven columns stable for the existing hidden ledger.
+    "event_id", "occurred_at", "date", "source_row", "company_key",
+    "company_name", "from_status", "to_status", "action_type", "source",
+    "recorded_at", "lead_id", "previous_status", "new_status", "writer",
+    "reason", "evidence", "timestamp", "code_version", "idempotency_key",
+]
 
 
 
@@ -240,6 +252,12 @@ class SheetsRepo:
 
     def _update_dict_fields(self, sheet: str, row_number: int, changes: dict) -> None:
         if not changes:
+            return
+        if sheet == "営業リスト＿Factory/BPO":
+            self._narrow_update_sales_fields(
+                int(row_number), dict(changes), source="DICT_UPDATE",
+                writer="SHEETS_REPO", reason="centralized SSOT field update",
+            )
             return
         headers_rows = self.read(f"{sheet}!1:1")
         headers = headers_rows[0] if headers_rows else []
@@ -518,8 +536,9 @@ class SheetsRepo:
             }
             return (start, end)
 
-
     def update_row(self, sheet: str, row_number: int, values: list) -> None:
+        if sheet == "営業リスト＿Factory/BPO":
+            raise RuntimeError("direct_ssot_row_write_blocked:use_guarded_status_writer")
         self._execute_write(lambda: self.svc.spreadsheets().values().update(
             spreadsheetId=self.spreadsheet_id,
             range=f"{sheet}!A{row_number}:ZZ{row_number}",
@@ -529,15 +548,21 @@ class SheetsRepo:
 
 
     def update_range(self, range_: str, values: list[list]) -> None:
-        """Narrow values update used to preserve unrelated formulas/validation."""
+        """Narrow values update; SSOT Status writes must use the central guard."""
+        ref = str(range_ or "").replace("'", "")
+        if ref.startswith("営業リスト＿Factory/BPO!"):
+            target = ref.split("!", 1)[1].split(":", 1)[0]
+            if not target.endswith("1"):
+                raise RuntimeError("direct_ssot_range_write_blocked:use_guarded_status_writer")
         self._execute_write(lambda: self.svc.spreadsheets().values().update(
             spreadsheetId=self.spreadsheet_id,
             range=range_,
             valueInputOption="RAW",
             body={"values": values},
         ).execute())
-        if str(range_).startswith("Config!") or str(range_).startswith("'Config'!"):
+        if ref.startswith("Config!"):
             self.invalidate_config_cache()
+
 
 
     def _ensure_header(self, sheet: str, header: str) -> None:
@@ -1176,11 +1201,9 @@ class SheetsRepo:
                     "channel": "UNKNOWN",
                 })
         return out
-
     def record_sales_history_event(self, record: dict) -> dict:
-        """Persist one sales event in the SSOT and advance contact state atomically."""
+        """Persist one sales event in the SSOT and advance contact state."""
         self.ensure_sales_history_schema()
-        sheet, _ = self._human_ssot_config()
         source_row = str(record.get("source_row") or "").strip()
         row_number = int(source_row) if source_row.isdigit() else 0
         row = self._sales_row_dict_by_number(row_number) if row_number >= 2 else {}
@@ -1195,9 +1218,10 @@ class SheetsRepo:
         event = history_event_from_execution(record)
         event.setdefault("source_row", str(row_number))
         event.setdefault("company_name", row.get("company_name", ""))
-        changes = {
-            HISTORY_FIELD: append_history(row.get(HISTORY_FIELD), event),
-        }
+        if history_has_event(row.get(HISTORY_FIELD), event):
+            return {"row_number": row_number, "written": False, "duplicate": True, "contacted": is_contact_event(event)}
+
+        changes = {HISTORY_FIELD: append_history(row.get(HISTORY_FIELD), event)}
         if is_contact_event(event):
             at = str(event.get("executed_at") or datetime.now(timezone.utc).isoformat())
             if not str(row.get(FIRST_CONTACTED_FIELD) or "").strip():
@@ -1212,36 +1236,95 @@ class SheetsRepo:
                 if not str(row.get("営業メール宛先") or "").strip():
                     changes["営業メール宛先"] = event.get("recipient")
             changes["営業メール状態"] = "SENT"
-            current = str(row.get("Status") or "").strip()
-            if current in {"", "未接触", "判定中"}:
+            if str(row.get("Status") or "").strip() in {"", "未接触", "判定中"}:
                 changes["Status"] = "送付済み"
 
-        self._narrow_update_sales_fields(row_number, changes)
+        evidence = record.get("evidence") or record.get("raw_ref") or record.get("source")
+        audit_id = str(event.get("idempotency_key") or event.get("message_id") or f"history:{row_number}")
+        self._narrow_update_sales_fields(
+            row_number, changes,
+            source=str(record.get("source") or "OUTBOUND_EXECUTION"),
+            writer=str(record.get("writer") or "OUTBOUND_EXECUTOR"),
+            reason=str(record.get("reason") or "durable sales history event"),
+            evidence=str(evidence or ""),
+            audit_event_id=f"status:{audit_id}",
+        )
         return {"row_number": row_number, "written": True, "contacted": is_contact_event(event)}
 
-    def _narrow_update_sales_fields(self, row_number: int, fields: dict) -> None:
+    def _narrow_update_sales_fields(
+        self,
+        row_number: int,
+        fields: dict,
+        *,
+        source: str = "SYSTEM",
+        writer: str = "",
+        reason: str = "",
+        evidence: str = "",
+        audit_event_id: str = "",
+    ) -> None:
         sheet, _ = self._human_ssot_config()
+        row_before = self._sales_row_dict_by_number(int(row_number))
+        if not row_before:
+            raise RuntimeError(f"sales_row_not_found:{row_number}")
         headers_rows = self.read(f"'{sheet}'!1:1")
         if not headers_rows:
             raise RuntimeError(f"missing_header:{sheet}")
         headers = headers_rows[0]
         index = {str(h): i for i, h in enumerate(headers) if h}
-        data = []
         normalized_fields = dict(fields or {})
+        requested_status = None
+        effective_status = None
         if "Status" in normalized_fields:
-            normalized_fields["Status"] = self._guard_sales_status_change(
-                int(row_number), normalized_fields["Status"], source="SYSTEM"
+            requested_status = str(normalized_fields["Status"] or "").strip()
+            effective_status = guarded_status(
+                row_before.get("Status", ""), requested_status,
+                row=row_before, source=source,
             )
+            normalized_fields["Status"] = effective_status
+        data = []
         for key, value in normalized_fields.items():
             if key not in index:
                 continue
             col = self._column_letter(index[key] + 1)
             data.append({"range": f"'{sheet}'!{col}{row_number}", "values": [[value]]})
         if data:
-            self.svc.spreadsheets().values().batchUpdate(
+            self._execute_write(lambda: self.svc.spreadsheets().values().batchUpdate(
                 spreadsheetId=self.spreadsheet_id,
                 body={"valueInputOption": "RAW", "data": data},
-            ).execute()
+            ).execute())
+
+        if requested_status is not None:
+            previous = str(row_before.get("Status") or "").strip()
+            new_status = str(effective_status or "").strip()
+            requested_changed = requested_status != previous
+            if requested_changed:
+                action = "STATUS_CHANGE" if new_status != previous else "STATUS_GUARD_BLOCK"
+                event_id = str(audit_event_id or f"status:{row_number}:{uuid.uuid4().hex}")
+                self.append_action_event({
+                    "event_id": event_id,
+                    "occurred_at": datetime.now(timezone.utc).isoformat(),
+                    "source_row": str(row_number),
+                    "company_key": row_before.get("LF_lead_id") or row_before.get("company_name", ""),
+                    "lead_id": row_before.get("LF_lead_id", ""),
+                    "company_name": row_before.get("company_name", ""),
+                    "from_status": previous,
+                    "to_status": new_status,
+                    "previous_status": previous,
+                    "new_status": new_status,
+                    "action_type": action,
+                    "source": source,
+                    "writer": writer or source,
+                    "reason": reason or f"requested_status={requested_status}",
+                    "evidence": str(evidence or ""),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "code_version": os.getenv("GITHUB_SHA") or os.getenv("CODE_VERSION") or "unknown",
+                    "idempotency_key": event_id,
+                })
+                readback = self.read(f"'{sheet}'!B{row_number}:B{row_number}")
+                actual = str(readback[0][0] if readback and readback[0] else "").strip()
+                if actual != new_status:
+                    raise RuntimeError(f"ssot_status_readback_mismatch:{row_number}:{actual}:{new_status}")
+
 
     def _refresh_sales_from_candidate(self, row_number: int, candidate: dict) -> None:
         """Refresh research/evidence on the existing intake row without making a second lead row."""
@@ -2064,58 +2147,83 @@ class SheetsRepo:
     def append_approval_queue(self, row: dict) -> None:
         self.append_dict("LeadFactory_ApprovalQueue", row)
 
-    def append_operational_event(self, row: dict) -> None:
-        """Write pipeline/send outcomes to the existing operational event ledger."""
-        self.append_dict("SalesControl_Events", row)
+    def ensure_action_event_schema(self) -> None:
+        """Ensure the append-only action ledger exists without deleting any tab."""
+        for header in ACTION_EVENT_HEADERS:
+            self._ensure_header(ACTION_EVENT_SHEET, header)
+
+    def append_action_event(self, row: dict) -> dict:
+        """Append one idempotent status/pipeline audit event to the hidden ledger."""
+        self.ensure_action_event_schema()
+        headers_rows = self.read(f"'{ACTION_EVENT_SHEET}'!1:1")
+        headers = [str(x or "").strip() for x in (headers_rows[0] if headers_rows else [])]
+        if not headers:
+            raise RuntimeError(f"missing_header:{ACTION_EVENT_SHEET}")
+        event = dict(row or {})
+        now = datetime.now(timezone.utc).isoformat()
+        event_id = str(event.get("event_id") or f"action:{uuid.uuid4().hex}").strip()
+        event["event_id"] = event_id
+        event.setdefault("occurred_at", event.get("timestamp") or now)
+        event.setdefault("date", str(event.get("occurred_at") or now)[:10])
+        event.setdefault("recorded_at", now)
+        event.setdefault("timestamp", event.get("occurred_at") or now)
+        event.setdefault("company_key", event.get("source_id") or event.get("lead_id") or "")
+        event.setdefault("lead_id", event.get("source_id") or "")
+        event.setdefault("company_name", event.get("company_name") or "")
+        event.setdefault("from_status", event.get("previous_status") or event.get("from_status") or "")
+        event.setdefault("to_status", event.get("new_status") or event.get("to_status") or event.get("match_status") or "")
+        event.setdefault("action_type", event.get("action_type") or event.get("event_type") or "UNKNOWN")
+        event.setdefault("source", event.get("source") or event.get("writer") or "SYSTEM")
+        event.setdefault("writer", event.get("writer") or event.get("source") or "SYSTEM")
+        event.setdefault("reason", event.get("reason") or event.get("reason_note") or event.get("reason_code") or "")
+        event.setdefault("evidence", event.get("evidence") or event.get("raw_ref") or "")
+        event.setdefault("code_version", event.get("code_version") or os.getenv("GITHUB_SHA") or os.getenv("CODE_VERSION") or "unknown")
+        event.setdefault("idempotency_key", event.get("idempotency_key") or event_id)
+
+        existing = self.read(f"'{ACTION_EVENT_SHEET}'!A2:{self._column_letter(len(headers))}")
+        for raw in existing or []:
+            padded = list(raw) + [""] * max(0, len(headers) - len(raw))
+            item = dict(zip(headers, padded))
+            if event_id and str(item.get("event_id") or "").strip() == event_id:
+                return {"written": False, "duplicate": True, "event_id": event_id}
+            idem = str(event.get("idempotency_key") or "").strip()
+            if idem and str(item.get("idempotency_key") or "").strip() == idem:
+                return {"written": False, "duplicate": True, "event_id": event_id}
+
+        ordered = [event.get(header, "") for header in headers]
+        append_range = f"'{ACTION_EVENT_SHEET}'!A:{self._column_letter(len(headers))}"
+        self._execute_write(lambda: self.svc.spreadsheets().values().append(
+            spreadsheetId=self.spreadsheet_id,
+            range=append_range,
+            valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS",
+            body={"values": [ordered]},
+        ).execute())
+        return {"written": True, "duplicate": False, "event_id": event_id}
+
+    def append_operational_event(self, row: dict) -> dict:
+        """Compatibility API routed to the durable append-only action ledger."""
+        return self.append_action_event(dict(row or {}))
 
     def operational_event_summary(self, limit: int = 5000) -> dict:
-        """Aggregate send, reply, and pipeline failure outcomes for the control UI."""
-        rows = self._rows_as_dicts("SalesControl_Events", "Z")[-max(1, int(limit)):]
+        """Aggregate pipeline/status outcomes from the append-only action ledger."""
+        rows = self._rows_as_dicts(ACTION_EVENT_SHEET, self._column_letter(len(ACTION_EVENT_HEADERS)))[-max(1, int(limit)):]
         counts: dict[str, int] = {}
         failures: dict[str, int] = {}
         for row in rows:
-            event_type = str(row.get("event_type") or "UNKNOWN").strip().upper()
+            event_type = str(row.get("action_type") or row.get("event_type") or "UNKNOWN").strip().upper()
             counts[event_type] = counts.get(event_type, 0) + 1
-            if event_type.endswith("FAILED") or event_type in {"PIPELINE_FAILURE", "OUTBOUND_BLOCKED"}:
-                code = str(row.get("reason_code") or "UNKNOWN_FAILURE").strip().upper()
+            if event_type.endswith("FAILED") or event_type in {"PIPELINE_FAILURE", "OUTBOUND_BLOCKED", "STATUS_GUARD_BLOCK"}:
+                code = str(row.get("reason_code") or row.get("reason") or "UNKNOWN_FAILURE").strip().upper()
                 failures[code] = failures.get(code, 0) + 1
         return {
             "events_scanned": len(rows),
             "event_counts": counts,
             "failure_counts": failures,
             "last_events": [
-                {"occurred_at": r.get("occurred_at", ""), "event_type": r.get("event_type", ""),
-                 "company_name": r.get("company_name", ""), "reason_code": r.get("reason_code", ""),
-                 "status": r.get("match_status", "")}
-                for r in rows[-20:]
-            ],
-        }
-
-
-    def append_operational_event(self, row: dict) -> None:
-        """Write pipeline/send outcomes to the existing operational event ledger."""
-        self.append_dict("SalesControl_Events", row)
-
-
-    def operational_event_summary(self, limit: int = 5000) -> dict:
-        """Aggregate send, reply, and pipeline failure outcomes for the control UI."""
-        rows = self._rows_as_dicts("SalesControl_Events", "Z")[-max(1, int(limit)):]
-        counts: dict[str, int] = {}
-        failures: dict[str, int] = {}
-        for row in rows:
-            event_type = str(row.get("event_type") or "UNKNOWN").strip().upper()
-            counts[event_type] = counts.get(event_type, 0) + 1
-            if event_type.endswith("FAILED") or event_type in {"PIPELINE_FAILURE", "OUTBOUND_BLOCKED"}:
-                code = str(row.get("reason_code") or "UNKNOWN_FAILURE").strip().upper()
-                failures[code] = failures.get(code, 0) + 1
-        return {
-            "events_scanned": len(rows),
-            "event_counts": counts,
-            "failure_counts": failures,
-            "last_events": [
-                {"occurred_at": r.get("occurred_at", ""), "event_type": r.get("event_type", ""),
-                 "company_name": r.get("company_name", ""), "reason_code": r.get("reason_code", ""),
-                 "status": r.get("match_status", "")}
+                {"occurred_at": r.get("occurred_at", ""), "event_type": r.get("action_type") or r.get("event_type", ""),
+                 "company_name": r.get("company_name", ""), "reason_code": r.get("reason_code") or r.get("reason", ""),
+                 "status": r.get("to_status") or r.get("match_status", "")}
                 for r in rows[-20:]
             ],
         }

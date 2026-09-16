@@ -35,6 +35,46 @@ def failure_code(*values: object) -> str:
 def record_event(sheets, *, event_type: str, reason_code: str = "", reason_note: str = "",
                  company_name: str = "", domain: str = "", email: str = "",
                  source_id: str = "", raw_ref: str = "", status: str = "") -> None:
+    """Append every pipeline/send outcome to the durable action ledger."""
+    now = datetime.now(timezone.utc).isoformat()
+    event_id = f"lf:{uuid.uuid4().hex}"
+    try:
+        sheets.append_operational_event({
+            "event_id": event_id,
+            "occurred_at": now,
+            "date": now[:10],
+            "source_row": source_id,
+            "company_key": source_id or company_name,
+            "lead_id": source_id,
+            "event_type": event_type,
+            "action_type": event_type,
+            "direction": "OUTBOUND" if str(event_type or "").upper().startswith("OUTBOUND") else "INTERNAL",
+            "email": email,
+            "domain": domain,
+            "company_name": company_name,
+            "match_rule": "LEAD_FACTORY",
+            "match_status": status,
+            "to_status": status,
+            "reason_code": reason_code,
+            "reason_note": reason_note[:5000],
+            "reason": reason_note[:5000] or reason_code,
+            "evidence": raw_ref,
+            "raw_ref": raw_ref,
+            "writer": "LEAD_FACTORY",
+            "source": "LEAD_FACTORY",
+            "timestamp": now,
+            "code_version": os.getenv("GITHUB_SHA") or os.getenv("CODE_VERSION") or "unknown",
+            "ingested_at": now,
+            "dedupe_key": f"lead-factory:{event_type}:{source_id or company_name}:{domain or email}:{now[:16]}",
+            "idempotency_key": event_id,
+        })
+    except Exception:
+        # Observability must never stop the production lane.
+        return
+
+ *, event_type: str, reason_code: str = "", reason_note: str = "",
+                 company_name: str = "", domain: str = "", email: str = "",
+                 source_id: str = "", raw_ref: str = "", status: str = "") -> None:
     """Best-effort append to the existing SalesControl_Events operational ledger."""
     # High-throughput qualification mode keeps the production objective on the
     # Raw/Gate/Promotion/SSOT ledgers. Per-company event rows would consume the

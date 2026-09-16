@@ -12,7 +12,7 @@ from googleapiclient.discovery import build
 
 from outreach_execution import _gmail_credentials
 from sheets_repo import SheetsRepo
-from sales_history import append_history
+from sales_history import append_history, history_has_event, parse_history
 
 
 SSOT = "営業リスト＿Factory/BPO"
@@ -67,25 +67,6 @@ def _norm_words(value: str) -> list[str]:
 def _company_key(value: str) -> str:
     words = _norm_words(value)
     return " ".join(words)
-
-
-def _subject_matches_company(subject: str, company: str) -> bool:
-    cwords = _norm_words(company)
-    swords = _norm_words(subject)
-    if not cwords or not swords:
-        return False
-    if len(cwords) == 1:
-        token = cwords[0]
-        if token in GENERIC_SINGLE_NAMES or len(token) < 7:
-            return False
-        return token in set(swords)
-    # Require the complete normalized company phrase as a contiguous token span.
-    if sum(len(x) for x in cwords) < 8:
-        return False
-    for i in range(0, len(swords) - len(cwords) + 1):
-        if swords[i:i + len(cwords)] == cwords:
-            return True
-    return False
 
 
 def _gmail_messages(service, sender: str, after_date: str) -> list[dict]:
@@ -156,7 +137,8 @@ def main() -> None:
 
     by_email: dict[str, list[dict]] = defaultdict(list)
     by_domain: dict[str, list[dict]] = defaultdict(list)
-    by_name: dict[str, list[dict]] = defaultdict(list)
+    by_message_id: dict[str, list[dict]] = defaultdict(list)
+    by_thread_id: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
         e = _email(row.get("営業メール宛先", ""))
         if e:
@@ -164,9 +146,13 @@ def main() -> None:
         domain = _host(row.get("website") or row.get("original_domain") or "")
         if domain:
             by_domain[domain].append(row)
-        key = _company_key(row.get("company_name", ""))
-        if key:
-            by_name[key].append(row)
+        for history_event in parse_history(row.get("Sales_History_JSON")):
+            message_id = str(history_event.get("message_id") or "").strip()
+            thread_id = str(history_event.get("thread_id") or "").strip()
+            if message_id:
+                by_message_id[message_id].append(row)
+            if thread_id:
+                by_thread_id[thread_id].append(row)
 
     creds = _gmail_credentials(sender)
     gmail = build("gmail", "v1", credentials=creds, cache_discovery=False)
@@ -195,21 +181,28 @@ def main() -> None:
                 candidate = domain_rows[0]
                 basis = "unique_domain"
 
+        message_rows = by_message_id.get(str(msg.get("id") or "").strip(), [])
+        if len(message_rows) == 1:
+            candidate = message_rows[0]
+            basis = "existing_message_id"
+
         if candidate is None:
-            subject = str(msg.get("subject") or "")
-            strong = []
-            for key, name_rows in by_name.items():
-                if len(name_rows) != 1:
-                    continue
-                row = name_rows[0]
-                if _subject_matches_company(subject, row.get("company_name", "")):
-                    strong.append(row)
-            unique_rows = {int(r["row_number"]): r for r in strong}
-            if len(unique_rows) == 1:
-                candidate = next(iter(unique_rows.values()))
-                basis = "exact_company_subject"
-            elif len(unique_rows) > 1:
-                ambiguous += 1
+            thread_rows = by_thread_id.get(str(msg.get("thread_id") or "").strip(), [])
+            if len(thread_rows) == 1:
+                candidate = thread_rows[0]
+                basis = "existing_thread_id"
+
+        if candidate is None and recipient:
+            exact = by_email.get(recipient, [])
+            if len(exact) == 1:
+                candidate = exact[0]
+                basis = "exact_email"
+
+        if candidate is None and recipient_domain and recipient_domain not in GENERIC_EMAIL_DOMAINS:
+            domain_rows = by_domain.get(recipient_domain, [])
+            if len(domain_rows) == 1:
+                candidate = domain_rows[0]
+                basis = "unique_domain"
 
         if candidate is None:
             unmatched += 1
@@ -238,21 +231,12 @@ def main() -> None:
         history_raw = row.get("Sales_History_JSON", "")
         before_history = str(history_raw or "")
         history = before_history
-        existing_ids = {
-            str(item.get("message_id") or "")
-            for item in (json.loads(before_history) if before_history else [])
-            if isinstance(item, dict)
-        } if before_history else set()
-
         fresh = []
         for event in sorted(events, key=lambda x: str(x.get("executed_at") or "")):
-            mid = str(event.get("message_id") or "")
-            if mid and mid in existing_ids:
+            if history_has_event(history, event):
                 continue
             history = append_history(history, event)
             fresh.append(event)
-            if mid:
-                existing_ids.add(mid)
 
         if not fresh:
             continue
@@ -277,7 +261,14 @@ def main() -> None:
             fields["Status"] = "送付済み"
             status_restored += 1
 
-        sheets._narrow_update_sales_fields(row_number, fields)
+        sheets._narrow_update_sales_fields(
+            row_number, fields,
+            source="GMAIL_BACKFILL",
+            writer="GMAIL_BACKFILL",
+            reason=f"high_confidence_match:{earliest.get('match_basis') or latest.get('match_basis')}",
+            evidence=f"gmail_message:{latest.get('message_id') or ''}",
+            audit_event_id=f"gmail-status:{latest.get('message_id') or row_number}",
+        )
 
     summary = {
         "sender": sender,

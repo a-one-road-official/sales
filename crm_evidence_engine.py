@@ -472,7 +472,13 @@ def run_crm_evidence_tick(factory, *, limit: int = 12) -> dict:
             if decision.latest_notes:
                 fields["Latest_Notes"] = decision.latest_notes
 
-            factory.sheets._narrow_update_sales_fields(int(row["row_number"]), fields)
+            factory.sheets._narrow_update_sales_fields(
+                int(row["row_number"]), fields,
+                source="CRM_EVIDENCE",
+                writer="CRM_EVIDENCE_ENGINE",
+                reason=decision.yomi_reason or decision.stage or "CRM evidence update",
+                evidence=decision.yomi_source or "",
+            )
             try:
                 factory.sheets.append_operational_event({
                     "occurred_at": now,

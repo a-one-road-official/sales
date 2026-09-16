@@ -17,6 +17,8 @@ PERSISTENT_CONFIG_SHEET = "SalesOS_Goal_Config"
 def install(cls):
     native_read = cls.read
     native_read_once = getattr(cls, "read_once", None)
+    native_append_action_event = getattr(cls, "append_action_event", None)
+    native_operational_event_summary = getattr(cls, "operational_event_summary", None)
 
     def _persistent_runtime_config(self):
         """Read durable runtime state from the existing goal-config tab."""
@@ -105,6 +107,7 @@ def install(cls):
         return scrapers, source_states
 
     def enforce_sheet_contract(self):
+        """Audit hidden tabs without destructive cleanup."""
         now = time.monotonic()
         last = float(getattr(self, "_sheet_contract_checked_at", 0.0) or 0.0)
         if now - last < 120:
@@ -120,19 +123,14 @@ def install(cls):
                 for item in meta.get("sheets", [])
                 if item.get("properties", {}).get("hidden")
             ]
-            machine_prefixes = ("LeadFactory_", "SalesOS_", "SalesControl_", "DEPRECATED_", "__TMP_")
-            delete_ids = [
-                int(p["sheetId"]) for p in hidden
-                if str(p.get("title") or "").startswith(machine_prefixes)
-            ]
-            survivors = [p for p in hidden if int(p.get("sheetId", -1)) not in set(delete_ids)]
-            if len(survivors) > 2:
-                delete_ids.extend(int(p["sheetId"]) for p in survivors[2:])
-            if delete_ids:
-                self._execute_write(lambda: self.svc.spreadsheets().batchUpdate(
-                    spreadsheetId=self.spreadsheet_id,
-                    body={"requests": [{"deleteSheet": {"sheetId": sid}} for sid in sorted(set(delete_ids))]},
-                ).execute())
+            # Existing hidden ledgers are part of the audit contract. Never
+            # delete them during a normal runtime read or config refresh.
+            titles = [str(p.get("title") or "") for p in hidden]
+            if titles:
+                print(
+                    f"single-sheet-ssot:hidden-ledgers-preserved:{','.join(titles)}",
+                    flush=True,
+                )
         except Exception as exc:
             print(f"single-sheet-ssot:sheet-contract-warning:{type(exc).__name__}:{exc}", flush=True)
 
@@ -187,15 +185,16 @@ def install(cls):
             if name and existing_name == name:
                 return row
         return None
-
     def update(self, row_number, changes):
         hs = headers(self)
         index = {h: i for i, h in enumerate(hs) if h}
         normalized = dict(changes or {})
-        if "Status" in normalized and hasattr(self, "_guard_sales_status_change"):
-            normalized["Status"] = self._guard_sales_status_change(
-                int(row_number), normalized["Status"], source="SINGLE_SHEET"
+        if "Status" in normalized and hasattr(self, "_narrow_update_sales_fields"):
+            self._narrow_update_sales_fields(
+                int(row_number), normalized, source="SINGLE_SHEET",
+                writer="SINGLE_SHEET", reason="single-sheet status write",
             )
+            return
         data = []
         for key, value in normalized.items():
             if key not in index:
@@ -207,6 +206,7 @@ def install(cls):
                 spreadsheetId=self.spreadsheet_id,
                 body={"valueInputOption": "RAW", "data": data},
             ).execute())
+
 
     def append_intake(self, payload):
         hs = headers(self)
@@ -543,24 +543,25 @@ def install(cls):
             "LF_error": error,
             "LF_history": f"{now}|GATE|{status}",
         }
-        # CRM Status is owned by the sales workflow. Gate screening may only set the
-        # initial Status for a brand-new intake row that is still in 判定中.
-        # Never let re-screening overwrite an existing human/CRM Status.
-        current_status = str(row.get("Status") or "").strip()
-        intake_status = str(row.get("LF_intake_status") or "").strip().upper()
-        fresh_intake = (
-            current_status in {"", "判定中"}
-            and intake_status in {"", "NEEDS_DOMAIN", "READY_FOR_GATE", "READY_FOR_MITTELSTAND_GATE"}
-        )
+        # Gate owns eligibility only. CRM Status is a sales-lifecycle fact.
+        # Keep screening results in LF_* and 営業判定; never write Status here.
         if status in {"GO", "PASS"}:
-            changes.update({"added_at": now, "LF_intake_status": "PROMOTED_TO_SALES"})
-            if fresh_intake:
-                changes["Status"] = "未接触"
+            changes.update({
+                "added_at": now,
+                "LF_intake_status": "PROMOTED_TO_SALES",
+                "営業判定": status,
+            })
         elif status in {"NO", "NO-GO", "FAIL"}:
-            changes.update({"LF_intake_status": "SCREENED_NO_GO"})
-            if fresh_intake:
-                changes["Status"] = "対象外"
+            changes.update({
+                "LF_intake_status": "SCREENED_NO_GO",
+                "営業判定": status,
+            })
         update(self, row["row_number"], changes)
+
+    def append_action_event(self, row):
+        if not callable(native_append_action_event):
+            raise RuntimeError("action_event_writer_missing")
+        return native_append_action_event(self, dict(row or {}))
 
     def append_dict(self, sheet, row):
         if sheet == "LeadFactory_ExecutionLog":
@@ -568,7 +569,12 @@ def install(cls):
                 raise RuntimeError("sales_history_writer_missing")
             self.record_sales_history_event(dict(row or {}))
             return
-        if sheet in {"LeadFactory_MetaLog", "LeadFactory_TriggerSignals", "LeadFactory_ScraperTests", "SalesControl_Events"}:
+        if sheet in {"SalesControl_Events", "SalesOS_Action_Events"}:
+            if not callable(native_append_action_event):
+                raise RuntimeError("action_event_writer_missing")
+            native_append_action_event(self, dict(row or {}))
+            return
+        if sheet in {"LeadFactory_MetaLog", "LeadFactory_TriggerSignals", "LeadFactory_ScraperTests"}:
             print(f"single-sheet-ssot:{sheet}:{row}", flush=True)
             return
         if sheet not in {
@@ -827,6 +833,8 @@ def install(cls):
         ref = str(range_ or "").replace("'", "")
         if ref.startswith("Config!"):
             return [[k, v] for k, v in sorted(get_config(self).items())]
+        if ref.startswith("SalesOS_Action_Events!"):
+            return native_read(self, range_)
         if ref.startswith("LeadFactory_Raw!"):
             if "1:1" in ref:
                 return [raw_headers]
@@ -940,10 +948,13 @@ def install(cls):
         return True
 
     def operational_event_summary(self, limit=5000):
+        if callable(native_operational_event_summary):
+            return native_operational_event_summary(self, limit)
         return {"events_scanned": 0, "event_counts": {}, "failure_counts": {}, "last_events": []}
 
     cls.read = read
     cls.read_once = read_once
+    cls.append_action_event = append_action_event
     cls.update_range = update_range
     cls.update_message_draft = update_message_draft
     cls.update_approval_queue_for_draft = update_approval_queue_for_draft
