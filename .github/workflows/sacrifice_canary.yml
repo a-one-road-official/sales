@@ -89,7 +89,7 @@ jobs:
       - name: Execute bounded research, append, and public-form outreach
         if: ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'execute') || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'RUN_EC_PLAYWRIGHT_EXECUTE')) }}
         env:
-          SACRIFICE_EXPLICIT_SEND_APPROVAL: TRUE
+          SACRIFICE_EXPLICIT_SEND_APPROVAL: "TRUE"
           MANIFEST_PATH: ${{ inputs.manifest || 'data/sacrifice_oss_campaign.json' }}
         run: |
           set -euo pipefail
