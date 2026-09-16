@@ -745,6 +745,10 @@ def run_ten_sacrifice_batch(
                     normalized_lane == "EC_SACRIFICE"
                     and _cfg_truthy(cfg, "OUTREACH_PREFER_PUBLIC_FORM")
                 )
+                playwright_form_only = (
+                    normalized_lane == "EC_SACRIFICE"
+                    and _cfg_truthy(cfg, "OUTREACH_PLAYWRIGHT_FORM_ONLY")
+                )
                 if (
                     (
                         preferred_form
@@ -828,11 +832,15 @@ def run_ten_sacrifice_batch(
                         result.update(status=form_result.get("status", "FORM_FAILED"), stage="FORM_EXECUTION")
                     result["form_execution"] = form_result
                     result["audit"]["form_execution"] = form_result
-                elif not email:
+                elif not email or playwright_form_only:
                     result.update(
                         status="FAILED",
-                        stage="CONTACT_RESEARCH",
-                        error_message="no_email_or_public_form",
+                        stage="FORM_REQUIRED" if playwright_form_only else "CONTACT_RESEARCH",
+                        error_message=(
+                            "playwright_public_form_required"
+                            if playwright_form_only
+                            else "no_email_or_public_form"
+                        ),
                         form_candidates=site.get("forms", []),
                     )
                     result["audit"]["channel"] = "NONE"
