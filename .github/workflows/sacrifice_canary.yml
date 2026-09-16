@@ -62,11 +62,23 @@ jobs:
       - name: Verify this lane cannot call Vertex
         run: |
           set -euo pipefail
-          if rg -n --glob '*.py' 'google\.genai|google\.generativeai|vertexai|aiplatform' \
-            sacrifice_sheet_pipeline.py sacrifice_web_research.py browser_fetch.py form_execution.py sales_leads_sacrifice.py; then
-            echo "forbidden paid AI import found"
-            exit 1
-          fi
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          paths = [
+              "sacrifice_sheet_pipeline.py", "sacrifice_web_research.py",
+              "browser_fetch.py", "form_execution.py", "sales_leads_sacrifice.py",
+          ]
+          patterns = re.compile(r"google\.genai|google\.generativeai|vertexai|aiplatform")
+          hits = []
+          for name in paths:
+              for number, line in enumerate(Path(name).read_text(encoding="utf-8").splitlines(), 1):
+                  if patterns.search(line):
+                      hits.append(f"{name}:{number}:{line}")
+          if hits:
+              raise SystemExit("forbidden paid AI import found:\n" + "\n".join(hits))
+          print("vertex_import_scan=clean")
+          PY
           python -m py_compile sacrifice_sheet_pipeline.py sacrifice_web_research.py browser_fetch.py form_execution.py sales_leads_sacrifice.py
 
       - name: Preflight exact sacrifice workbook and schema
