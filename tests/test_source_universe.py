@@ -16,3 +16,21 @@ def test_growth_bootstrap_contains_multiple_industrial_exhibition_universes():
     assert "hannovermesse" in urls
     assert "formnext" in urls
     assert "euroblech" in urls
+
+
+def test_priority_geographies_have_dedicated_sources_in_both_lanes():
+    mittel = for_lane("MITTELSTAND")
+    growth = for_lane("GROWTH")
+    for country in ("Israel", "Taiwan", "South Korea"):
+        assert any(str(x.get("country")) == country for x in mittel)
+        assert any(str(x.get("country")) == country for x in growth)
+
+
+def test_country_normalization_and_priority():
+    from source_universe import geo_priority, normalize_country
+
+    assert normalize_country("Tayvan") == "Taiwan"
+    assert normalize_country("Korea") == "South Korea"
+    assert normalize_country("USA") == "United States"
+    assert geo_priority("Israel") < geo_priority("Germany")
+    assert geo_priority("Taiwan") < geo_priority("United States")

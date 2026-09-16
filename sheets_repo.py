@@ -708,8 +708,10 @@ class SheetsRepo:
             src for src in self.list_sources()
             if str(src.crawl_status or "").upper() not in blocked and lane_ok(src) and due(src)
         ]
+        from source_universe import geo_priority
         candidates.sort(key=lambda src: (
             priority.get(str(src.crawl_status or "").upper(), 1),
+            geo_priority(str(src.country or "")),
             str(src.last_crawled_at or ""),
             src.source_id,
         ))
@@ -766,12 +768,13 @@ class SheetsRepo:
             return False, existing[url]
         sid = "source-" + hashlib.sha256(url.encode()).hexdigest()[:20]
         now = datetime.now(timezone.utc).isoformat()
+        from source_universe import normalize_country
         row = [
             sid,
             candidate.get("source_type", "EXHIBITION"),
             candidate.get("source_name", ""),
             url,
-            candidate.get("country", ""),
+            normalize_country(candidate.get("country", "")),
             str(candidate.get("event_year", "")),
             candidate.get("exhibitor_directory_url", url),
             now,
@@ -1820,6 +1823,8 @@ class SheetsRepo:
             else "READY_FOR_GATE"
         ) if duplicate_state == "NEW" else "SKIP"
         canonical_website = str(website or f"https://{domain}").strip()
+        from source_universe import normalize_country
+        hq_country = normalize_country(hq_country)
 
         p_formula = q_formula = r_formula = False
         if preserve_formulas:

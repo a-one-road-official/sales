@@ -117,6 +117,13 @@ Your job is to continuously replenish a source queue. You do not screen companie
 STRATEGY: {strategy}
 {objective}
 
+GEOGRAPHIC REPLENISHMENT POLICY:
+- Priority markets: Israel, Taiwan, South Korea.
+- When limit >= 3, include at least one valid official source from each priority market.
+- Target at least two-thirds of this batch from the three priority markets until their lead inventory catches up.
+- Do not return US-only sources in this replenishment batch unless all three priority markets are represented and additional slots remain.
+- Prefer local industrial associations, official exhibitor directories, robotics/automation/manufacturing clusters, and national industry directories.
+
 Return ONLY a JSON array of up to {limit} objects with:
 source_type, source_name, source_url, country, event_year, exhibitor_directory_url.
 Use primary/official sources for exhibitions. For funding feeds, reliable recurring media feeds/category pages are allowed.
@@ -275,7 +282,13 @@ Prioritize company-list entry points such as:
 - official exhibitor directories for major industrial trade fairs
 - industrial clusters and exporter directories
 - national technology-industry member lists
-- official Taiwan/Korea industrial directories
+- official Israel/Taiwan/South Korea industrial directories
+
+GEOGRAPHIC REPLENISHMENT POLICY:
+- Priority markets: Israel, Taiwan, South Korea.
+- When limit >= 3, include at least one valid official source from each priority market.
+- Target at least two-thirds of this batch from the three priority markets until their lead inventory catches up.
+- Do not return US-only source directories in this replenishment batch unless all three priority markets are already represented.
 
 Return ONLY a JSON array of up to {limit} objects with:
 source_type, source_name, source_url, country, event_year, exhibitor_directory_url.

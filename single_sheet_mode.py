@@ -479,12 +479,15 @@ def install(cls):
             "READY_FOR_MITTELSTAND_GATE" if source_type.startswith("MITTELSTAND_") else "READY_FOR_GATE"
         )
         canonical = str(website or f"https://{domain}").strip()
+        from source_universe import normalize_country
+        normalized_hq_country = normalize_country(hq_country or row.get("LF_hq_country", ""))
         update(self, row["row_number"], {
             "website": canonical,
             "original_domain": domain,
             "LF_domain": domain,
             "LF_website": canonical,
-            "LF_hq_country": hq_country or row.get("LF_hq_country", ""),
+            "LF_hq_country": normalized_hq_country,
+            "hq_country": normalize_country(hq_country or row.get("hq_country") or row.get("LF_hq_country", "")),
             "LF_normalized_domain": domain,
             "LF_duplicate_state": duplicate,
             "LF_intake_status": intake,
