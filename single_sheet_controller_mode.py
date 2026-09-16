@@ -66,14 +66,16 @@ def install(cls):
                 if 0 <= age <= minutes:
                     windows[minutes] += 1
         five, ten = windows[5], windows[10]
-        breach = five < THROUGHPUT_MIN_PER_MINUTE * 5 or ten < 100
+        minimum_5m = THROUGHPUT_MIN_PER_MINUTE * 5
+        minimum_10m = THROUGHPUT_MIN_PER_MINUTE * 10
+        breach = five < minimum_5m or ten < minimum_10m
         return {
             "promoted_last_5m": five,
             "promoted_last_10m": ten,
             "qualified_per_minute_5m": round(five / 5.0, 2),
             "qualified_per_minute_10m": round(ten / 10.0, 2),
-            "throughput_minimum_5m": THROUGHPUT_MIN_PER_MINUTE * 5,
-            "throughput_minimum_10m": 100,
+            "throughput_minimum_5m": minimum_5m,
+            "throughput_minimum_10m": minimum_10m,
             "throughput_target_5m": THROUGHPUT_TARGET_PER_MINUTE * 5,
             "throughput_status": "THROUGHPUT_BREACH" if breach else (
                 "ON_TARGET" if five >= THROUGHPUT_TARGET_PER_MINUTE * 5 else "ABOVE_MINIMUM"

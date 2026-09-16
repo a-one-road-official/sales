@@ -9,9 +9,14 @@ import google.auth
 from google.api_core.exceptions import AlreadyExists
 from google.cloud import tasks_v2
 
+from cost_guard import require_paid_cloud
+
 
 class TaskDispatcher:
     def __init__(self, queue: str | None = None):
+        # Cloud Tasks fan-out is a paid execution multiplier. Construction itself
+        # is blocked unless the operator explicitly authorizes paid cloud for this run.
+        require_paid_cloud("cloud_tasks_dispatch")
         creds, project = google.auth.default()
         self.project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT") or project
         self.location = os.getenv("LEAD_FACTORY_TASKS_LOCATION", "asia-northeast1")
@@ -39,6 +44,7 @@ class TaskDispatcher:
         return "lf-" + hashlib.sha256(raw).hexdigest()[:40]
 
     def enqueue(self, path: str, payload: dict[str, Any], key: str) -> dict:
+        require_paid_cloud("cloud_tasks_enqueue")
         url = f"{self.service_url}/{str(path).lstrip('/')}"
         task_id = self._task_id(key)
         task_name = self.client.task_path(self.project, self.location, self.queue, task_id)

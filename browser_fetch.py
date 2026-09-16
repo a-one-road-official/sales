@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
 
+from cost_guard import is_cloud_run, paid_cloud_allowed
 from safe_fetch import Snapshot
 from safety import same_host_or_subdomain
 
@@ -15,14 +16,15 @@ class TrustedBrowserFetcher:
 
     Generated adapters never control Playwright. They only receive the resulting DOM/network snapshots.
     Top-level navigation is restricted to the source host. Non-GET/HEAD requests are blocked.
+    Browser execution inside Cloud Run requires explicit paid-cloud authorization.
     """
 
     def __init__(self, source_url: str, rps: float, max_requests: int, max_bytes: int, storage_state: dict | None = None):
         self.source_url = source_url
         self.storage_state = storage_state
         self.rps = max(rps, 0.05)
-        self.max_requests = max_requests
-        self.max_bytes = max_bytes
+        self.max_requests = max(0, min(int(max_requests or 0), 5000))
+        self.max_bytes = max(1, min(int(max_bytes or 1), 8 * 1024 * 1024))
         self.requests = 0
         self._last = 0.0
 
@@ -35,6 +37,8 @@ class TrustedBrowserFetcher:
         self._last = time.monotonic()
 
     def fetch(self, url: str) -> Snapshot:
+        if is_cloud_run() and not paid_cloud_allowed():
+            raise RuntimeError("paid_cloud_disabled:playwright_fetch")
         if self.requests >= self.max_requests:
             raise RuntimeError("request_budget_exceeded")
         if not same_host_or_subdomain(url, self.source_url):
@@ -72,7 +76,9 @@ class TrustedBrowserFetcher:
                     }
                     network.append(item)
                     ctype = item["content_type"].lower()
-                    if same_host_or_subdomain(resp.url, self.source_url) and ("json" in ctype or "graphql" in resp.url.lower() or "/api/" in resp.url.lower()):
+                    if same_host_or_subdomain(resp.url, self.source_url) and (
+                        "json" in ctype or "graphql" in resp.url.lower() or "/api/" in resp.url.lower()
+                    ):
                         body = resp.body()
                         if len(body) <= min(self.max_bytes, 2 * 1024 * 1024):
                             text = body.decode("utf-8", errors="replace")
