@@ -116,16 +116,24 @@ def _gmail_credentials(sender: str):
         ) from exc
 
 
+def _execution_log_sheet() -> str:
+    return str(
+        os.getenv("OUTREACH_EXECUTION_LOG_SHEET", "LeadFactory_ExecutionLog")
+        or "LeadFactory_ExecutionLog"
+    ).strip() or "LeadFactory_ExecutionLog"
+
+
 def _sheet_rows_with_retry(sheets):
     if sheets is None:
         return []
+    sheet = _execution_log_sheet()
     reader = getattr(sheets, "rows_as_dicts_once", None)
     if callable(reader):
-        return reader("LeadFactory_ExecutionLog", "O")
+        return reader(sheet, "U")
     last_error = None
     for attempt in range(5):
         try:
-            return sheets._rows_as_dicts("LeadFactory_ExecutionLog", "O")
+            return sheets._rows_as_dicts(sheet, "U")
         except Exception as exc:
             last_error = exc
             if attempt < 4:
@@ -439,6 +447,15 @@ def record_outbound_attempt(sheets, draft: dict, result: dict) -> dict:
         "recipient": recipient,
         "executed_at": datetime.now(timezone.utc).isoformat(),
     }
+    if _execution_log_sheet() == "outreach_engine_log":
+        record = {
+            **record,
+            "timestamp": record["executed_at"],
+            "website": draft.get("verified_website") or draft.get("website", ""),
+            "email": recipient,
+            "error_message": reason,
+            "stage": "OUTBOUND_ATTEMPT",
+        }
     try:
         existing = _sheet_rows_with_retry(sheets)
         if any(str(row.get("idempotency_key") or "") == key for row in existing):
@@ -449,7 +466,7 @@ def record_outbound_attempt(sheets, draft: dict, result: dict) -> dict:
     last_error = None
     for attempt in range(4):
         try:
-            sheets.append_dict("LeadFactory_ExecutionLog", record)
+            sheets.append_dict(_execution_log_sheet(), record)
             return {"written": True, "idempotency_key": key}
         except Exception as exc:
             last_error = exc
@@ -703,7 +720,15 @@ class OutboundEmailExecutor:
         if self.sheets:
             for attempt in range(4):
                 try:
-                    self.sheets.append_dict("LeadFactory_ExecutionLog", {
+                    self.sheets.append_dict(_execution_log_sheet(), {
+                        "timestamp": now,
+                        "channel": "EMAIL",
+                        "company_name": draft.get("company_name", ""),
+                        "website": draft.get("verified_website") or draft.get("website", ""),
+                        "email": draft.get("recipient", ""),
+                        "status": "SENT",
+                        "error_message": "",
+                        "stage": "OUTBOUND_EXECUTION",
                         "idempotency_key": key,
                         "draft_id": draft.get("draft_id", ""),
                         "source_row": draft.get("source_row", ""),
