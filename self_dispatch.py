@@ -3,14 +3,16 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
-from datetime import datetime, timezone
 import urllib.request
 
+from cost_guard import bounded_int, http_self_fallback_allowed, paid_cloud_allowed
 from task_queue import TaskDispatcher
 
 
 def _post_fallback(factory, path: str, payload: dict) -> dict:
-    """Best-effort independent lane when Cloud Tasks administration is unavailable."""
+    """Explicitly-authorized self-HTTP fallback for rare operator-directed recovery."""
+    if not http_self_fallback_allowed():
+        return {"ok": False, "error": "http_self_fallback_disabled_by_budget"}
     base = str(os.getenv("LEAD_FACTORY_SERVICE_URL", "")).rstrip("/")
     token = str(os.getenv("LEAD_FACTORY_INTERNAL_TOKEN", ""))
     if not base:
@@ -22,19 +24,14 @@ def _post_fallback(factory, path: str, payload: dict) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=530) as response:
+        with urllib.request.urlopen(req, timeout=180) as response:
             return {"ok": 200 <= response.status < 300, "status_code": response.status}
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}:{exc}"}
 
 
 def _bounded_fallback_jobs(jobs: list[tuple[str, dict, str]], limit: int) -> list[tuple[str, dict, str]]:
-    """Select a small fair slice when Cloud Tasks is unavailable.
-
-    The service cannot hold hundreds of self-HTTP calls in one request. Keep a
-    round-robin slice across Gate, domain, and source work so supply and
-    qualification advance together on every retry.
-    """
+    """Select a tiny fair slice when an operator explicitly enables self-HTTP fallback."""
     buckets = {stage: [] for stage in ("gate", "domain", "source")}
     for job in jobs:
         buckets.setdefault(job[2], []).append(job)
@@ -53,7 +50,15 @@ def _bounded_fallback_jobs(jobs: list[tuple[str, dict, str]], limit: int) -> lis
 
 
 def dispatch_lane(factory, lane: str) -> dict:
-    """Queue independent jobs; fall back to parallel HTTP workers if queue is absent."""
+    """Queue a hard-bounded amount of work only after explicit paid-cloud authorization.
+
+    Historical code multiplied already-scaled Config limits by a capacity multiplier a
+    second time. At multiplier=50 that could request tens of thousands of tasks per
+    lane. Limits are now absolute and code-capped. Re-running the scheduler reuses the
+    same stable task key until an operator intentionally changes TASK_EPOCH.
+    """
+    if not paid_cloud_allowed():
+        return {"status": "DISABLED_BUDGET", "reason": "LEAD_FACTORY_PAID_CLOUD_ALLOWED is FALSE"}
     if not factory._enabled():
         return {"status": "DISABLED", "reason": "Config.LEAD_FACTORY_ENABLED is FALSE"}
     lane_key = str(lane or "").strip().upper()
@@ -61,11 +66,13 @@ def dispatch_lane(factory, lane: str) -> dict:
         raise ValueError(f"unsupported_lane:{lane}")
 
     cfg = factory._config()
-    multiplier = max(1, min(50, int(cfg.get("LEAD_FACTORY_CAPACITY_MULTIPLIER", "1") or 1)))
-    source_limit = int(cfg.get("DISPATCH_SOURCE_MAX", "5") or 5) * multiplier
-    domain_limit = int(cfg.get("DISPATCH_DOMAIN_MAX", "100") or 100) * multiplier
-    gate_limit = int(cfg.get("DISPATCH_GATE_MAX", "100") or 100) * multiplier
-    recrawl = int(cfg.get("SOURCE_RECRAWL_AFTER_MINUTES", "1440") or 1440)
+    # Absolute ceilings. Stale LEAD_FACTORY_CAPACITY_MULTIPLIER values are ignored.
+    source_limit = bounded_int(cfg, "DISPATCH_SOURCE_MAX", default=2, hard_max=4, minimum=0)
+    domain_limit = bounded_int(cfg, "DISPATCH_DOMAIN_MAX", default=5, hard_max=10, minimum=0)
+    gate_limit = bounded_int(cfg, "DISPATCH_GATE_MAX", default=5, hard_max=10, minimum=0)
+    recrawl = bounded_int(
+        cfg, "SOURCE_RECRAWL_AFTER_MINUTES", default=1440, hard_max=10080, minimum=60
+    )
 
     sources = factory.sheets.sources_for_crawl(
         limit=source_limit, lane=lane_key.lower(), recrawl_after_minutes=recrawl
@@ -77,14 +84,12 @@ def dispatch_lane(factory, lane: str) -> dict:
         else factory.sheets.list_pending_gate(limit=gate_limit)
     )
 
-    # Qualify the existing backlog before adding slower source-crawl work.
-    # MAKTEK is placed on a separate queue so a pre-existing FIFO backlog cannot
-    # delay the companies captured for the active production goal.
     priority_queue = str(
         cfg.get("LEAD_FACTORY_PRIORITY_TASKS_QUEUE", "lead-factory-priority-workers")
     ).strip()
     priority_jobs = []
     normal_jobs = []
+
     def add_job(path: str, payload: dict, stage: str, priority: bool = False) -> None:
         (priority_jobs if priority else normal_jobs).append((path, payload, stage))
 
@@ -103,27 +108,33 @@ def dispatch_lane(factory, lane: str) -> dict:
                 priority=str(company.get("source_name", "")).strip() == "MAKTEK Eurasia 2026",
             )
     for source in sources:
-        # Target-company additions must not wait behind the pre-existing
-        # domain/gate backlog; source capture is the active production goal.
         add_job("/worker/source", {"source_id": source.source_id}, "source", priority=True)
 
-    jobs = priority_jobs + normal_jobs
     queued = {"source": 0, "domain": 0, "gate": 0, "already_queued": 0, "errors": 0, "deferred": 0}
     errors = []
     mode = "CLOUD_TASKS_ASYNC"
+
     def enqueue_http_fallback(fallback_jobs: list[tuple[str, dict, str]]) -> None:
         nonlocal mode
         if not fallback_jobs:
             return
-        mode = "HTTP_FALLBACK_BOUNDED"
+        if not http_self_fallback_allowed():
+            queued["deferred"] += len(fallback_jobs)
+            errors.append({
+                "stage": "dispatcher",
+                "status": "HTTP_FALLBACK_DISABLED_BY_BUDGET",
+                "count": len(fallback_jobs),
+            })
+            return
+        mode = "HTTP_FALLBACK_EXPLICIT"
         try:
-            fallback_workers = max(1, min(16, int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_WORKERS", "16") or 16)))
+            fallback_workers = max(1, min(2, int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_WORKERS", "1") or 1)))
         except ValueError:
-            fallback_workers = 16
+            fallback_workers = 1
         try:
-            fallback_budget = max(1, min(32, int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_JOBS", "32") or 32)))
+            fallback_budget = max(1, min(4, int(os.getenv("LEAD_FACTORY_DISPATCH_HTTP_JOBS", "2") or 2)))
         except ValueError:
-            fallback_budget = 32
+            fallback_budget = 2
         selected_jobs = _bounded_fallback_jobs(fallback_jobs, fallback_budget)
         deferred = len(fallback_jobs) - len(selected_jobs)
         if deferred:
@@ -132,15 +143,15 @@ def dispatch_lane(factory, lane: str) -> dict:
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(fallback_workers, len(selected_jobs))) as pool:
             futures = [pool.submit(_post_fallback, factory, path, payload) for path, payload, _ in selected_jobs]
             for future, (path, payload, stage) in zip(futures, selected_jobs):
-                result = future.result(timeout=535)
+                result = future.result(timeout=185)
                 if result.get("ok"):
                     queued[stage] += 1
                 else:
                     queued["errors"] += 1
                     errors.append({"stage": stage, "path": path, "error": result.get("error", "fallback_failed")})
 
-    now = datetime.now(timezone.utc)
-    bucket = f"{now:%Y%m%d%H}{(now.minute // 10) * 10:02d}"
+    # Stable across scheduler ticks. Reprocessing requires an explicit epoch bump.
+    task_epoch = str(os.getenv("LEAD_FACTORY_TASK_EPOCH", "budget-v1") or "budget-v1").strip()
     queue_batches = [
         (priority_queue, priority_jobs),
         (None, normal_jobs),
@@ -151,19 +162,19 @@ def dispatch_lane(factory, lane: str) -> dict:
         fallback_jobs = []
         try:
             dispatcher = TaskDispatcher(queue=queue_name)
+
             def enqueue_one(item):
                 path, payload, stage = item
-                key = f"{lane_key.lower()}:{stage}:{payload.get('source_id') or payload.get('lead_id')}:{bucket}"
+                identity = payload.get("source_id") or payload.get("lead_id")
+                key = f"{lane_key.lower()}:{stage}:{identity}:{task_epoch}"
                 try:
                     return item, dispatcher.enqueue(path, payload, key), None
                 except Exception as exc:
                     return item, None, exc
 
-            # Cloud Tasks creation is an RPC per task. Submit bounded parallel
-            # RPCs so a 200+ candidate dispatch cannot hit the service request
-            # deadline before any work is queued.
+            # Keep queue-creation pressure deliberately tiny.
             with concurrent.futures.ThreadPoolExecutor(
-                max_workers=min(16, max(1, len(queue_jobs)))
+                max_workers=min(4, max(1, len(queue_jobs)))
             ) as pool:
                 futures = [pool.submit(enqueue_one, item) for item in queue_jobs]
                 for future in futures:
@@ -188,18 +199,17 @@ def dispatch_lane(factory, lane: str) -> dict:
                 "queue": queue_name or "default",
                 "error": f"{type(exc).__name__}:{exc}",
             })
-            try:
-                enqueue_http_fallback(queue_jobs)
-            except Exception as inner:
-                queued["errors"] += len(queue_jobs)
-                errors.append({"stage": "fallback", "queue": queue_name or "default", "error": f"{type(inner).__name__}:{inner}"})
+            enqueue_http_fallback(queue_jobs)
 
     return {
-        "status": "ENQUEUED_WITH_ERRORS" if queued["errors"] else "ENQUEUED",
+        "status": "ENQUEUED_WITH_ERRORS" if queued["errors"] or queued["deferred"] else "ENQUEUED",
         "lane": lane_key,
         "candidates": {"source": len(sources), "domain": len(domains), "gate": len(gates)},
         "queued": queued,
         "errors": errors[:100],
         "execution": mode,
+        "task_epoch": task_epoch,
+        "legacy_capacity_multiplier_ignored": str(cfg.get("LEAD_FACTORY_CAPACITY_MULTIPLIER", "1")),
+        "hard_caps": {"source": 4, "domain": 10, "gate": 10},
         "customer_facing_send": "DISABLED_LIST_ONLY",
     }
