@@ -97,7 +97,7 @@ jobs:
           import re
           from pathlib import Path
           from llm import VERTEX_FORBIDDEN
-          if os.environ.get("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE") != "FALSE":
+          if os.environ.get("LEAD_FACTORY_VERTEX_ALLOWED", "").strip().upper() != "FALSE":
               raise SystemExit("vertex_policy_env_not_false")
           if not VERTEX_FORBIDDEN:
               raise SystemExit("vertex_boundary_not_forbidden")
