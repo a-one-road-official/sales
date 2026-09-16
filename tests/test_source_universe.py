@@ -34,3 +34,32 @@ def test_country_normalization_and_priority():
     assert normalize_country("USA") == "United States"
     assert geo_priority("Israel") < geo_priority("Germany")
     assert geo_priority("Taiwan") < geo_priority("United States")
+
+
+def test_lane_balance_holds_mittelstand_when_growth_is_underrepresented():
+    from source_universe import lane_balance_decision
+    result = lane_balance_decision(
+        "MITTELSTAND", sampled=500, growth_share=0.08,
+        target_growth_share=0.50, tolerance=0.08, min_sample=100,
+    )
+    assert result["hold"] is True
+    assert result["reason"] == "growth_underrepresented"
+
+
+def test_lane_balance_allows_growth_when_growth_is_underrepresented():
+    from source_universe import lane_balance_decision
+    result = lane_balance_decision(
+        "GROWTH", sampled=500, growth_share=0.08,
+        target_growth_share=0.50, tolerance=0.08, min_sample=100,
+    )
+    assert result["hold"] is False
+
+
+def test_lane_balance_holds_growth_when_growth_dominates():
+    from source_universe import lane_balance_decision
+    result = lane_balance_decision(
+        "GROWTH", sampled=500, growth_share=0.90,
+        target_growth_share=0.50, tolerance=0.08, min_sample=100,
+    )
+    assert result["hold"] is True
+    assert result["reason"] == "mittelstand_underrepresented"
