@@ -764,6 +764,13 @@ def _visible_step_signature(form) -> tuple:
         return ()
 
 
+def _execution_log_sheet() -> str:
+    return str(
+        os.getenv("OUTREACH_EXECUTION_LOG_SHEET", "LeadFactory_ExecutionLog")
+        or "LeadFactory_ExecutionLog"
+    ).strip() or "LeadFactory_ExecutionLog"
+
+
 class PublicContactFormExecutor:
     def __init__(self, sheets=None):
         self.sheets = sheets
@@ -781,11 +788,11 @@ class PublicContactFormExecutor:
         last_error = None
         reader = getattr(self.sheets, "rows_as_dicts_once", None)
         if callable(reader):
-            rows = reader("LeadFactory_ExecutionLog", "ZZ")
+            rows = reader(_execution_log_sheet(), "U")
         else:
             for attempt in range(5):
                 try:
-                    rows = self.sheets._rows_as_dicts("LeadFactory_ExecutionLog", "ZZ")
+                    rows = self.sheets._rows_as_dicts(_execution_log_sheet(), "U")
                     break
                 except Exception as exc:
                     last_error = exc
@@ -1297,6 +1304,14 @@ class PublicContactFormExecutor:
                     finished_at=datetime.now(timezone.utc).isoformat(),
                 )
                 audit_row = {
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "channel": "FORM",
+                    "company_name": company_name,
+                    "website": website,
+                    "email": "PUBLIC_CONTACT_FORM",
+                    "status": "FORM_SENT",
+                    "error_message": "",
+                    "stage": "FORM_EXECUTION",
                     "idempotency_key": idempotency_key,
                     "draft_id": draft_id,
                     "source_row": source_row,
@@ -1316,7 +1331,7 @@ class PublicContactFormExecutor:
                 log_error = ""
                 if self.sheets is not None:
                     try:
-                        self.sheets.append_dict("LeadFactory_ExecutionLog", audit_row)
+                        self.sheets.append_dict(_execution_log_sheet(), audit_row)
                     except Exception as exc:
                         log_error = f"{type(exc).__name__}:{exc}"
                 result["audit_log_written"] = not log_error
