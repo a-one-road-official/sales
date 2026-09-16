@@ -44,7 +44,13 @@ jobs:
             gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT" || true
           done
 
+      - name: Disable Vertex AI API
+        run: |
+          set -euo pipefail
+          gcloud services disable aiplatform.googleapis.com --project="$PROJECT" --force
+
       - name: Disable Vertex and outbound runtimes
+        run: |
         run: |
           set +e
           gcloud run services update aone-lead-factory \
