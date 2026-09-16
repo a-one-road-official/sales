@@ -650,6 +650,40 @@ class SheetsRepo:
         raise KeyError(source_id)
 
 
+    def recent_lane_mix(self, sample_size: int = 500) -> dict:
+        """Return the lane mix of the most recently appended LeadFactory rows.
+
+        The sample is row-order based so a one-day burst cannot be hidden by a
+        wider date window. Legacy rows with no LF_source_type are ignored.
+        """
+        sheet, _ = self._human_ssot_config()
+        headers_rows = self.read(f"'{sheet}'!1:1")
+        if not headers_rows:
+            return {"sampled": 0, "growth": 0, "mittelstand": 0, "growth_share": 0.0}
+        headers = [str(x or "").strip() for x in headers_rows[0]]
+        if "LF_source_type" not in headers:
+            return {"sampled": 0, "growth": 0, "mittelstand": 0, "growth_share": 0.0}
+        idx = headers.index("LF_source_type")
+        last_col = self._column_letter(len(headers))
+        values = self.read(f"'{sheet}'!A2:{last_col}")
+        typed = []
+        for raw in values:
+            padded = list(raw) + [""] * max(0, len(headers) - len(raw))
+            source_type = str(padded[idx] or "").strip().upper()
+            if source_type:
+                typed.append(source_type)
+        recent = typed[-max(1, int(sample_size)):]
+        mittel = sum(1 for t in recent if t.startswith("MITTELSTAND_"))
+        growth = len(recent) - mittel
+        sampled = len(recent)
+        return {
+            "sampled": sampled,
+            "growth": growth,
+            "mittelstand": mittel,
+            "growth_share": (growth / sampled) if sampled else 0.0,
+        }
+
+
     def sources_for_crawl(
         self,
         limit: int = 20,
