@@ -138,7 +138,9 @@ def _find_existing_gmail_message(service, *, sender: str, recipient: str, idempo
     The idempotency header protects retries from this worker.  The recipient
     fallback also protects against older sends that predate that header.
     """
-    query = f"from:{sender} to:{recipient} newer_than:30d"
+    # Initial outreach is company-history sensitive. Search the full mailbox,
+    # not a rolling 30-day window, so an old contact cannot become "new" again.
+    query = f"from:{sender} to:{recipient}"
     listed = service.users().messages().list(userId="me", q=query, maxResults=50).execute()
     fallback = ""
     for item in listed.get("messages", []) or []:
@@ -157,6 +159,43 @@ def _find_existing_gmail_message(service, *, sender: str, recipient: str, idempo
         if not fallback:
             fallback = message_id
     return fallback
+def _company_domain(value: str) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return ""
+    candidate = raw if "://" in raw else f"https://{raw}"
+    try:
+        host = urllib.parse.urlparse(candidate).hostname or ""
+    except Exception:
+        return ""
+    return host.lower().removeprefix("www.").strip(".")
+
+
+def _find_existing_gmail_company_message(service, *, sender: str, company_domain: str) -> str:
+    domain = _company_domain(company_domain)
+    if not domain:
+        return ""
+    listed = service.users().messages().list(
+        userId="me",
+        q=f"from:{sender} to:{domain}",
+        maxResults=50,
+    ).execute()
+    for item in listed.get("messages", []) or []:
+        message_id = str(item.get("id") or "").strip()
+        if not message_id:
+            continue
+        message = service.users().messages().get(
+            userId="me",
+            id=message_id,
+            format="metadata",
+            metadataHeaders=["To"],
+        ).execute()
+        to_header = _gmail_header_map(message).get("to", "").lower()
+        if f"@{domain}" in to_header:
+            return message_id
+    return ""
+
+
 def _find_existing_gmail_message_with_retry(service, *, sender: str, recipient: str, idempotency_key: str) -> str:
     last_error = None
     for attempt in range(4):
@@ -500,6 +539,20 @@ class OutboundEmailExecutor:
             return {"status": prompt_check.get("status", "STALE_PROMPT"), "prompt_preflight": prompt_check}
 
         key = f"outbound:{lane.lower()}:{draft.get('draft_id','')}:{preflight['message_hash']}"
+        source_row = str(draft.get("source_row") or "").strip()
+        if (
+            self.sheets is not None
+            and source_row.isdigit()
+            and hasattr(self.sheets, "sales_row_has_contact_history")
+            and self.sheets.sales_row_has_contact_history(int(source_row))
+        ):
+            return {
+                "status": "DUPLICATE_BLOCKED",
+                "idempotency_key": key,
+                "lane": lane,
+                "recipient": str(draft.get("recipient") or "").strip(),
+                "reason": "ssot_contact_history",
+            }
         if key in self._sent_keys:
             return {"status": "DUPLICATE_BLOCKED", "idempotency_key": key, "lane": lane, "recipient": str(draft.get("recipient") or "").strip()}
         sheet_idempotency_error = ""
@@ -558,6 +611,39 @@ class OutboundEmailExecutor:
                 "recipient": str(draft.get("recipient") or "").strip(),
                 "existing_message_id": existing_message_id,
             }
+
+        # Legacy rows may have lost their Status/history during the single-sheet
+        # migration. A prior outbound to the same corporate domain still proves
+        # that this company was contacted, even when the newly researched
+        # recipient differs.
+        company_domain = _company_domain(
+            draft.get("verified_website") or draft.get("website") or ""
+        )
+        if company_domain:
+            try:
+                company_message_id = _find_existing_gmail_company_message(
+                    service, sender=sender, company_domain=company_domain
+                )
+            except Exception as exc:
+                if sheet_idempotency_error:
+                    return {
+                        "status": "IDEMPOTENCY_LOOKUP_FAILED",
+                        "idempotency_key": key,
+                        "lane": lane,
+                        "recipient": str(draft.get("recipient") or "").strip(),
+                        "reason": f"company_history_lookup_failed:{type(exc).__name__}:{exc}",
+                    }
+                company_message_id = ""
+            if company_message_id:
+                return {
+                    "status": "DUPLICATE_BLOCKED",
+                    "idempotency_key": key,
+                    "lane": lane,
+                    "recipient": str(draft.get("recipient") or "").strip(),
+                    "existing_message_id": company_message_id,
+                    "reason": "gmail_company_history",
+                }
+
         message = MIMEText(str(draft.get("body") or ""), "plain", "utf-8")
         message["to"] = str(draft["recipient"]).strip()
         message["from"] = sender
@@ -604,6 +690,7 @@ class OutboundEmailExecutor:
         now = datetime.now(timezone.utc).isoformat()
         self._sent_keys.add(key)
         message_id = str(result.get("id") or "").strip()
+        thread_id = str(result.get("threadId") or "").strip()
         audit_log_error = ""
         if self.sheets:
             for attempt in range(4):
@@ -618,6 +705,7 @@ class OutboundEmailExecutor:
                         "status": "SENT",
                         "semantic_success": "PENDING_DELIVERY",
                         "message_id": message_id,
+                        "thread_id": thread_id,
                         "recipient": draft.get("recipient", ""),
                         "executed_at": now,
                     })
@@ -629,6 +717,7 @@ class OutboundEmailExecutor:
         response = {
             "status": "SENT",
             "message_id": message_id,
+            "thread_id": thread_id,
             "idempotency_key": key,
             "lane": lane,
             "recipient": str(draft.get("recipient") or "").strip(),

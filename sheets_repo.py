@@ -18,6 +18,22 @@ from googleapiclient.errors import HttpError
 
 from models import Source
 from safety import canonicalize_url
+from sales_history import (
+    CONTACTED_STATUSES,
+    FIRST_CONTACTED_FIELD,
+    HISTORY_FIELD,
+    LAST_OUTBOUND_AT_FIELD,
+    LAST_OUTBOUND_MESSAGE_ID_FIELD,
+    LAST_OUTBOUND_RECIPIENT_FIELD,
+    LAST_OUTBOUND_THREAD_ID_FIELD,
+    SALES_HISTORY_FIELDS,
+    append_history,
+    guarded_status,
+    has_contact_history,
+    history_event_from_execution,
+    is_contact_event,
+    parse_history,
+)
 
 
 
@@ -1033,6 +1049,139 @@ class SheetsRepo:
                 return row_number
         return None
 
+    def ensure_sales_history_schema(self) -> None:
+        """Keep durable contact history inside the human SSOT row."""
+        sheet, _ = self._human_ssot_config()
+        for header in SALES_HISTORY_FIELDS:
+            self._ensure_header(sheet, header)
+
+    def _sales_row_dict_by_number(self, row_number: int) -> dict:
+        sheet, _ = self._human_ssot_config()
+        headers_rows = self.read(f"'{sheet}'!1:1")
+        if not headers_rows:
+            return {}
+        headers = [str(x or "").strip() for x in headers_rows[0]]
+        if not headers:
+            return {}
+        last_col = self._column_letter(len(headers))
+        values = self.read(f"'{sheet}'!A{int(row_number)}:{last_col}{int(row_number)}")
+        if not values:
+            return {}
+        row = list(values[0]) + [""] * max(0, len(headers) - len(values[0]))
+        item = dict(zip(headers, row))
+        item["row_number"] = int(row_number)
+        return item
+
+    def _guard_sales_status_change(self, row_number: int, requested: str, *, source: str = "SYSTEM") -> str:
+        row = self._sales_row_dict_by_number(int(row_number))
+        return guarded_status(row.get("Status", ""), requested, row=row, source=source)
+
+    def sales_row_has_contact_history(self, row_number: int) -> bool:
+        return has_contact_history(self._sales_row_dict_by_number(int(row_number)))
+
+    def contacted_sales_row_numbers(self) -> set[int]:
+        """Return rows that must never be considered untouched again."""
+        self.ensure_sales_history_schema()
+        sheet, _ = self._human_ssot_config()
+        headers_rows = self.read(f"'{sheet}'!1:1")
+        if not headers_rows:
+            return set()
+        headers = [str(x or "").strip() for x in headers_rows[0]]
+        wanted = {
+            "Status", HISTORY_FIELD, FIRST_CONTACTED_FIELD, LAST_OUTBOUND_MESSAGE_ID_FIELD,
+        }
+        index = {name: headers.index(name) for name in wanted if name in headers}
+        if "Status" not in index:
+            return set()
+        last_col = self._column_letter(len(headers))
+        values = self.read(f"'{sheet}'!A2:{last_col}")
+        out: set[int] = set()
+        for row_number, raw in enumerate(values, start=2):
+            padded = list(raw) + [""] * max(0, len(headers) - len(raw))
+            row = {name: padded[pos] for name, pos in index.items()}
+            if has_contact_history(row):
+                out.add(row_number)
+        return out
+
+    def sales_history_rows(self) -> list[dict]:
+        """Project the row-local history into the legacy ExecutionLog contract."""
+        self.ensure_sales_history_schema()
+        sheet, _ = self._human_ssot_config()
+        headers_rows = self.read(f"'{sheet}'!1:1")
+        if not headers_rows:
+            return []
+        headers = [str(x or "").strip() for x in headers_rows[0]]
+        last_col = self._column_letter(len(headers))
+        values = self.read(f"'{sheet}'!A2:{last_col}")
+        out: list[dict] = []
+        for row_number, raw in enumerate(values, start=2):
+            padded = list(raw) + [""] * max(0, len(headers) - len(raw))
+            row = dict(zip(headers, padded))
+            events = parse_history(row.get(HISTORY_FIELD))
+            for event in events:
+                item = dict(event)
+                item.setdefault("source_row", str(row_number))
+                item.setdefault("company_name", row.get("company_name", ""))
+                out.append(item)
+            # Current contacted state is a durable baseline even if the original
+            # technical ledger was deleted during the single-sheet migration.
+            if not events and has_contact_history(row):
+                out.append({
+                    "idempotency_key": f"baseline-contact:{row_number}",
+                    "source_row": str(row_number),
+                    "company_name": row.get("company_name", ""),
+                    "status": "SENT",
+                    "semantic_success": "TRUE",
+                    "message_id": row.get(LAST_OUTBOUND_MESSAGE_ID_FIELD, ""),
+                    "recipient": row.get(LAST_OUTBOUND_RECIPIENT_FIELD, ""),
+                    "executed_at": row.get(FIRST_CONTACTED_FIELD, ""),
+                    "lane": "SSOT_BASELINE",
+                    "channel": "UNKNOWN",
+                })
+        return out
+
+    def record_sales_history_event(self, record: dict) -> dict:
+        """Persist one sales event in the SSOT and advance contact state atomically."""
+        self.ensure_sales_history_schema()
+        sheet, _ = self._human_ssot_config()
+        source_row = str(record.get("source_row") or "").strip()
+        row_number = int(source_row) if source_row.isdigit() else 0
+        row = self._sales_row_dict_by_number(row_number) if row_number >= 2 else {}
+        if not row:
+            company = str(record.get("company_name") or "").strip()
+            match = self.find_sales_match(company, "") if company else None
+            row_number = int((match or {}).get("row_number") or 0)
+            row = self._sales_row_dict_by_number(row_number) if row_number >= 2 else {}
+        if not row:
+            raise RuntimeError("sales_history_target_not_found")
+
+        event = history_event_from_execution(record)
+        event.setdefault("source_row", str(row_number))
+        event.setdefault("company_name", row.get("company_name", ""))
+        changes = {
+            HISTORY_FIELD: append_history(row.get(HISTORY_FIELD), event),
+        }
+        if is_contact_event(event):
+            at = str(event.get("executed_at") or datetime.now(timezone.utc).isoformat())
+            if not str(row.get(FIRST_CONTACTED_FIELD) or "").strip():
+                changes[FIRST_CONTACTED_FIELD] = at
+            changes[LAST_OUTBOUND_AT_FIELD] = at
+            if str(event.get("message_id") or "").strip():
+                changes[LAST_OUTBOUND_MESSAGE_ID_FIELD] = event.get("message_id")
+            if str(event.get("thread_id") or "").strip():
+                changes[LAST_OUTBOUND_THREAD_ID_FIELD] = event.get("thread_id")
+            if str(event.get("recipient") or "").strip():
+                changes[LAST_OUTBOUND_RECIPIENT_FIELD] = event.get("recipient")
+                if not str(row.get("営業メール宛先") or "").strip():
+                    changes["営業メール宛先"] = event.get("recipient")
+            changes["営業メール状態"] = "SENT"
+            current = str(row.get("Status") or "").strip()
+            if current not in CONTACTED_STATUSES:
+                changes["Status"] = "送付済み"
+
+        self._narrow_update_sales_fields(row_number, changes)
+        return {"row_number": row_number, "written": True, "contacted": is_contact_event(event)}
+
     def _narrow_update_sales_fields(self, row_number: int, fields: dict) -> None:
         sheet, _ = self._human_ssot_config()
         headers_rows = self.read(f"'{sheet}'!1:1")
@@ -1041,7 +1190,12 @@ class SheetsRepo:
         headers = headers_rows[0]
         index = {str(h): i for i, h in enumerate(headers) if h}
         data = []
-        for key, value in fields.items():
+        normalized_fields = dict(fields or {})
+        if "Status" in normalized_fields:
+            normalized_fields["Status"] = self._guard_sales_status_change(
+                int(row_number), normalized_fields["Status"], source="SYSTEM"
+            )
+        for key, value in normalized_fields.items():
             if key not in index:
                 continue
             col = self._column_letter(index[key] + 1)
@@ -1844,6 +1998,8 @@ class SheetsRepo:
             status_rows = self.read(f"'{sheet}'!B{row_number}:B{row_number}")
             status = str(status_rows[0][0]).strip() if status_rows and status_rows[0] else ""
             if status != "未接触":
+                continue
+            if self.sales_row_has_contact_history(row_number):
                 continue
             out.append(candidate)
             if len(out) >= max(0, int(limit)):
