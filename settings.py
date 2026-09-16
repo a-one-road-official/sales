@@ -16,22 +16,25 @@ class Settings:
     outreach_prompt_doc_title: str = os.getenv("OUTREACH_PROMPT_DOC_TITLE", "outreach_prompt_production_v1").strip()
     openai_model: str = os.getenv("LEAD_FACTORY_GEMINI_MODEL", "gemini-2.5-flash")
     meta_interval_seconds: int = int(os.getenv("LEAD_FACTORY_META_INTERVAL_SECONDS", "120"))
-    max_repair_attempts: int = int(os.getenv("LEAD_FACTORY_MAX_REPAIR_ATTEMPTS", "5"))
+
+    # Budget-first defaults. A missing environment variable must reduce work,
+    # never resurrect the historical high-fan-out production profile.
+    max_repair_attempts: int = int(os.getenv("LEAD_FACTORY_MAX_REPAIR_ATTEMPTS", "1"))
     source_rps: float = float(os.getenv("LEAD_FACTORY_SOURCE_RPS", "0.5"))
-    max_requests_per_run: int = int(os.getenv("LEAD_FACTORY_MAX_REQUESTS_PER_RUN", "3000"))
-    max_response_bytes: int = int(os.getenv("LEAD_FACTORY_MAX_RESPONSE_BYTES", str(8 * 1024 * 1024)))
-    max_records_per_run: int = int(os.getenv("LEAD_FACTORY_MAX_RECORDS_PER_RUN", "100000"))
+    max_requests_per_run: int = int(os.getenv("LEAD_FACTORY_MAX_REQUESTS_PER_RUN", "50"))
+    max_response_bytes: int = int(os.getenv("LEAD_FACTORY_MAX_RESPONSE_BYTES", str(2 * 1024 * 1024)))
+    max_records_per_run: int = int(os.getenv("LEAD_FACTORY_MAX_RECORDS_PER_RUN", "5000"))
     repair_backoff_seconds: int = int(os.getenv("LEAD_FACTORY_REPAIR_BACKOFF_SECONDS", "5"))
 
-    # Production default: keep widening and draining the source universe until the
-    # exhaustion controller proves the frontier and all backlogs are quiet.
-    autonomy_mode: str = os.getenv("LEAD_FACTORY_AUTONOMY_MODE", "UNTIL_EXHAUSTED")
+    # Autonomous production is fail-closed. The target remains business metadata;
+    # it does not authorize paid compute or an infinite daily loop by itself.
+    autonomy_mode: str = os.getenv("LEAD_FACTORY_AUTONOMY_MODE", "PAUSED")
     autonomy_target_new_companies: int = int(os.getenv("LEAD_FACTORY_TARGET_NEW_COMPANIES", "1500"))
     autonomy_start_promoted: int = int(os.getenv("LEAD_FACTORY_AUTONOMY_START_PROMOTED", "0"))
-    autonomy_stop_after_zero_runs: int = int(os.getenv("LEAD_FACTORY_STOP_AFTER_ZERO_PROMOTION_RUNS", "3"))
+    autonomy_stop_after_zero_runs: int = int(os.getenv("LEAD_FACTORY_STOP_AFTER_ZERO_PROMOTION_RUNS", "1"))
     autonomy_notify_email: str = os.getenv("LEAD_FACTORY_AUTONOMY_NOTIFY_EMAIL", "admin@a1-road.com")
 
-    enable_browser_probe: bool = os.getenv("LEAD_FACTORY_ENABLE_BROWSER_PROBE", "TRUE").upper() == "TRUE"
+    enable_browser_probe: bool = os.getenv("LEAD_FACTORY_ENABLE_BROWSER_PROBE", "FALSE").upper() == "TRUE"
     # External execution is explicitly scoped. The default remains fail-closed.
     allow_external_write: bool = os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE").upper() == "TRUE"
     allow_delete: bool = os.getenv("LEAD_FACTORY_ALLOW_DELETE", "FALSE").upper() == "TRUE"
