@@ -1,5 +1,7 @@
 name: EMERGENCY STOP Google Cloud automation
 
+# A1 repair emergency-stop trigger: leave outbound disabled until human approval.
+
 on:
   push:
     branches: [main]
