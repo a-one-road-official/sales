@@ -1,6 +1,7 @@
 from outreach_execution import (
     OutboundEmailExecutor,
     is_sacrificial_lane,
+    outbound_lane_send_enabled,
     semantic_email_preflight,
 )
 
@@ -98,3 +99,21 @@ def test_shared_executor_blocks_protected_ssot_without_approval():
 def test_email_url_is_allowed_but_identity_corruption_is_critical():
     cfg = {"OUTREACH_SACRIFICE_LANES": "EC"}
     assert semantic_email_preflight(_row(), cfg)["ok"] is True
+
+
+def test_ec_sacrifice_gate_opens_only_for_the_isolated_authorized_lane():
+    cfg = {
+        "LEAD_FACTORY_LIST_ONLY_LOCK": "FALSE",
+        "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE": "TRUE",
+        "LEAD_FACTORY_SEND_MODE": "ENABLED",
+        "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL": "TRUE",
+        "LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME": "TRUE",
+        "OUTREACH_ALLOWED_LANES": "EC_SACRIFICE",
+        "OUTREACH_SACRIFICE_SEND_ENABLED": "TRUE",
+        "OUTREACH_SACRIFICE_TARGET_COMPANIES": "Algolia|Bluecore",
+    }
+    assert outbound_lane_send_enabled("EC_SACRIFICE", cfg) is True
+    assert outbound_lane_send_enabled("BPO", cfg) is False
+    assert outbound_lane_send_enabled("SSOT", cfg) is False
+    cfg["LEAD_FACTORY_LIST_ONLY_LOCK"] = "TRUE"
+    assert outbound_lane_send_enabled("EC_SACRIFICE", cfg) is False
