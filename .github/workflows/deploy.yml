@@ -75,14 +75,6 @@ jobs:
             cloudtasks.googleapis.com \
             --project="$PROJECT"
 
-      - name: Grant Gemini runtime permission
-        run: |
-          gcloud projects add-iam-policy-binding "$PROJECT" \
-            --member="serviceAccount:$RUNTIME_SA" \
-            --role="roles/aiplatform.user" \
-            --condition=None >/dev/null 2>&1 || \
-            echo "Gemini IAM grant unavailable to deploy identity; remediation remains visible in runtime health/logs."
-
       - name: Grant runtime queue permission
         run: |
           set -euo pipefail
@@ -267,7 +259,7 @@ jobs:
             -H "X-Aone-Internal-Token: ${INTERNAL_TOKEN}" \
             -o /tmp/deep-health.json \
             "${SERVICE_URL}/healthz/deep"
-          python -c 'import json; d=json.load(open("/tmp/deep-health.json")); assert d.get("ok") is True, d; assert d.get("gemini_vertex_ready") is True, d; print(json.dumps(d, indent=2, ensure_ascii=False))'
+          python -c 'import json; d=json.load(open("/tmp/deep-health.json")); assert d.get("ok") is True, d; assert d.get("vertex_allowed") is False, d; assert d.get("gemini_vertex_ready") is False, d; print(json.dumps(d, indent=2, ensure_ascii=False))'
 
       - name: Register autonomous production goal
         continue-on-error: true
