@@ -702,6 +702,9 @@ def _sacrifice_limit(payload: dict | None) -> int:
 
 
 _OUTBOUND_RUNTIME_KEYS = (
+    # Keep the budget circuit visible to every outbound preflight. Sacrifice
+    # runs use it to select the non-LLM HTML/browser path.
+    "LEAD_FACTORY_VERTEX_ALLOWED",
     "LEAD_FACTORY_ALLOW_EXTERNAL_WRITE",
     "LEAD_FACTORY_SEND_MODE",
     "LEAD_FACTORY_EXPLICIT_SEND_APPROVAL",
