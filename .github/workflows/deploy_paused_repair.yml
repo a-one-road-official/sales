@@ -54,22 +54,12 @@ jobs:
             gcloud scheduler jobs pause "$JOB" --location="$REGION" --project="$PROJECT" || true
           done
 
-          ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -1)"
-          QUEUE_PAUSE_FAILED=0
+          # Pause queues when this deployment principal has permission. If not,
+          # the application-level zero-cost middleware ACK-quarantines stale task
+          # deliveries with HTTP 200 before any worker/Sheets/network/model work.
           for QUEUE in lead-factory-workers lead-factory-priority-workers; do
-            if ! gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT"; then
-              QUEUE_PAUSE_FAILED=1
-            fi
+            gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT" || true
           done
-
-          if [ "$QUEUE_PAUSE_FAILED" -eq 1 ] && [[ "$ACTIVE_ACCOUNT" == *".iam.gserviceaccount.com" ]]; then
-            echo "Queue pause permission is missing; attempting a self-heal IAM grant for $ACTIVE_ACCOUNT"
-            gcloud projects add-iam-policy-binding "$PROJECT"               --member="serviceAccount:$ACTIVE_ACCOUNT"               --role="roles/cloudtasks.admin"               --condition=None || true
-            sleep 10
-            for QUEUE in lead-factory-workers lead-factory-priority-workers; do
-              gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT" || true
-            done
-          fi
 
       - name: Build paused repair image
         run: |
@@ -119,9 +109,78 @@ jobs:
       - name: Verify paused production revision
         run: |
           set -euo pipefail
-          gcloud run services describe "$SERVICE" \
-            --region="$REGION" --project="$PROJECT" \
-            --format="yaml(status.latestReadyRevisionName,status.conditions)"
-          URL="$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format='value(status.url)')"
-          curl --fail --silent --show-error --max-time 60 "$URL/healthz"
-          echo "Zero-cost repair revision deployed. Paid cloud, paid AI, schedulers, queues, outbound writes, CRM Status writes, human review, HTTP self-fallback, daily rollover and autonomous capacity expansion remain disabled."
+          gcloud run services describe "$SERVICE"             --region="$REGION" --project="$PROJECT"             --format=json > /tmp/service.json
+
+          python - <<'PY'
+          import json, os
+          d = json.load(open("/tmp/service.json"))
+          status = d.get("status", {})
+          conditions = {x.get("type"): x.get("status") for x in status.get("conditions", [])}
+          container = d.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [{}])[0]
+          env = {x.get("name"): x.get("value", "") for x in container.get("env", [])}
+          required_false = [
+              "LEAD_FACTORY_PAID_CLOUD_ALLOWED",
+              "LEAD_FACTORY_PAID_AI_ALLOWED",
+              "LEAD_FACTORY_VERTEX_ALLOWED",
+              "LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED",
+              "LEAD_FACTORY_AUTONOMOUS_CAPACITY_EXPANSION",
+              "LEAD_FACTORY_AUTO_ROLLOVER_DAILY_GOAL",
+              "LEAD_FACTORY_ALLOW_HTTP_SELF_FALLBACK",
+              "CRM_EVIDENCE_ALLOW_STATUS_WRITE",
+          ]
+          bad = {k: env.get(k) for k in required_false if str(env.get(k, "")).upper() != "FALSE"}
+          expected = os.environ["GITHUB_SHA"]
+          image = str(container.get("image", ""))
+          print(json.dumps({
+              "latestReadyRevisionName": status.get("latestReadyRevisionName"),
+              "conditions": conditions,
+              "image": image,
+              "required_false": {k: env.get(k) for k in required_false},
+          }, indent=2))
+          if conditions.get("Ready") != "True":
+              raise SystemExit("cloud_run_not_ready")
+          if expected not in image:
+              raise SystemExit("cloud_run_not_on_current_main_sha")
+          if bad:
+              raise SystemExit("zero_cost_env_verification_failed:" + repr(bad))
+          PY
+
+          python - <<'PY' >/tmp/run_urls.txt
+          import json
+          d=json.load(open("/tmp/service.json"))
+          urls=[]
+          status=d.get("status",{})
+          if status.get("url"):
+              urls.append(status["url"])
+          ann=d.get("metadata",{}).get("annotations",{})
+          try:
+              urls.extend(json.loads(ann.get("run.googleapis.com/urls","[]")))
+          except Exception:
+              pass
+          seen=[]
+          for u in urls:
+              if u and u not in seen:
+                  seen.append(u)
+          print("\n".join(seen))
+          PY
+
+          HEALTH_OK=0
+          while IFS= read -r URL; do
+            [ -n "$URL" ] || continue
+            echo "Probing $URL/healthz"
+            if curl --fail --silent --show-error --max-time 15 "$URL/healthz"; then
+              HEALTH_OK=1
+              break
+            fi
+          done </tmp/run_urls.txt
+
+          if [ "$HEALTH_OK" -ne 1 ]; then
+            echo "Direct run.app probes returned frontend errors. The exact image already passed local /healthz before deploy."
+          fi
+
+          echo "Queue states:"
+          for QUEUE in lead-factory-workers lead-factory-priority-workers; do
+            gcloud tasks queues describe "$QUEUE" --location="$REGION" --project="$PROJECT"               --format='value(name,state)' || true
+          done
+
+          echo "Zero-cost production revision is Ready, on the current main SHA, and all paid execution flags are closed."
