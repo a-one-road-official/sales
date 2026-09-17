@@ -46,7 +46,9 @@ def normalize_event(row: dict) -> dict:
     timestamp = _text(row.get("executed_at") or row.get("timestamp") or row.get("Timestamp"))
     if not event_id:
         # Exact legacy record fingerprint; it is NOT proof of actual delivery.
-        event_id = "legacy:" + hashlib.sha256(json.dumps(row, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
+        # Physical row position changes on sorting/copying and is not event identity.
+        payload = {key: value for key, value in row.items() if key != "row_number"}
+        event_id = "legacy:" + hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
     return {"event_id": event_id, "company_id": company, "kind": kind,
             "occurred_at": timestamp, "message_id": message_id,
             "campaign_id": _text(row.get("campaign_id")), "source_stage": stage}

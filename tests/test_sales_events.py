@@ -56,3 +56,15 @@ def test_only_human_reply_advances_reply_status():
 
 def test_other_company_reply_cannot_advance_this_company():
     assert project_sales_status("DM済", [event(company_id="other", kind="HUMAN_REPLY")], company_id="acme") == "DM済"
+def test_legacy_duplicate_identity_ignores_physical_row_number():
+    from sales_events import normalize_event, summarize_events
+    original = {"company_name": "Example", "website": "https://example.com", "status": "FAILED",
+                "timestamp": "2026-09-17T10:00:00Z", "error_message": "blocked", "row_number": 2}
+    copied = {**original, "row_number": 500}
+    events = [normalize_event(original), normalize_event(copied)]
+    assert events[0]["event_id"] == events[1]["event_id"]
+    summary = summarize_events(events)
+    assert summary["unique_events"] == 1
+    assert summary["duplicate_records_excluded"] == 1
+    later = {**copied, "timestamp": "2026-09-17T11:00:00Z"}
+    assert normalize_event(later)["event_id"] != events[0]["event_id"]
