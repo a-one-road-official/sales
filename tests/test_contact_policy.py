@@ -23,6 +23,18 @@ class ContactPolicyTests(unittest.TestCase):
     def test_explicit_permit(self):
         self.assertEqual(self.check(), '')
 
+    def test_named_pilot_can_run_before_quality_certification(self):
+        self.policy['campaigns']['c1'] = {'enabled': True, 'mode': 'PILOT'}
+        self.assertEqual(self.check(), '')
+        self.policy['accounts']['company:1']['mode'] = 'PERSONAL'
+        self.assertTrue(self.check())
+
+    def test_pilot_cannot_expand_beyond_ten_accounts_without_quality(self):
+        self.policy['campaigns']['c1'] = {'enabled': True, 'mode': 'PILOT'}
+        for index in range(2, 12):
+            self.policy['accounts'][f'company:{index}'] = copy.deepcopy(self.policy['accounts']['company:1'])
+        self.assertTrue(self.check())
+
     def test_every_protected_or_missing_mode_blocks(self):
         for mode in ('PERSONAL', 'HOLD', 'DO_NOT_CONTACT', '', None):
             self.policy['accounts']['company:1']['mode'] = mode
