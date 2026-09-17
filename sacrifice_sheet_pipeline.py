@@ -17,6 +17,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 SACRIFICE_ID = "1QBZKoN82O-SrFUnWaHBQtvflcdMT1gDp-QMPtZvLsEk"
+SACRIFICE_TITLE = "マスター営業リスト（生贄）"
+# Kept only as a fail-closed identity guard for the archived workbook.
+LEGACY_SACRIFICE_ID = "1--qMqpAr9c_yJXAfgZD5kBxDZcw-F5y4Em6h0m0TdF0"
 SSOT_ID = "1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo"
 LEADS_TAB = "営業リスト_Vendor"
 LOG_TAB = "outreach_engine_log"
@@ -37,6 +40,8 @@ def host(url):
 def policy(env):
     if env.get("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE").upper() != "FALSE":
         raise ValueError("vertex_forbidden")
+    if env.get("SACRIFICE_SPREADSHEET_ID") == LEGACY_SACRIFICE_ID:
+        raise ValueError("legacy_sacrifice_disconnected")
     if env.get("SACRIFICE_SPREADSHEET_ID") != SACRIFICE_ID:
         raise ValueError("sacrifice_workbook_identity_mismatch")
 
@@ -90,7 +95,7 @@ class SacrificeStore:
         self.spreadsheet_id = SACRIFICE_ID
         meta = svc.spreadsheets().get(spreadsheetId=SACRIFICE_ID,
             fields="spreadsheetId,properties(title),sheets(properties)").execute()
-        if meta.get("spreadsheetId") != SACRIFICE_ID or meta["properties"]["title"].strip() != "sales_leads（生贄）":
+        if meta.get("spreadsheetId") != SACRIFICE_ID or meta["properties"]["title"].strip() != SACRIFICE_TITLE:
             raise ValueError("sacrifice_metadata_mismatch")
         self.tabs = {s["properties"]["title"]: s["properties"] for s in meta["sheets"]}
         for tab in (LEADS_TAB, LOG_TAB, "send_log"):
