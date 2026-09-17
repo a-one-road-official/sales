@@ -11,7 +11,7 @@ def _row(**overrides):
         "draft_id": "d1", "company_name": "Shop Example", "lane": "EC",
         "recipient": "founder@example.com", "recipient_verified": "TRUE",
         "subject": "A specific idea",
-        "body": "Hello. https://calendar.app.google/adKEhXC4UWhQXfJp6",
+        "body": "Hello. https://calendar.app.google/BVFS7uyBH1LfJZ9Z8",
     }
     row.update(overrides)
     return row
