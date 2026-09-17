@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from outreach_execution import prompt_freshness_preflight, semantic_email_preflight
+from workbook_sales import CALENDAR_URL, WORKBOOK_ID, claim_candidate
 from sacrifice_web_research import inspect_official_site
 from sales_leads_sacrifice import (
     _host,
@@ -508,7 +509,7 @@ def _verified_site_draft(candidate: dict, site: dict) -> dict:
     reference = reference[:120]
     if lane == "SALES_GTM":
         proposition = (
-            "A-one road helps international software companies build Japan GTM through "
+            "A-one road helps international technology and business-services companies build Japan GTM through "
             "customer discovery, partner development, and qualified first conversations "
             "with Japanese buyers."
         )
@@ -533,7 +534,8 @@ def _verified_site_draft(candidate: dict, site: dict) -> dict:
         "I’d like to explore whether a focused Japan conversation could be useful for "
         "your current priorities.\n\n"
         "Would you be open to a 20–30 minute conversation? "
-        "If so, you can choose a time here: https://calendar.app.google/BVFS7uyBH1LfJZ9Z8\n\n"
+        f"If so, you can choose a time here: {CALENDAR_URL}\n\n"
+        "If this is not relevant, please let us know and we will not follow up.\n\n"
         "Best,\n"
         "Kazuma Tamura\n"
         "A-one road Co., Ltd.\n"
@@ -593,6 +595,10 @@ def run_ten_sacrifice_batch(
         raise ValueError("unsupported_sacrifice_lane")
     cfg = dict(cfg or {})
     sheets = getattr(executor, "sheets", None)
+    if execute_external and getattr(sheets, "spreadsheet_id", "") != WORKBOOK_ID:
+        raise ValueError("automatic_outreach_requires_new_workbook")
+    if _cfg_truthy(cfg, "LEAD_FACTORY_VERTEX_ALLOWED"):
+        raise ValueError("vertex_forbidden")
     batch_token = str(batch_id or uuid.uuid4().hex).strip()
     run_id = f"sales-leads-{normalized_lane.lower()}-{batch_token}"
     normalized_slot = None if batch_slot is None else int(batch_slot)
@@ -685,9 +691,12 @@ def run_ten_sacrifice_batch(
         }
         context = make_research_context(candidate)
         try:
+            if execute_external:
+                authorization = claim_candidate(sheets, candidate, normalized_lane, run_id)
+                executor.workbook_authorization = authorization
             evidence = candidate.get("candidate_website_evidence", {})
             source_site_url = str(candidate.get("candidate_website") or "").strip()
-            canonical_site_url = CANONICAL_WEBSITE_HINTS.get(str(candidate.get("company_name") or "").strip(), "")
+            canonical_site_url = "" if candidate.get("company_id") else CANONICAL_WEBSITE_HINTS.get(str(candidate.get("company_name") or "").strip(), "")
             site_url = canonical_site_url or source_site_url
             if canonical_site_url:
                 result["domain_resolution"] = {
@@ -697,9 +706,7 @@ def run_ten_sacrifice_batch(
                 }
             elif evidence.get("status") == "MISMATCH_REJECTED":
                 vertex_budget_closed = not _cfg_truthy(cfg, "LEAD_FACTORY_VERTEX_ALLOWED")
-                if fast_sales_gtm_mode or (
-                    normalized_lane == "EC_SACRIFICE" and vertex_budget_closed
-                ):
+                if fast_sales_gtm_mode or vertex_budget_closed:
                     # A sacrifice run must never spend Vertex budget to repair
                     # an untrusted source URL. The browser/HTML verifier may
                     # still inspect an explicit first-party URL, but a
@@ -897,7 +904,7 @@ def run_ten_sacrifice_batch(
                         body=draft_body,
                         message_hash=result["message_hash"],
                     )
-                    form_key = f"form:{run_id}:{candidate.get('source_row', '')}"
+                    form_key = f"first-contact:{candidate.get('company_id') or candidate.get('source_row', '')}"
                     form_result = {
                         "status": "FORM_NOT_ATTEMPTED",
                         "reason": "external_execution_disabled",
@@ -918,7 +925,7 @@ def run_ten_sacrifice_batch(
                     else:
                         if execute_external:
                             from form_execution import PublicContactFormExecutor
-                            form_result = PublicContactFormExecutor(sheets=sheets).execute(
+                            form_result = PublicContactFormExecutor(sheets=sheets, authorization=authorization).execute(
                                 form_url=form_url,
                                 website=site_url,
                                 message=draft_body,
@@ -952,8 +959,7 @@ def run_ten_sacrifice_batch(
                         "contact_confidence": research.get("confidence", "HIGH"),
                     }
                     deterministic_draft = (
-                        normalized_lane == "EC_SACRIFICE"
-                        and (
+                        (
                             _cfg_truthy(cfg, "OUTREACH_DETERMINISTIC_DRAFT")
                             or not _cfg_truthy(cfg, "LEAD_FACTORY_VERTEX_ALLOWED")
                         )
@@ -1072,7 +1078,7 @@ def run_ten_sacrifice_batch(
         )
         result["critical_errors"] = sorted(critical_errors)
         results.append(result)
-        if execute_external and result.get("status") != "SENT":
+        if execute_external:
             _record_attempt(sheets, run_id=run_id, candidate=candidate, result=result)
 
     # Keep the batch ledger truthful: operational lanes consume every row
@@ -1119,13 +1125,23 @@ def run_ten_sacrifice_batch(
     ]
     success_count = len(email_message_ids) + len(form_confirmations)
     attempted = len(results)
+    unconfirmed_count = sum(bool(r.get("status") in {"FORM_UNCONFIRMED", "SENT_UNVERIFIED"} or (
+        (r.get("form_execution") or {}).get("submission_attempted") and r.get("status") != "FORM_SENT"
+    )) for r in results)
     return {
         "run_id": run_id,
         "batch_id": batch_token,
         "status": "EXHAUSTED" if attempted == 0 else "COMPLETE",
         "source": "sales_leads",
+        "routing": getattr(sheets, "workbook_routing_summary", {}),
+        "production_ssot_access": "READ_ONLY" if sheets is not None else "NONE",
         "lane": normalized_lane,
         "attempted": attempted,
+        "evaluated_candidate_count": attempted,
+        "unconfirmed_count": unconfirmed_count,
+        "external_submit_attempts": sum(bool((r.get("form_execution") or {}).get("submission_attempted") or (r.get("execution") or {}).get("send_attempted")) for r in results),
+        "confirmed_booking_count": None,
+        "qualified_meeting_count": None,
         "source_pool_count": len(pool),
         "source_consumed_count": source_consumed_count,
         "source_candidates_count": len(candidates),

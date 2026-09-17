@@ -26,6 +26,22 @@ SUCCESS_RE = re.compile(
 CORE_FIELDS = ("name", "company", "email", "phone", "country", "address", "role", "message")
 
 
+def contact_policy_blocked(text: str) -> bool:
+    return bool(re.search(
+        r"(?:no|do not send|we do not accept)\s+(?:unsolicited\s+)?(?:sales|marketing|solicitation)\s+(?:emails?|messages?|inquiries|enquiries)"
+        r"|営業(?:目的|メール|のご連絡|の問い合わせ).{0,25}(?:禁止|お断り|ご遠慮)"
+        r"|(?:採用|サポート|報道|取材)専用", text, re.I,
+    ))
+
+
+def final_submit_once(control) -> bool:
+    try:
+        control.click(timeout=15000)
+        return True
+    except Exception:
+        return False
+
+
 def _host(url: str) -> str:
     return (urlparse(str(url or "")).hostname or "").lower().removeprefix("www.").rstrip(".")
 
@@ -187,9 +203,9 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
     if key == "role":
         return "Founder & CEO"
     if key == "industry":
-        return "Retail"
+        return "Business consulting"
     if key == "reason":
-        return os.getenv("OUTREACH_FORM_REASON") or "A product expert"
+        return os.getenv("OUTREACH_FORM_REASON") or "Business partnership inquiry"
     if key == "discovery_source":
         return "Found you online"
     if key == "category":
@@ -231,8 +247,8 @@ def _select_option(el, key: str) -> tuple[bool, str]:
     wanted = {
         "country": ("japan", "日本", "jp"),
         "state": ("kanagawa", "神奈川"),
-        "industry": ("retail", "consumer"),
-        "reason": ("product expert", "sales"),
+        "industry": ("consulting", "professional services", "other"),
+        "reason": ("partnership", "partner inquiry", "business development", "other"),
         "discovery_source": ("found you online", "online marketing"),
         "category": ("other",),
         "platform": ("other",),
@@ -319,7 +335,7 @@ def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
     """Select a visible option from a HubSpot-style custom dropdown."""
     wanted = {
         "country": ("japan", "日本"),
-        "reason": ("product expert", "sales"),
+        "reason": ("partnership", "partner inquiry", "business development", "other"),
         "discovery_source": ("found you online", "online marketing"),
         "category": ("other",),
         "platform": ("other",),
@@ -772,8 +788,9 @@ def _execution_log_sheet() -> str:
 
 
 class PublicContactFormExecutor:
-    def __init__(self, sheets=None):
+    def __init__(self, sheets=None, authorization=None):
         self.sheets = sheets
+        self.authorization = authorization
 
     def _existing(
         self,
@@ -859,6 +876,9 @@ class PublicContactFormExecutor:
             payload.update(extra)
             return payload
 
+        from workbook_sales import authorized
+        if not authorized(self.authorization, self.sheets, company_name, website):
+            return result_payload("BLOCKED", reason="workbook_authorization_required")
         if not form_url or not _same_host_or_subdomain(form_url, website):
             return result_payload("FORM_FAILED", reason="FORM_HOST_UNVERIFIED")
         duplicate = self._existing(
@@ -1251,15 +1271,13 @@ class PublicContactFormExecutor:
                         "FORM_FAILED",
                         reason="MULTI_STEP_NOT_COMPLETED",
                     )
+                if contact_policy_blocked(page.locator("body").inner_text()):
+                    return result_payload("BLOCKED", reason="CONTACT_POLICY_RESTRICTS_OUTREACH")
                 submission_attempted = True
-                try:
-                    submit.click(timeout=15000)
-                except Exception as first_click_error:
-                    _dismiss_cookie_banner([page] + list(page.frames[1:]))
-                    try:
-                        submit.click(timeout=15000)
-                    except Exception:
-                        raise first_click_error
+                if not final_submit_once(submit):
+                    # The request may already have reached the recipient. Never
+                    # click a final submit twice after an ambiguous timeout.
+                    return result_payload("FORM_UNCONFIRMED", reason="SUBMIT_CLICK_OUTCOME_UNKNOWN")
                 try:
                     page.wait_for_load_state("domcontentloaded", timeout=15000)
                 except Exception:
@@ -1316,7 +1334,7 @@ class PublicContactFormExecutor:
                     "draft_id": draft_id,
                     "source_row": source_row,
                     "company_name": company_name,
-                    "lane": "EC_SACRIFICE",
+                    "lane": self.authorization.lane,
                     "channel": "FORM",
                     "status": "FORM_SENT",
                     "semantic_success": "FORM_CONFIRMED",

@@ -10,7 +10,7 @@ on:
         options:
           - preflight
           - execute
-        default: execute
+        default: preflight
   push:
     branches: [main]
     paths:
@@ -27,7 +27,7 @@ concurrency:
 jobs:
   sacrifice-bulk:
     if: >-
-      ${{ (github.event_name == 'workflow_dispatch' && inputs.mode == 'execute')
+      ${{ (github.event_name == 'workflow_dispatch')
       || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'RUN_SACRIFICE_BULK')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -38,7 +38,6 @@ jobs:
       LEAD_FACTORY_SPREADSHEET_ID: 1QBZKoN82O-SrFUnWaHBQtvflcdMT1gDp-QMPtZvLsEk
       LEAD_FACTORY_CONFIG_SHEET: Settings
       LEAD_FACTORY_HUMAN_SSOT_SHEET: 営業リスト_Vendor
-      LEAD_FACTORY_SACRIFICE_SOURCE_PATH: data/sales_leads_ec_sacrifice.json
       LEAD_FACTORY_VERTEX_ALLOWED: FALSE
       LEAD_FACTORY_ALLOW_EXTERNAL_WRITE: TRUE
       LEAD_FACTORY_SEND_MODE: ENABLED
@@ -49,12 +48,12 @@ jobs:
       LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       OUTREACH_EXECUTION_LOG_SHEET: outreach_engine_log
       OUTREACH_EXECUTION_LOG_MAX_ROW: "5000"
-      OUTREACH_ALLOWED_LANES: "EC_SACRIFICE,BPO"
-      OUTREACH_SACRIFICE_LANES: "EC_SACRIFICE,BPO"
+      OUTREACH_ALLOWED_LANES: "EC_SACRIFICE,BPO,SALES_GTM"
+      OUTREACH_SACRIFICE_LANES: "EC_SACRIFICE,BPO,SALES_GTM"
       OUTREACH_SACRIFICE_TARGET_COMPANIES: "*"
       OUTREACH_SACRIFICE_SEND_ENABLED: TRUE
       OUTREACH_BPO_SEND_ENABLED: TRUE
-      OUTREACH_SALES_GTM_SEND_ENABLED: FALSE
+      OUTREACH_SALES_GTM_SEND_ENABLED: TRUE
       OUTREACH_FACTORY_SEND_ENABLED: FALSE
       OUTREACH_SSOT_SEND_ENABLED: FALSE
       OUTREACH_SITE_FETCH_MODE: PLAYWRIGHT
@@ -115,9 +114,10 @@ jobs:
       - name: Preflight exact sacrifice workbook
         run: |
           set -euo pipefail
-          python sacrifice_sheet_pipeline.py --preflight
+          python workbook_sales.py --check --output workbook-preflight.json
 
       - name: Start isolated local sacrifice runtime
+        if: ${{ inputs.mode == 'execute' || github.event_name == 'push' }}
         run: |
           set -euo pipefail
           token="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
@@ -136,6 +136,7 @@ jobs:
           exit 1
 
       - name: Execute all eligible sacrifice lanes in bounded sequential batches
+        if: ${{ inputs.mode == 'execute' || github.event_name == 'push' }}
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -147,7 +148,7 @@ jobs:
 
           token = os.environ["LEAD_FACTORY_INTERNAL_TOKEN"]
           base = "http://127.0.0.1:8080"
-          lanes = ["EC_SACRIFICE", "BPO"]
+          lanes = ["EC_SACRIFICE", "BPO", "SALES_GTM"]
           max_batches = 30
           summaries = []
 
@@ -227,6 +228,7 @@ jobs:
                       "vertex_allowed": result.get("vertex_allowed"),
                       "production_ssot_touched": result.get("production_ssot_touched"),
                       "history_error": result.get("history_error", ""),
+                      "routing": result.get("routing", {}),
                   }
                   summaries.append(compact)
                   print(json.dumps(compact, ensure_ascii=False), flush=True)
@@ -268,5 +270,6 @@ jobs:
           name: sacrifice-bulk-${{ github.run_id }}
           path: |
             bulk-summary.json
+            workbook-preflight.json
             runtime.log
           if-no-files-found: ignore

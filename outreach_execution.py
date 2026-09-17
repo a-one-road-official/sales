@@ -555,6 +555,12 @@ class OutboundEmailExecutor:
                 "recipient": str(draft.get("recipient") or "").strip(),
             }
 
+        from workbook_sales import authorized
+        authorization = getattr(self, "workbook_authorization", None)
+        if not authorized(authorization, self.sheets, draft.get("company_name", ""), draft.get("verified_website") or draft.get("website", "")):
+            return {"status": "BLOCKED", "reason": "workbook_authorization_required", "lane": lane}
+        if authorization.lane != lane:
+            return {"status": "BLOCKED", "reason": "authorization_lane_mismatch", "lane": lane}
         preflight = semantic_email_preflight(draft, cfg)
         if not preflight["ok"]:
             return {"status": "BLOCKED_PREFLIGHT", "recipient": str(draft.get("recipient") or "").strip(), **preflight}
@@ -563,7 +569,7 @@ class OutboundEmailExecutor:
         if not prompt_check.get("ok"):
             return {"status": prompt_check.get("status", "STALE_PROMPT"), "prompt_preflight": prompt_check}
 
-        key = f"outbound:{lane.lower()}:{draft.get('draft_id','')}:{preflight['message_hash']}"
+        key = f"first-contact:{authorization.company_id}"
         source_row = str(draft.get("source_row") or "").strip()
         if (
             self.sheets is not None
@@ -686,32 +692,12 @@ class OutboundEmailExecutor:
                 body={"raw": raw},
             ).execute()
         except Exception as exc:
-            if "Precondition check failed" not in str(exc):
-                raise
-            time.sleep(1)
-            recovered_message_id = _find_existing_gmail_message_with_retry(
-                service,
-                sender=sender,
-                recipient=str(draft["recipient"]).strip(),
-                idempotency_key=key,
-            )
-            if recovered_message_id:
-                return {
-                    "status": "DUPLICATE_BLOCKED",
-                    "idempotency_key": key,
-                    "lane": lane,
-                    "recipient": str(draft.get("recipient") or "").strip(),
-                    "existing_message_id": recovered_message_id,
-                    "reason": "send_precondition_recovered",
-                }
-            # The notifier path already uses userId="me" with the same
-            # delegated credentials. Reuse that proven API form for this
-            # retry, still under the exact same idempotency key.
-            send_user_id = "me"
-            result = service.users().messages().send(
-                userId=send_user_id,
-                body={"raw": raw},
-            ).execute()
+            # Gmail search can lag acceptance. A failed search cannot establish
+            # that the first send failed, so never issue a second send here.
+            self._sent_keys.add(key)
+            return {"status": "SENT_UNVERIFIED", "idempotency_key": key,
+                    "lane": lane, "send_attempted": True,
+                    "reason": "SEND_OUTCOME_UNKNOWN:" + type(exc).__name__}
         now = datetime.now(timezone.utc).isoformat()
         self._sent_keys.add(key)
         message_id = str(result.get("id") or "").strip()
@@ -749,6 +735,7 @@ class OutboundEmailExecutor:
                         time.sleep(2 * (attempt + 1))
         response = {
             "status": "SENT",
+            "send_attempted": True,
             "message_id": message_id,
             "thread_id": thread_id,
             "idempotency_key": key,

@@ -203,10 +203,9 @@ class SacrificeStore:
         number, row = found
         if row[10] != ORIGIN or row[5] != seed["website"] or row[7] != "未接触":
             raise RuntimeError("source_row_changed_preserve_human_status")
-        self.svc.spreadsheets().values().update(spreadsheetId=SACRIFICE_ID,
-            range=f"'{LEADS_TAB}'!H{number}", valueInputOption="RAW", body={"values":[[status]]}).execute()
-        if self.values(LEADS_TAB, f"H{number}:H{number}") != [[status]]:
-            raise RuntimeError("status_readback_failed")
+        # Manual Status is never part of an automatic write request. The log
+        # carries the operational result without racing a human cell edit.
+        return {"applied": False, "suggested_status": status, "reason": "human_owned_status"}
 
 
 def process(seed, store, research, submit, *, execute=False, prompt_hash=""):
