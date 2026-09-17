@@ -533,7 +533,7 @@ def _verified_site_draft(candidate: dict, site: dict) -> dict:
         "I’d like to explore whether a focused Japan conversation could be useful for "
         "your current priorities.\n\n"
         "Would you be open to a 20–30 minute conversation? "
-        "If so, you can choose a time here: https://calendar.app.google/adKEhXC4UWhQXfJp6\n\n"
+        "If so, you can choose a time here: https://calendar.app.google/BVFS7uyBH1LfJZ9Z8\n\n"
         "Best,\n"
         "Kazuma Tamura\n"
         "A-one road Co., Ltd.\n"
