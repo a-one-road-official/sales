@@ -32,3 +32,4 @@ jobs:
               "image": d.get("spec",{}).get("template",{}).get("spec",{}).get("containers",[{}])[0].get("image"),
           }, indent=2))
           PY
+          gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="aone-lead-factory" AND resource.labels.revision_name="aone-lead-factory-00482-qf2"' --project="$PROJECT" --freshness=20m --limit=20 --format='table(timestamp,severity,httpRequest.status,textPayload)'
