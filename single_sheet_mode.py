@@ -17,6 +17,9 @@ PERSISTENT_CONFIG_SHEET = "SalesOS_Goal_Config"
 def install(cls):
     native_read = cls.read
     native_read_once = getattr(cls, "read_once", None)
+    native_append_dict = getattr(cls, "append_dict", None)
+    native_append = getattr(cls, "append", None)
+    native_append_rows = getattr(cls, "append_rows", None)
     native_append_action_event = getattr(cls, "append_action_event", None)
     native_operational_event_summary = getattr(cls, "operational_event_summary", None)
 
@@ -564,6 +567,13 @@ def install(cls):
         return native_append_action_event(self, dict(row or {}))
 
     def append_dict(self, sheet, row):
+        # Technical outbound audit ledgers are explicit exceptions to the
+        # single-human-SSOT contract. Preserve them for idempotency, failure
+        # classification, and post-run reconciliation.
+        if sheet in {"outreach_engine_log", "LeadFactory_ExecutionBatches"}:
+            if not callable(native_append_dict):
+                raise RuntimeError("technical_ledger_writer_missing")
+            return native_append_dict(self, sheet, dict(row or {}))
         if sheet == "LeadFactory_ExecutionLog":
             if not hasattr(self, "record_sales_history_event"):
                 raise RuntimeError("sales_history_writer_missing")
@@ -626,11 +636,19 @@ def install(cls):
     def append(self, sheet, values):
         if sheet == SSOT:
             raise RuntimeError("direct_human_ssot_append_blocked:use_single_sheet_pipeline")
+        if sheet in {"outreach_engine_log", "LeadFactory_ExecutionBatches"}:
+            if not callable(native_append):
+                raise RuntimeError("technical_ledger_writer_missing")
+            return native_append(self, sheet, values)
         print(f"single-sheet-ssot:dropped append:{sheet}", flush=True)
 
     def append_rows(self, sheet, values_rows):
         if sheet == SSOT:
             raise RuntimeError("direct_human_ssot_append_blocked:use_single_sheet_pipeline")
+        if sheet in {"outreach_engine_log", "LeadFactory_ExecutionBatches"}:
+            if not callable(native_append_rows):
+                raise RuntimeError("technical_ledger_writer_missing")
+            return native_append_rows(self, sheet, values_rows)
         print(f"single-sheet-ssot:dropped append_rows:{sheet}", flush=True)
 
     def meta_log(self, row):
