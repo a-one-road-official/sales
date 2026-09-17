@@ -1,0 +1,4 @@
+beautifulsoup4>=4.12,<5
+requests[socks]>=2.32,<3
+tldextract>=5,<6
+google-auth>=2,<3

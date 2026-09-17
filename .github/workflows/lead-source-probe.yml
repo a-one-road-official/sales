@@ -1,0 +1,41 @@
+name: Lead source connectivity and schema probe
+on:
+  push:
+    branches: [codex/non-ai-lead-generator]
+    paths: [.github/workflows/lead-source-probe.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests beautifulsoup4
+      - name: Inspect public directory structures
+        run: |
+          python -u - <<'PY'
+          import requests,json,concurrent.futures
+          from bs4 import BeautifulSoup
+          urls=[
+            'https://automationtaipei.chanchao.com.tw/en/VisitorExhibitor',
+            'https://automationtaipei.chanchao.com.tw/en/VisitorExhibitor/Detail?regNo=213874',
+            'https://www.logimat-messe.de/en',
+            'https://koreamat.org/',
+            'https://www.logimat.in/exhibitor-profile',
+            'https://www.imhax.in/exhibitor-list',
+            'https://finder.startupnationcentral.org/startups/search',
+          ]
+          def inspect(u):
+            try:
+              r=requests.get(u,timeout=30); s=BeautifulSoup(r.text,'html.parser')
+              links=[(a.get_text(' ',strip=True)[:90],a['href']) for a in s.select('a[href]')]
+              scripts=[a.get('src','') for a in s.select('script[src]')]
+              return dict(url=u,status=r.status_code,title=s.title.get_text() if s.title else '',text=s.get_text(' ',strip=True)[:3500],links=links[:130],scripts=scripts[-15:])
+            except Exception as e:return dict(url=u,error=str(e))
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as p:
+            for row in p.map(inspect,urls): print(json.dumps(row,ensure_ascii=False))
+          PY

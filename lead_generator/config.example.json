@@ -1,0 +1,6 @@
+{
+  "run_id": "priority-geo-20260917",
+  "ssot": {"spreadsheet_id": "SET_EXISTING_SSOT_ID", "tab": "営業リスト＿Factory/BPO"},
+  "sacrifice": {"spreadsheet_id": "SET_EXISTING_CURRENT_SACRIFICE_ID", "tab": "営業リスト_Vendor"},
+  "control": {"tab": "Sales Control"}
+}
