@@ -17,19 +17,53 @@ jobs:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      - name: Read service routing and readiness without mutations
+      - name: Inspect routing, IAM and health responses without mutations
         env:
           PROJECT: ${{ secrets.GCP_PROJECT_ID }}
         run: |
-          set -euo pipefail
-          gcloud run services describe aone-lead-factory --region=asia-northeast1 --project="$PROJECT" --format=json > /tmp/service.json
+          set -u
+          SERVICE=aone-lead-factory
+          REGION=asia-northeast1
+          gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format=json > /tmp/service.json
           python - <<'PY'
           import json
-          d = json.load(open("/tmp/service.json"))
+          d=json.load(open("/tmp/service.json"))
           print(json.dumps({
-              "annotations": {k:v for k,v in d.get("metadata",{}).get("annotations",{}).items() if any(x in k for x in ("ingress", "url", "default"))},
+              "annotations": d.get("metadata",{}).get("annotations",{}),
               "status": d.get("status",{}),
               "image": d.get("spec",{}).get("template",{}).get("spec",{}).get("containers",[{}])[0].get("image"),
           }, indent=2))
           PY
-          gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="aone-lead-factory" AND resource.labels.revision_name="aone-lead-factory-00482-qf2"' --project="$PROJECT" --freshness=20m --limit=20 --format='table(timestamp,severity,httpRequest.status,textPayload)'
+
+          echo "IAM policy:"
+          gcloud run services get-iam-policy "$SERVICE" --region="$REGION" --project="$PROJECT" --format=json || true
+
+          python - <<'PY' >/tmp/run_urls.txt
+          import json
+          d=json.load(open("/tmp/service.json"))
+          urls=[]
+          s=d.get("status",{})
+          if s.get("url"): urls.append(s["url"])
+          a=d.get("metadata",{}).get("annotations",{})
+          try: urls.extend(json.loads(a.get("run.googleapis.com/urls","[]")))
+          except Exception: pass
+          seen=[]
+          for u in urls:
+              if u and u not in seen: seen.append(u)
+          print("\n".join(seen))
+          PY
+
+          TOKEN="$(gcloud auth print-identity-token 2>/dev/null || true)"
+          while IFS= read -r URL; do
+            [ -n "$URL" ] || continue
+            echo "=== unauthenticated $URL/healthz ==="
+            curl -sS -D - -o /tmp/body --max-time 15 "$URL/healthz" || true
+            cat /tmp/body 2>/dev/null || true
+            echo
+            if [ -n "$TOKEN" ]; then
+              echo "=== authenticated $URL/healthz ==="
+              curl -sS -D - -o /tmp/body-auth --max-time 15 -H "Authorization: Bearer $TOKEN" "$URL/healthz" || true
+              cat /tmp/body-auth 2>/dev/null || true
+              echo
+            fi
+          done </tmp/run_urls.txt
