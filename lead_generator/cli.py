@@ -35,6 +35,10 @@ def worker(store,config_path):
             completed=set(store.completed())
             target=min(2000,max(1,int(store.get('target','2000'))))
             if len(completed)>=target:
+                verified=mirror.reconcile_completed()
+                if verified < target: raise RuntimeError('final_reconciliation_count_mismatch')
+                store.set('target_verified',now())
+                store.event('TARGET_VERIFIED',{'same_new_companies':verified})
                 store.set('state','TARGET_REACHED');store.set('command','STOP');break
             pending=store.db.execute("SELECT company_key,payload FROM records WHERE decision='PASS' ORDER BY updated_at").fetchall()
             candidates=[r for r in pending if r['company_key'] not in completed and not store.db.execute(
@@ -48,13 +52,7 @@ def worker(store,config_path):
             count=len(store.completed())
             if count>=500 and not store.get('milestone_verified'):
                 # Fresh two-book read, verify every completed record before expansion.
-                from .sync import find
-                snapshots={d:api.rows(d) for d in ('ssot','sacrifice')}
-                for k in store.completed():
-                    record=json.loads(store.db.execute('SELECT payload FROM records WHERE company_key=?',(k,)).fetchone()[0])
-                    for d,rows in snapshots.items():
-                        marked,dup=find(rows,d,record,f'leadgen:{run_id}:{k}')
-                        if not marked or dup: raise RuntimeError('milestone_reconciliation_failed')
+                mirror.reconcile_completed()
                 store.set('milestone_verified',now())
                 store.event('MILESTONE_VERIFIED',{'same_new_companies':count})
             # Rate limit, with STOP checked before the next network write.
