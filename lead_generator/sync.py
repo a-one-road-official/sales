@@ -50,9 +50,16 @@ class Sheets:
                             params={'valueRenderOption':'UNFORMATTED_VALUE'}).get('values',[])
 
     def append(self,dest,row):
-        tab=self.config[dest]['tab'].replace("'","''")
-        return self.request('POST',dest,'/values/'+quote(f"'{tab}'!A1",safe='')+':append',
-            params={'valueInputOption':'RAW','insertDataOption':'INSERT_ROWS'},json={'values':[row]})
+        # appendCells allocates after the last occupied row and reuses blank grid
+        # capacity. INSERT_ROWS unnecessarily expands large existing workbooks.
+        metadata=self.request('GET',dest,'',params={'fields':'sheets.properties(sheetId,title)'})
+        matches=[s['properties']['sheetId'] for s in metadata.get('sheets',[])
+                 if s.get('properties',{}).get('title')==self.config[dest]['tab']]
+        if len(matches)!=1:raise ValueError('destination_tab_missing_or_ambiguous')
+        return self.request('POST',dest,':batchUpdate',json={'requests':[{'appendCells':{
+            'sheetId':matches[0],
+            'rows':[{'values':[{'userEnteredValue':{'stringValue':str(value)}} for value in row]}],
+            'fields':'userEnteredValue'}}]})
 
 
 def layout(dest):
