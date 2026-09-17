@@ -69,7 +69,8 @@ def find(rows,dest,record,marker):
         same_domain=domain(cell(row,col['website']))==domain(record['website'])
         same_name=name_key(cell(row,col['name']))==name_key(record['company_name'])
         if marker in cell(row,col['marker']):
-            if not same_domain: raise AmbiguousWrite('marker_identity_mismatch')
+            if not same_domain or not same_name:
+                raise AmbiguousWrite('marker_identity_mismatch')
             marked.append(i)
         elif same_domain or same_name: duplicates.append(i)
     if len(marked)>1: raise AmbiguousWrite('multiple_marker_rows')
@@ -80,6 +81,7 @@ def make_row(dest,record,result,marker):
     timestamp=now()
     src=marker+' '+record['exhibition_proof']['url']
     evidence=json.dumps({'policy':result['policy_version'],'payment':result['payment_capacity_level'],
+                        'payment_capacity_evidence':record['payment_capacity'],
                         'offer':record['initial_offer'],'japan':record['japan'],
                         'proofs':{k:v for k,v in record.items() if k.endswith('_proof')}},ensure_ascii=False)
     if len(evidence)>45000: raise ValueError('evidence_cell_too_large')
@@ -102,6 +104,27 @@ class Mirror:
     def __init__(self,store,api,run_id):
         if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}',run_id): raise ValueError('invalid run id')
         self.store,self.api,self.run_id=store,api,run_id
+
+    def reconcile_completed(self):
+        """Re-read both destinations; a cached count cannot prove completion."""
+        snapshots={d:self.api.rows(d) for d in ('ssot','sacrifice')}
+        keys=self.store.completed()
+        for k in keys:
+            saved=self.store.db.execute('SELECT payload FROM records WHERE company_key=?',(k,)).fetchone()
+            if not saved: raise AmbiguousWrite('reconciliation_record_missing')
+            record=json.loads(saved[0])
+            marker=f'leadgen:{self.run_id}:{k}'
+            for dest,rows in snapshots.items():
+                try:
+                    marked,duplicates=find(rows,dest,record,marker)
+                except AmbiguousWrite:
+                    self.store.mark(k,dest,'RECONCILIATION_FAILED')
+                    raise
+                if not marked or duplicates:
+                    self.store.mark(k,dest,'RECONCILIATION_FAILED')
+                    raise AmbiguousWrite('reconciliation_identity_or_duplicate_conflict')
+                self.store.mark(k,dest,'VERIFIED_NEW',marked[0])
+        return len(keys)
 
     def sync_one(self,k,record):
         result=qualification(record)
@@ -137,10 +160,11 @@ class Mirror:
                     self.store.set('command','STOP')
                     self.store.set('state','AMBIGUOUS_WRITE_REQUIRES_RECONCILIATION')
                     raise AmbiguousWrite(d) from exc
-            marked,_=find(self.api.rows(d),d,record,marker)
-            if not marked:
+            marked,duplicates=find(self.api.rows(d),d,record,marker)
+            if not marked or duplicates:
                 self.store.set('command','STOP')
-                raise AmbiguousWrite('append_readback_missing:'+d)
+                self.store.mark(k,d,'RECONCILIATION_FAILED')
+                raise AmbiguousWrite('append_readback_missing_or_duplicate:'+d)
             self.store.mark(k,d,'VERIFIED_NEW',marked[0])
         self.store.event('BOTH_VERIFIED',{'company_key':k})
         return 'BOTH_VERIFIED'

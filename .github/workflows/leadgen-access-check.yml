@@ -1,0 +1,55 @@
+name: Non-AI list worker access check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/leadgen-reconciliation]
+    paths: [.github/workflows/leadgen-access-check.yml]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: non-ai-leadgen-access-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - run: pip install google-auth requests
+      - name: Verify existing list access without reading customer records
+        run: |
+          python - <<'PY'
+          import google.auth
+          from google.auth.transport.requests import AuthorizedSession
+          from urllib.parse import quote
+          credentials,_=google.auth.default(scopes=['https://www.googleapis.com/auth/spreadsheets'])
+          session=AuthorizedSession(credentials)
+          books=[
+            ('ssot','1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo','営業リスト＿Factory/BPO','A1:G1',0,6),
+            ('sacrifice','1QBZKoN82O-SrFUnWaHBQtvflcdMT1gDp-QMPtZvLsEk','営業リスト_Vendor','A1:F1',1,5),
+          ]
+          for label,sid,tab,area,name_index,url_index in books:
+              endpoint='https://sheets.googleapis.com/v4/spreadsheets/'+sid+'/values/'+quote("'"+tab+"'!"+area,safe='')
+              response=session.get(endpoint,timeout=30)
+              if response.status_code!=200:
+                  print(label+': HTTP '+str(response.status_code))
+                  raise SystemExit(1)
+              headers=response.json().get('values',[[]])[0]
+              if len(headers)<=url_index or headers[name_index]!='company_name' or headers[url_index]!='website':
+                  print(label+': schema mismatch');raise SystemExit(1)
+              print(label+': authorized; schema verified')
+          print('Read-only access check complete. No list additions, cloud deployment, paid APIs, or customer sends.')
+          PY

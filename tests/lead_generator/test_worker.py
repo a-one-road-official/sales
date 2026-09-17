@@ -71,6 +71,19 @@ class Tests(unittest.TestCase):
     def test_stop_no_write(self):
         self.store.set('command','STOP');r=record();self.m.sync_one(company_key(r),r)
         self.assertEqual(self.api.calls,[])
+    def test_marker_cannot_mask_wrong_company_name(self):
+        r=record();self.store.record(r);self.m.sync_one(company_key(r),r)
+        self.api.data['ssot'][1][0]='Another Company'
+        with self.assertRaises(AmbiguousWrite):self.m.reconcile_completed()
+        self.assertEqual(self.api.calls,['ssot','sacrifice'])
+    def test_final_reconciliation_detects_removed_mirror_and_preserves_status(self):
+        r=record();self.store.record(r);self.m.sync_one(company_key(r),r)
+        self.api.data['ssot'][1][1]='商談中'
+        self.assertEqual(self.m.reconcile_completed(),1)
+        self.assertEqual(self.api.data['ssot'][1][1],'商談中')
+        self.api.data['sacrifice'].pop()
+        with self.assertRaises(AmbiguousWrite):self.m.reconcile_completed()
+        self.assertEqual(len(self.store.completed()),0)
     def test_invalid_schema_no_write(self):
         self.api.data['sacrifice'][0][1]='changed';r=record()
         with self.assertRaises(ValueError):self.m.sync_one(company_key(r),r)
