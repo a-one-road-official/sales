@@ -201,6 +201,10 @@ def _attempted_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[str]:
         "FAILED", "FORM_FAILED", "BLOCKED", "BLOCKED_PREFLIGHT",
         "IDEMPOTENCY_LOOKUP_FAILED", "STALE_PROMPT",
         "PROMPT_LIVE_READ_UNAVAILABLE", "PROMPT_PREFLIGHT",
+        # Reserved by a completed bulk run whose per-row audit append was
+        # dropped by the legacy single-sheet wrapper. Keep it terminal so a
+        # later run cannot repeat an external action without reconciliation.
+        "ATTEMPTED_UNRECONCILED",
     }
 
     for row in rows or []:
