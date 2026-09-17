@@ -352,6 +352,13 @@ def source_website_check(row: dict) -> dict:
     host = _host(row.get("website"))
     host_tokens = _tokens(host)
     matched = sorted(company_tokens & host_tokens)
+    # "Tech Mahindra" / techmahindra.com and "NTT DATA" / nttdata.com
+    # are plausible identities even though token boundaries differ. This is
+    # permission to inspect the official page, never proof of identity.
+    compact_name = re.sub(r"[^a-z0-9]", "", str(row.get("company_name") or "").lower())
+    compact_host = re.sub(r"[^a-z0-9]", "", host)
+    if not matched and len(compact_name) >= 4 and compact_name in compact_host:
+        matched = [compact_name]
     if not host:
         return {"status": "MISSING", "host": "", "matched_tokens": []}
     if matched:

@@ -11,6 +11,8 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 import time
+import hashlib
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
@@ -223,7 +225,7 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
     if key == "last_name":
         return "Tamura"
     if key == "phone":
-        return "+818048705690" if re.search(r"country|国|international|国際", marker) else "08048705690"
+        return "+818048705690"
     if key == "country":
         return "Japan"
     if key == "postal_code":
@@ -335,6 +337,9 @@ def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
     """Select a visible option from a HubSpot-style custom dropdown."""
     wanted = {
         "country": ("japan", "日本"),
+        "state": ("kanagawa", "神奈川"),
+        "industry": ("consulting", "professional services", "other"),
+        "role": ("founder", "ceo", "chief executive", "owner"),
         "reason": ("partnership", "partner inquiry", "business development", "other"),
         "discovery_source": ("found you online", "online marketing"),
         "category": ("other",),
@@ -365,6 +370,8 @@ def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
     wanted_tokens = tuple(
         _normalise_choice_text(token) for token in wanted if _normalise_choice_text(token)
     )
+    if not wanted_tokens:
+        return False, ""
 
     try:
         el.click(timeout=5000)
@@ -856,8 +863,25 @@ class PublicContactFormExecutor:
         missing_required = []
         core_unfilled = []
         initial_success_texts = set()
+        page = None
+        screenshots = {}
+
+        def capture(stage):
+            directory = os.getenv("OUTREACH_EVIDENCE_DIR", "")
+            if not directory or page is None:
+                return
+            try:
+                root = Path(directory)
+                root.mkdir(parents=True, exist_ok=True)
+                key = hashlib.sha256((idempotency_key + ':' + company_name).encode()).hexdigest()[:20]
+                path = root / f"{key}-{stage}.png"
+                page.screenshot(path=str(path), timeout=5000)
+                screenshots[stage] = str(path)
+            except Exception:
+                pass
 
         def result_payload(status: str, *, reason: str = "", **extra) -> dict:
+            capture("outcome")
             payload = {
                 "status": status,
                 "company_name": company_name,
@@ -867,6 +891,7 @@ class PublicContactFormExecutor:
                 "field_audit": field_audit,
                 "checkbox_audit": checkbox_audit,
                 "submission_attempted": submission_attempted,
+                "screenshots": dict(screenshots),
                 "field_status": dict(field_status),
                 "missing_required": list(missing_required),
                 "core_unfilled": list(core_unfilled),
@@ -1228,10 +1253,30 @@ class PublicContactFormExecutor:
                         )
 
                     radios = form.locator("input[type=radio]")
+                    radio_groups = {}
                     for index in range(radios.count()):
                         el = radios.nth(index)
-                        if el.is_visible() and el.is_enabled() and _required(el) and not el.is_checked():
-                            missing_required.append(f"radio_required_{index}:{_marker(el, _label_for(el))}")
+                        if el.is_visible() and el.is_enabled():
+                            group = el.get_attribute("name") or f"unnamed_{index}"
+                            radio_groups.setdefault(group, []).append(el)
+                    for group, controls in radio_groups.items():
+                        if any(el.is_checked() for el in controls):
+                            continue
+                        required = any(_required(el) for el in controls)
+                        if not required:
+                            continue
+                        # Choose only a truthful partnership/general inquiry or
+                        # sender role. Never invent a purchasing intention.
+                        match = next((el for el in controls if re.search(
+                            r"\bpartnership\b|partner inquiry|\bother\b|founder|\bceo\b",
+                            _label_for(el), re.I)), None)
+                        if match is not None:
+                            try:
+                                match.check()
+                            except Exception:
+                                pass
+                        if not any(el.is_checked() for el in controls):
+                            missing_required.append(f"radio_required:{group}")
 
                     core_present = {
                         key for key in CORE_FIELDS
@@ -1303,6 +1348,7 @@ class PublicContactFormExecutor:
                     return result_payload("BLOCKED", reason="CONTACT_POLICY_RESTRICTS_OUTREACH")
                 if preview_only:
                     return result_payload("FORM_PREVIEW_READY", reason="PREVIEW_NO_SUBMISSION")
+                capture("before-submit")
                 submission_attempted = True
                 if not final_submit_once(submit):
                     # The request may already have reached the recipient. Never

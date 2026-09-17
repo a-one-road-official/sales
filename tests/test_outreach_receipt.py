@@ -13,6 +13,7 @@ from outreach_evidence import HEADERS, append_verified, quality_summary
 from outreach_stability import SacrificeStability
 from sacrifice_web_research import _append_page, inspect_official_site
 from workbook_sales import WORKBOOK_ID
+from sales_leads_sacrifice import source_website_check
 
 
 @contextmanager
@@ -60,6 +61,12 @@ def test_fetch_failure_is_not_a_verified_site(monkeypatch):
     monkeypatch.setattr('sacrifice_web_research._inspect_with_requests', lambda *a, **k: ([{'status': 'FETCH_FAILED'}], set(), [], []))
     monkeypatch.setenv('OUTREACH_SITE_FETCH_MODE', 'REQUESTS')
     assert inspect_official_site('https://acme.example', expected_company='Acme')['status'] == 'UNAVAILABLE'
+
+
+@pytest.mark.parametrize('name,url', [('Tech Mahindra', 'https://www.techmahindra.com'), ('NTT DATA', 'https://www.nttdata.com'), ('Remote CoWorker', 'https://remotecoworker.com')])
+def test_compound_name_is_researched_before_rejection(name, url):
+    assert source_website_check({'company_name': name, 'website': url})['status'] == 'UNTRUSTED_POSSIBLE_MATCH'
+    assert source_website_check({'company_name': name, 'website': 'https://unrelated.example'})['status'] == 'MISMATCH_REJECTED'
 
 
 def test_newsletter_is_not_discovered_as_contact_form():

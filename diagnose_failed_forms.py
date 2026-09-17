@@ -43,6 +43,13 @@ def main():
             record.update(status='INSPECTION_ERROR', reason=f'{type(exc).__name__}:{exc}')
         (root / (row['source_row'] + '-diagnosis.json')).write_text(json.dumps(record, ensure_ascii=False, indent=2))
         print(json.dumps({k: record.get(k) for k in ('company_name', 'source_row', 'status', 'reason', 'external_submissions')}, ensure_ascii=False), flush=True)
+        form = record.get('form_execution') or {}
+        print(json.dumps({'company_name': row['company_name'], 'form_url': form.get('form_url'),
+                          'missing_required': form.get('missing_required'), 'core_unfilled': form.get('core_unfilled'),
+                          'fields': [{k: f.get(k) for k in ('key', 'label', 'type', 'required', 'action', 'error')}
+                                     for f in form.get('field_audit', [])],
+                          'pages': [{k: p.get(k) for k in ('url', 'status_code', 'status', 'error')}
+                                    for p in record.get('website_research', {}).get('pages', [])]}, ensure_ascii=False), flush=True)
 
 
 if __name__ == '__main__':
