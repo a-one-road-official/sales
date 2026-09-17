@@ -289,6 +289,45 @@ def _explicit_retry_source_rows(sheets, *, lane: str = "EC_SACRIFICE") -> set[st
 _BATCH_ASSIGNMENTS: dict[str, list[dict]] = {}
 _BATCH_ASSIGNMENTS_LOCK = threading.Lock()
 
+# A single local runtime owns the bounded bulk loop. Keep attempted source
+# identities reserved even when a remote audit append or a transient Sheets
+# read fails, so the next ten-record call cannot select the same rows again.
+_RUNTIME_CONSUMED_SOURCE_KEYS: dict[str, set[str]] = {}
+_RUNTIME_CONSUMED_LOCK = threading.Lock()
+
+
+def _candidate_consumption_keys(item: dict) -> set[str]:
+    keys = set()
+    source_row = str(item.get("source_row") or "").strip()
+    source_key = str(
+        item.get("source_key")
+        or _source_identity(item.get("source_row"), item.get("company_name"))
+        or item.get("source_row")
+        or ""
+    ).strip()
+    if source_row:
+        keys.add(source_row)
+    if source_key:
+        keys.add(source_key)
+    return keys
+
+
+def _runtime_consumed_source_keys(lane: str) -> set[str]:
+    normalized_lane = str(lane or "EC_SACRIFICE").strip().upper()
+    with _RUNTIME_CONSUMED_LOCK:
+        return set(_RUNTIME_CONSUMED_SOURCE_KEYS.get(normalized_lane, set()))
+
+
+def _mark_runtime_consumed(lane: str, items: list[dict]) -> None:
+    normalized_lane = str(lane or "EC_SACRIFICE").strip().upper()
+    keys = set()
+    for item in items or []:
+        keys.update(_candidate_consumption_keys(item))
+    if not keys:
+        return
+    with _RUNTIME_CONSUMED_LOCK:
+        _RUNTIME_CONSUMED_SOURCE_KEYS.setdefault(normalized_lane, set()).update(keys)
+
 
 def _batch_candidates(
     pool: list[dict],
@@ -403,7 +442,20 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
     last_error = None
     for attempt in range(4):
         try:
-            sheets.append_dict(_execution_log_sheet(), record)
+            if _execution_log_sheet() == "outreach_engine_log":
+                headers = [
+                    "timestamp", "channel", "company_name", "website", "email",
+                    "status", "error_message", "subject", "body", "stage",
+                    "idempotency_key", "draft_id", "source_row", "lane",
+                    "semantic_success", "message_id", "thread_id", "form_url",
+                    "confirmation", "recipient", "executed_at",
+                ]
+                sheets.append(
+                    _execution_log_sheet(),
+                    [record.get(header, "") for header in headers],
+                )
+            else:
+                sheets.append_dict(_execution_log_sheet(), record)
             return
         except Exception as exc:
             last_error = exc
@@ -578,12 +630,24 @@ def run_ten_sacrifice_batch(
         ]
     with _BATCH_ASSIGNMENTS_LOCK:
         assignment_exists = normalized_slot is not None and batch_token in _BATCH_ASSIGNMENTS
-    consumed = (
-        set()
-        if assignment_exists
-        else _attempted_source_rows(sheets, lane=normalized_lane) if execute_external else set()
-    )
+    history_error = ""
+    if assignment_exists:
+        consumed = set()
+    elif execute_external:
+        try:
+            consumed = _attempted_source_rows(sheets, lane=normalized_lane)
+        except Exception as exc:
+            # A transient audit-read failure must not reopen rows already
+            # reserved in this process. A fresh process still fails closed.
+            runtime_consumed = _runtime_consumed_source_keys(normalized_lane)
+            if not runtime_consumed:
+                raise
+            consumed = runtime_consumed
+            history_error = f"{type(exc).__name__}:{exc}"
+    else:
+        consumed = set()
     if execute_external:
+        consumed |= _runtime_consumed_source_keys(normalized_lane)
         consumed -= _explicit_retry_source_rows(sheets, lane=normalized_lane)
     candidates = _batch_candidates(        pool,
         consumed,
@@ -594,6 +658,11 @@ def run_ten_sacrifice_batch(
 
     prompt_title = str(cfg.get("OUTREACH_PROMPT_DOC_TITLE") or PROMPT_DOC_TITLE).strip()
     prompt, prompt_meta = drive.read_live_prompt_by_title(prompt_title)
+
+    # Reserve the selected rows before browser work starts. This protects the
+    # next call from duplicate external actions after a partial batch failure.
+    if execute_external:
+        _mark_runtime_consumed(normalized_lane, candidates)
 
     results = []
 
@@ -1006,17 +1075,13 @@ def run_ten_sacrifice_batch(
     # attempted in this batch, while the legacy EC lane consumes only its
     # confirmed/terminal records.
     consumed_after = set(consumed)
-    if normalized_lane in {"BPO", "SALES_GTM"}:
-        consumed_after.update(
-            str(
-                item.get("source_key")
-                or _source_identity(item.get("source_row"), item.get("company_name"))
-                or item.get("source_row")
-                or ""
-            ).strip()
-            for item in candidates
-            if str(item.get("source_row") or "").strip()
-        )
+    if normalized_lane in {"BPO", "SALES_GTM"} or (
+        normalized_lane == "EC_SACRIFICE"
+        and _cfg_truthy(cfg, "OUTREACH_SACRIFICE_CONSUME_FAILED")
+    ):
+        for item in candidates:
+            consumed_after.update(_candidate_consumption_keys(item))
+    consumed_after |= _runtime_consumed_source_keys(normalized_lane)
     source_consumed_count = len(consumed_after)
     source_remaining_count = sum(
         1
@@ -1085,4 +1150,5 @@ def run_ten_sacrifice_batch(
             "prompt_hash": prompt_meta.get("prompt_hash", ""),
         },
         "results": results,
+        "history_error": history_error,
     }
