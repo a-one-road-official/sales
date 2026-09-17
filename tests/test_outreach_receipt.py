@@ -11,7 +11,8 @@ from browser_fetch import TrustedBrowserFetcher
 from form_execution import PublicContactFormExecutor
 from outreach_evidence import HEADERS, append_verified, quality_summary
 from outreach_stability import SacrificeStability
-from sacrifice_web_research import _append_page, inspect_official_site
+from sacrifice_web_research import _append_page, inspect_official_site, ordered_contact_links
+from sales_leads_sacrifice_run import _preferred_form_url
 from workbook_sales import WORKBOOK_ID
 from sales_leads_sacrifice import source_website_check
 
@@ -76,6 +77,25 @@ def test_newsletter_is_not_discovered_as_contact_form():
     assert forms == []
 
 
+def test_contact_discovery_does_not_spend_budget_on_sales_product_or_translated_page():
+    links = ['https://acme.example/services/salesforce/', 'https://acme.example/fr-ca/contact-us/',
+             'https://acme.example/contact-us/#main-content']
+    assert ordered_contact_links(links)[0] == 'https://acme.example/contact-us/'
+    assert _preferred_form_url('Acme', 'https://acme.example', links) == 'https://acme.example/contact-us/'
+
+
+@pytest.mark.browser
+def test_region_and_inquiry_type_are_not_confused_with_message(monkeypatch):
+    html = '''<form method=post><input name=email type=email required>
+    <label for=region>Region</label><select id=region name=region required><option value=''>Select</option><option value=APAC>APAC</option></select>
+    <label for=kind>Inquiry Type</label><select id=kind name=inquiry_type required><option value=''>Select</option><option value=Partners>Partners</option></select>
+    <textarea name=message required></textarea><button type=submit>Send</button></form>'''
+    with local_site(html) as (url, received):
+        result = form_run(url, monkeypatch)
+        assert result['status'] == 'FORM_SENT', result
+        assert len(received) == 1 and 'inquiry_type=Partners' in received[0] and 'region=APAC' in received[0]
+
+
 def form_run(url, monkeypatch, preview=False):
     # Test-only authorization at a local HTTP fixture; no external site is used.
     monkeypatch.setattr('workbook_sales.authorized', lambda *a: True)
@@ -136,7 +156,7 @@ def test_write_requires_exact_readback():
 
 
 def test_seven_of_ten_needs_actual_message_receipts_and_all_records():
-    rows = [{'draft': {'body': 'Proposal'}, 'status': 'FORM_SENT' if i < 7 else 'FORM_FAILED',
+    rows = [{'draft': {'subject': 'Partnership', 'body': 'Proposal'}, 'status': 'FORM_SENT' if i < 7 else 'FORM_FAILED',
              'form_execution': {'confirmation': 'SUCCESS_TEXT' if i < 7 else '', 'field_status': {'message': 'FILLED'}},
              'audit_log_verified': True} for i in range(10)]
     assert quality_summary(rows)['passed'] is True
@@ -152,3 +172,25 @@ def test_success_counter_alone_cannot_declare_stability():
     sheets = SimpleNamespace(append_dict=lambda *a: None, _rows_as_dicts=lambda *a: [])
     gate = SacrificeStability(sheets)
     assert gate.record(lane='BPO', attempted=10, successes=10, critical_errors=[], cfg={})['stable'] is False
+
+
+def test_quality_cannot_become_stable_when_the_real_ledger_write_is_dropped(monkeypatch):
+    sheets = SimpleNamespace(spreadsheet_id=WORKBOOK_ID, append_dict=Mock())
+    monkeypatch.setattr(SacrificeStability, '_batches', lambda self: [])
+    monkeypatch.setattr('outreach_evidence.append_verified', Mock(side_effect=RuntimeError('evidence_readback_mismatch')))
+    with pytest.raises(RuntimeError, match='readback_mismatch'):
+        SacrificeStability(sheets).record(lane='BPO', attempted=10, successes=7, critical_errors=[], cfg={},
+            quality={'passed': True, 'ui_verified': True, 'denominator': 10, 'recorded': 10, 'accepted': 7})
+    sheets.append_dict.assert_not_called()
+
+
+@pytest.mark.browser
+def test_required_radio_group_uses_one_truthful_selection(monkeypatch):
+    html = '''<form method=post><input name=email type=email required><textarea name=message required></textarea>
+    <label><input type=radio name=reason value=customer required>Customer support</label>
+    <label><input type=radio name=reason value=partnership required>Partnership</label>
+    <button type=submit>Send</button></form>'''
+    with local_site(html) as (url, received):
+        result = form_run(url, monkeypatch)
+        assert result['status'] == 'FORM_SENT', result
+        assert len(received) == 1 and 'reason=partnership' in received[0]

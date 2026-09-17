@@ -6,6 +6,7 @@ come exclusively from the workbook. Full observations survive in the artifact.
 from __future__ import annotations
 
 import json
+import argparse
 from pathlib import Path
 
 from form_execution import PublicContactFormExecutor
@@ -14,17 +15,20 @@ from sales_leads_sacrifice_run import _preferred_form_url, _verified_site_draft
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--manifest')
+    args = parser.parse_args()
     root = Path('outreach-evidence')
     root.mkdir(exist_ok=True)
-    rows = json.loads(Path('data/sales_leads_bpo_verified.json').read_text())[-10:]
+    rows = json.loads(Path(args.manifest or 'data/sales_leads_bpo_verified.json').read_text())[-10:]
     for row in rows:
         record = {'company_name': row['company_name'], 'source_row': row['source_row'],
-                  'historical_result': 'UNRECONCILED', 'inspection': 'CURRENT_SITE_PREVIEW_ONLY',
+                  'historical_result': 'NOT_SENT' if args.manifest else 'UNRECONCILED', 'inspection': 'CURRENT_SITE_PREVIEW_ONLY',
                   'external_submissions': 0}
         try:
             site = inspect_official_site(row['website'], max_pages=3, expected_company=row['company_name'])
             record['website_research'] = site
-            draft = _verified_site_draft({**row, 'sacrifice_lane': 'BPO'}, site)
+            draft = _verified_site_draft({**row, 'sacrifice_lane': row.get('sacrifice_lane', 'BPO')}, site)
             record['draft'] = draft
             if site['status'] != 'VERIFIED':
                 record.update(status=site['status'], reason=site.get('identity_reason') or 'site_unavailable')

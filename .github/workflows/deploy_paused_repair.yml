@@ -3,10 +3,7 @@ name: Deploy paused SSOT history repair
 # zero-cost-hardening-deploy: 2026-09-16
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/deploy_paused_repair.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -27,6 +24,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Mandatory zero paid AI budget gate
+        run: python cost_guard.py
 
       - uses: actions/setup-python@v5
         with:

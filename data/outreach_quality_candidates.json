@@ -1,0 +1,12 @@
+[
+  {"company_name":"Help Scout","website":"https://www.helpscout.com/","source_row":"research-helpscout","sacrifice_lane":"SALES_GTM","domain":"CS","what_it_solves":"Customer support software with shared inbox and knowledge base"},
+  {"company_name":"Missive","website":"https://missiveapp.com/","source_row":"research-missive","sacrifice_lane":"SALES_GTM","domain":"CS","what_it_solves":"Collaborative team inbox and email workflows"},
+  {"company_name":"Chatwoot","website":"https://www.chatwoot.com/","source_row":"research-chatwoot","sacrifice_lane":"SALES_GTM","domain":"CS","what_it_solves":"Open-source customer support platform"},
+  {"company_name":"Hiver","website":"https://hiverhq.com/","source_row":"research-hiver","sacrifice_lane":"SALES_GTM","domain":"CS","what_it_solves":"Omnichannel customer service software"},
+  {"company_name":"BoldDesk","website":"https://www.bolddesk.com/","source_row":"research-bolddesk","sacrifice_lane":"SALES_GTM","domain":"CS","what_it_solves":"Help desk and customer support software"},
+  {"company_name":"Dixa","website":"https://www.dixa.com/","source_row":"research-dixa","sacrifice_lane":"SALES_GTM","domain":"CS","what_it_solves":"Customer service platform for customer conversations"},
+  {"company_name":"Trengo","website":"https://trengo.com/","source_row":"research-trengo","sacrifice_lane":"SALES_GTM","domain":"CS","what_it_solves":"Omnichannel customer engagement platform"},
+  {"company_name":"Deskpro","website":"https://www.deskpro.com/","source_row":"research-deskpro","sacrifice_lane":"SALES_GTM","domain":"CS","what_it_solves":"Help desk software for customer service teams"},
+  {"company_name":"Kayako","website":"https://kayako.com/","source_row":"research-kayako","sacrifice_lane":"SALES_GTM","domain":"CS","what_it_solves":"AI customer support and help desk platform"},
+  {"company_name":"Reamaze","website":"https://www.reamaze.com/","source_row":"research-reamaze","sacrifice_lane":"SALES_GTM","domain":"CS","what_it_solves":"Customer service and live chat for ecommerce"}
+]

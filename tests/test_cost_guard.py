@@ -20,12 +20,29 @@ def test_paid_cloud_defaults_fail_closed(monkeypatch):
     assert cost_guard.http_self_fallback_allowed() is False
 
 
-def test_paid_ai_requires_both_opt_ins(monkeypatch):
+def test_exhausted_ai_budget_cannot_be_reopened_by_opt_ins(monkeypatch):
     monkeypatch.setenv("LEAD_FACTORY_PAID_CLOUD_ALLOWED", "TRUE")
     monkeypatch.setenv("LEAD_FACTORY_PAID_AI_ALLOWED", "FALSE")
     assert cost_guard.paid_ai_allowed() is False
     monkeypatch.setenv("LEAD_FACTORY_PAID_AI_ALLOWED", "TRUE")
-    assert cost_guard.paid_ai_allowed() is True
+    assert cost_guard.paid_ai_allowed() is False
+    with pytest.raises(RuntimeError, match='paid_ai_budget_exhausted'):
+        cost_guard.assert_zero_ai_budget()
+
+
+def test_budget_gate_rejects_paid_sheet_settings_and_never_constructs_a_model(monkeypatch):
+    monkeypatch.setenv('LEAD_FACTORY_PAID_AI_ALLOWED', 'FALSE')
+    monkeypatch.setenv('LEAD_FACTORY_VERTEX_ALLOWED', 'FALSE')
+    with pytest.raises(RuntimeError, match='paid_ai_budget_exhausted'):
+        cost_guard.assert_zero_ai_budget({'LEAD_FACTORY_VERTEX_ALLOWED': 'TRUE'})
+    from llm import LLM
+    from unittest.mock import Mock
+    client_factory = Mock()
+    monkeypatch.setattr('llm._GeminiCompatClient', client_factory)
+    with pytest.raises(RuntimeError, match='paid_ai_budget_exhausted'):
+        LLM('unused').client
+    client_factory.assert_not_called()
+    assert cost_guard.budget_snapshot()['ai_api_remaining_budget_jpy'] == 0
 
 
 def test_bounded_int_ignores_stale_huge_config():

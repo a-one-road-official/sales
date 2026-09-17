@@ -5,6 +5,9 @@ import os
 import threading
 import uuid
 
+from cost_guard import assert_zero_ai_budget, require_paid_ai
+assert_zero_ai_budget()
+
 import google.auth
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -170,6 +173,7 @@ def _ensure_openai_key() -> None:
     Deployment authority never needs to read the secret. The runtime identity reads
     the already-existing `aone-openai-api-key` secret when the first real task starts.
     """
+    require_paid_ai("load_inference_credentials")
     if os.getenv("OPENAI_API_KEY"):
         return
     _, detected_project = google.auth.default()

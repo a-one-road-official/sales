@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urldefrag
 
 import requests
 from bs4 import BeautifulSoup
@@ -27,7 +27,35 @@ CONTACT_WORDS = (
     "get in touch",
     "talk to sales",
     "お問い合わせ",
+    "partnership", "get-in-touch", "book-a-call", "connect-with",
 )
+
+
+def contact_priority(url: str) -> tuple[int, int]:
+    """Contact intent outranks product pages containing the word 'sales'."""
+    path = urlparse(url).path.casefold()
+    segments = re.split(r"[/_-]+", path)
+    score = 0
+    if any(word in segments for word in ('contact', 'inquiry', 'enquiry')):
+        score += 20
+    if 'partner' in segments or 'partnership' in segments or 'partnerships' in segments:
+        score += 12
+    if any(word in path for word in ('get-in-touch', 'book-a-call', 'talk-to')):
+        score += 10
+    if 'demo' in segments:
+        score += 5
+    if any(word in segments for word in ('services', 'products', 'features', 'news', 'blog', 'careers', 'login', 'signup', 'privacy', 'support')):
+        score -= 15
+    # Prefer the general or English contact page over a lexicographically later
+    # translated page. This does not change the recipient's regional selection.
+    if re.search(r'^/(?:fr|de|es|pt|it|ko|zh)(?:[-/]|$)', path):
+        score -= 8
+    return score, -len(path)
+
+
+def ordered_contact_links(links):
+    cleaned = list(dict.fromkeys(urldefrag(link)[0] for link in links))
+    return sorted(cleaned, key=contact_priority, reverse=True)
 
 
 def _request_timeout() -> float:
@@ -78,7 +106,7 @@ def _append_page(
         value for value in links
         if any(word in str(value).lower() for word in CONTACT_WORDS)
     )
-    return list(dict.fromkeys(contact_links)), page_forms
+    return ordered_contact_links(contact_links), page_forms
 
 
 def _inspect_with_requests(
@@ -127,7 +155,7 @@ def _inspect_with_requests(
                     "error": f"{type(exc).__name__}:{exc}",
                 }
             )
-    return pages, emails, forms, list(dict.fromkeys(contact_links))[:20]
+    return pages, emails, forms, ordered_contact_links(contact_links)[:20]
 
 
 def _inspect_with_playwright(
@@ -178,7 +206,7 @@ def _inspect_with_playwright(
                     "error": f"{type(exc).__name__}:{exc}",
                 }
             )
-    return pages, emails, forms, list(dict.fromkeys(contact_links))[:20]
+    return pages, emails, forms, ordered_contact_links(contact_links)[:20]
 
 
 def inspect_official_site(

@@ -53,7 +53,7 @@ class TrustedBrowserFetcher:
         network: list[dict] = []
         subrequests = 0
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, args=["--disable-http2"])
             context = browser.new_context(storage_state=self.storage_state) if self.storage_state else browser.new_context()
             page = context.new_page()
 

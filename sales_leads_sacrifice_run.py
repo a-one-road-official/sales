@@ -77,8 +77,9 @@ def _preferred_form_url(company_name: str, website: str, links: list[str]) -> st
     root_host = _host(website)
     if hint:
         return hint
+    from sacrifice_web_research import ordered_contact_links, contact_priority
     candidates = []
-    for value in _unique(links):
+    for value in ordered_contact_links(links):
         if not root_host:
             continue
         host = _host(value)
@@ -89,12 +90,12 @@ def _preferred_form_url(company_name: str, website: str, links: list[str]) -> st
         def has_path_token(marker: str) -> bool:
             token = re.sub(r"[-_]+", " ", marker)
             return bool(re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", normalized_path))
-        score = sum(3 for marker in FORM_PATH_MARKERS if has_path_token(marker))
+        score = contact_priority(value)[0]
         score -= sum(2 for marker in ("newsletter", "subscribe", "login", "signup") if has_path_token(marker))
         score -= sum(1 for marker in ("pricing", "features", "product", "platform") if has_path_token(marker))
         if score > 0:
-            candidates.append((score, value))
-    return max(candidates, default=(0, ""))[1]
+            candidates.append(value)
+    return candidates[0] if candidates else ""
 
 
 _PLACEHOLDER_EMAIL_DOMAINS = {
@@ -413,7 +414,7 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
         "source_row": source_row,
         "company_name": candidate.get("company_name", ""),
         "lane": str(result.get("lane") or candidate.get("sacrifice_lane") or "EC_SACRIFICE").strip().upper(),
-        "channel": "FORM" if result.get("stage") == "FORM_EXECUTION" else "EMAIL",
+        "channel": "FORM" if result.get("form_execution") else "EMAIL" if result.get("execution") else "NONE",
         "status": result.get("status", "FAILED"),
         "semantic_success": result.get("status") in {"SENT", "FORM_SENT"},
         "message_id": execution.get("message_id", ""),
@@ -589,6 +590,8 @@ def run_ten_sacrifice_batch(
     if normalized_lane not in {"EC_SACRIFICE", "BPO", "SALES_GTM"}:
         raise ValueError("unsupported_sacrifice_lane")
     cfg = dict(cfg or {})
+    from cost_guard import assert_zero_ai_budget
+    assert_zero_ai_budget(cfg)
     sheets = getattr(executor, "sheets", None)
     if execute_external and getattr(sheets, "spreadsheet_id", "") != WORKBOOK_ID:
         raise ValueError("automatic_outreach_requires_new_workbook")
@@ -664,11 +667,6 @@ def run_ten_sacrifice_batch(
     prompt_title = str(cfg.get("OUTREACH_PROMPT_DOC_TITLE") or PROMPT_DOC_TITLE).strip()
     prompt, prompt_meta = drive.read_live_prompt_by_title(prompt_title)
 
-    # Reserve the selected rows before browser work starts. This protects the
-    # next call from duplicate external actions after a partial batch failure.
-    if execute_external:
-        _mark_runtime_consumed(normalized_lane, candidates)
-
     results = []
 
     for candidate in candidates:
@@ -688,6 +686,7 @@ def run_ten_sacrifice_batch(
         try:
             if execute_external:
                 authorization = claim_candidate(sheets, candidate, normalized_lane, run_id)
+                _mark_runtime_consumed(normalized_lane, [candidate])
                 executor.workbook_authorization = authorization
             evidence = candidate.get("candidate_website_evidence", {})
             source_site_url = str(candidate.get("candidate_website") or "").strip()
@@ -848,8 +847,7 @@ def run_ten_sacrifice_batch(
                     and _cfg_truthy(cfg, "OUTREACH_PREFER_PUBLIC_FORM")
                 )
                 playwright_form_only = (
-                    normalized_lane == "EC_SACRIFICE"
-                    and _cfg_truthy(cfg, "OUTREACH_PLAYWRIGHT_FORM_ONLY")
+                    _cfg_truthy(cfg, "OUTREACH_PLAYWRIGHT_FORM_ONLY")
                 )
                 if (
                     (
@@ -1091,7 +1089,10 @@ def run_ten_sacrifice_batch(
         normalized_lane == "EC_SACRIFICE"
         and _cfg_truthy(cfg, "OUTREACH_SACRIFICE_CONSUME_FAILED")
     ):
+        processed = {item.get("source_row") for item in results}
         for item in candidates:
+            if item.get("source_row") not in processed:
+                continue
             consumed_after.update(_candidate_consumption_keys(item))
     consumed_after |= _runtime_consumed_source_keys(normalized_lane)
     source_consumed_count = len(consumed_after)

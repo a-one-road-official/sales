@@ -110,7 +110,8 @@ def _label_for(el) -> str:
                     const parent = el.closest('label');
                     if (parent) return (parent.innerText || '').trim();
                     const wrapper = el.parentElement;
-                    return wrapper ? (wrapper.innerText || '').trim().slice(0, 300) : '';
+                    if (!wrapper || wrapper.tagName === 'FORM' || wrapper.querySelectorAll('input,textarea,select').length > 1) return '';
+                    return (wrapper.innerText || '').trim().slice(0, 300);
                 }"""
             )
             or ""
@@ -140,6 +141,8 @@ def _field_key(el, label: str) -> str:
     marker = _marker(el, label)
     typ = (el.get_attribute("type") or "text").lower()
     tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
+    if tag == "textarea":
+        return "message"
     if typ == "email" or re.search(r"\b(e[- ]?mail|email)\b", marker):
         return "email"
     if re.search(r"gmv[_ -]?range|annual[_ -]?(?:e[_ -]?)?commerce[_ -]?(?:revenue|sales)|annual\s+revenue|年商", marker):
@@ -148,7 +151,7 @@ def _field_key(el, label: str) -> str:
         return "monthly_traffic"
     if re.search(r"ecommerce[_ -]?platform|e-commerce\s+platform|\bplatform\b", marker):
         return "platform"
-    if re.search(r"reason[_ -]?for[_ -]?contact|looking\s+to\s+talk|相談先|問い合わせ先", marker):
+    if re.search(r"reason[_ -]?for[_ -]?contact|(?:type[_ -]?of[_ -]?(?:enquiry|inquiry))|(?:inquiry|enquiry)[_ -]?type|looking\s+to\s+talk|相談先|問い合わせ先", marker):
         return "reason"
     if re.search(r"how[_ -]?did[_ -]?you[_ -]?learn|how\s+did\s+you\s+learn|流入元|知ったきっかけ", marker):
         return "discovery_source"
@@ -167,6 +170,8 @@ def _field_key(el, label: str) -> str:
         return "last_name"
     if re.search(r"\b(country|nation)\b|countryregion(?:_|$)|\b(国|国名)\b", marker):
         return "country"
+    if re.search(r"\bregion\b", marker):
+        return "region"
     if re.search(r"industry(?:_|$)|\bindustry\b|業種", marker):
         return "industry"
     if re.search(r"\b(postal|postcode|zip|郵便)\b", marker):
@@ -228,6 +233,8 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
         return "+818048705690"
     if key == "country":
         return "Japan"
+    if key == "region":
+        return "Asia Pacific"
     if key == "postal_code":
         return "220-0072"
     if key == "state":
@@ -248,9 +255,10 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
 def _select_option(el, key: str) -> tuple[bool, str]:
     wanted = {
         "country": ("japan", "日本", "jp"),
+        "region": ("apac", "asia pacific", "asia-pacific", "asia"),
         "state": ("kanagawa", "神奈川"),
         "industry": ("consulting", "professional services", "other"),
-        "reason": ("partnership", "partner inquiry", "business development", "other"),
+        "reason": ("partnership", "partner", "business development", "other"),
         "discovery_source": ("found you online", "online marketing"),
         "category": ("other",),
         "platform": ("other",),
@@ -337,10 +345,11 @@ def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
     """Select a visible option from a HubSpot-style custom dropdown."""
     wanted = {
         "country": ("japan", "日本"),
+        "region": ("apac", "asia pacific", "asia-pacific", "asia"),
         "state": ("kanagawa", "神奈川"),
         "industry": ("consulting", "professional services", "other"),
         "role": ("founder", "ceo", "chief executive", "owner"),
-        "reason": ("partnership", "partner inquiry", "business development", "other"),
+        "reason": ("partnership", "partner", "business development", "other"),
         "discovery_source": ("found you online", "online marketing"),
         "category": ("other",),
         "platform": ("other",),
@@ -1268,7 +1277,7 @@ class PublicContactFormExecutor:
                         # Choose only a truthful partnership/general inquiry or
                         # sender role. Never invent a purchasing intention.
                         match = next((el for el in controls if re.search(
-                            r"\bpartnership\b|partner inquiry|\bother\b|founder|\bceo\b",
+                            r"\bpartners?(?:hips?)?\b|\bothers?\b|general (?:inquiry|enquiry)|founder|\bceo\b",
                             _label_for(el), re.I)), None)
                         if match is not None:
                             try:

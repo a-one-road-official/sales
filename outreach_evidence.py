@@ -78,7 +78,7 @@ def quality_summary(results: list[dict]) -> dict:
     for item in results:
         form = item.get("form_execution") or {}
         checks = {
-            "message": bool((item.get("draft") or {}).get("body")) and form.get("field_status", {}).get("message") == "FILLED",
+            "message": bool((item.get("draft") or {}).get("subject")) and bool((item.get("draft") or {}).get("body")) and form.get("field_status", {}).get("message") == "FILLED",
             "form_received": item.get("status") == "FORM_SENT" and bool(form.get("confirmation")),
             "recorded": item.get("audit_log_verified") is True,
         }

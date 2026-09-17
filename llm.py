@@ -4,8 +4,7 @@ import json
 import os
 import re
 
-from google import genai
-from google.genai import types
+from cost_guard import require_paid_ai
 
 
 # Vertex AI is disabled at the policy boundary for this runtime generation.
@@ -18,44 +17,12 @@ class _GeminiResponses:
         self._client = client
 
     def create(self, model: str, input: str, tools=None):
-        # Policy circuit: Vertex remains unavailable for this runtime generation.
-        # Deterministic intake never reaches this boundary.
-        if VERTEX_FORBIDDEN or os.getenv("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE").upper() != "TRUE":
-            raise RuntimeError("vertex_disabled_by_budget")
-        use_search = bool(tools)
-        config = types.GenerateContentConfig(
-            tools=[types.Tool(google_search=types.GoogleSearch())] if use_search else None,
-        )
-        response = self._client.models.generate_content(
-            model=model,
-            contents=input,
-            config=config,
-        )
-        class Result:
-            output_text = response.text or ""
-        return Result()
+        require_paid_ai("generate_content")
 
 
 class _GeminiCompatClient:
     def __init__(self):
-        if VERTEX_FORBIDDEN:
-            raise RuntimeError("vertex_forbidden_by_policy")
-        project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT")
-        location = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
-        if not project:
-            raise RuntimeError("missing_google_cloud_project")
-        try:
-            timeout_ms = int(os.getenv("OUTREACH_LLM_TIMEOUT_MS", "120000") or 120000)
-        except (TypeError, ValueError):
-            timeout_ms = 120000
-        timeout_ms = max(30000, min(300000, timeout_ms))
-        self._client = genai.Client(
-            vertexai=True,
-            project=project,
-            location=location,
-            http_options=types.HttpOptions(timeout=timeout_ms),
-        )
-        self.responses = _GeminiResponses(self._client)
+        require_paid_ai("create_model_client")
 
 
 class LLM:
@@ -67,6 +34,7 @@ class LLM:
 
     @property
     def client(self):
+        require_paid_ai("model_client")
         if VERTEX_FORBIDDEN or os.getenv("LEAD_FACTORY_VERTEX_ALLOWED", "FALSE").upper() != "TRUE":
             raise RuntimeError("vertex_disabled_by_budget")
         if self._client is None:

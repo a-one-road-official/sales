@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from uuid import uuid4
 
 
@@ -29,6 +30,11 @@ class SacrificeStability:
         self.sheets = sheets
 
     def _batches(self):
+        from workbook_sales import WORKBOOK_ID
+        if getattr(self.sheets, "spreadsheet_id", "") == WORKBOOK_ID:
+            from workbook_sales import WorkbookReader
+            rows = WorkbookReader(self.sheets.svc).rows(WORKBOOK_ID, "outreach_engine_log", "U", {"stage", "body"})
+            return [json.loads(row["body"]) for row in rows if row.get("stage") == "QUALITY_BATCH"]
         try:
             reader = getattr(self.sheets, "rows_as_dicts_once", None)
             if callable(reader):
@@ -77,7 +83,7 @@ class SacrificeStability:
             streak += 1
         promoted = streak >= required
         now = datetime.now(timezone.utc).isoformat()
-        self.sheets.append_dict("LeadFactory_ExecutionBatches", {
+        record = {
             "record_type": "OUTREACH_STABILITY_BATCH",
             "job_id": str(job_id or "").strip(),
             "batch_id": batch_id, "lane": lane, "started_at": now,
@@ -85,7 +91,18 @@ class SacrificeStability:
             "semantic_success": successes, "critical_errors": ",".join(sorted(set(critical_errors))),
             "stability_status": "STABLE" if promoted else status,
             "reset_reason": "critical_error" if reset else ("threshold" if status == "BATCH_FAIL" else ""),
-        })
+        }
+        from workbook_sales import WORKBOOK_ID
+        if getattr(self.sheets, "spreadsheet_id", "") == WORKBOOK_ID:
+            from outreach_evidence import append_verified
+            append_verified(self.sheets, {
+                "timestamp": now, "executed_at": now, "channel": "QUALITY",
+                "stage": "QUALITY_BATCH", "status": record["stability_status"],
+                "lane": lane, "idempotency_key": batch_id + ":quality",
+                "body": json.dumps({**record, "quality": quality}, ensure_ascii=False),
+            })
+        else:
+            self.sheets.append_dict("LeadFactory_ExecutionBatches", record)
         return {"batch_id": batch_id, "attempted": attempted, "semantic_success": successes,
                 "critical_errors": sorted(set(critical_errors)), "passing_streak": streak,
                 "stable": promoted, "factory_send_enabled": False}

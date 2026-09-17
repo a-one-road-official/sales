@@ -26,7 +26,11 @@ def normalize_event(row: dict) -> dict:
     message_id = _text(row.get("message_id"))
     receipt = _text(row.get("confirmation"))
     stage = _text(row.get("stage"))
-    if status == "SENT" and message_id:
+    if stage == "QUALITY_BATCH":
+        kind = "QUALITY_CHECK"
+    elif status == "PREPARED":
+        kind = "MESSAGE_PREPARED"
+    elif status == "SENT" and message_id:
         kind = "EMAIL_ACCEPTED"
     elif status == "FORM_SENT" and receipt:
         kind = "IMPORTED_FORM_RECEIPT" if stage == "PREEXISTING_IMPORT" else "FORM_ACCEPTED"

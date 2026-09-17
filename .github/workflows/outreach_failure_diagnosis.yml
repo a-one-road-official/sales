@@ -8,6 +8,7 @@ on:
       - browser_fetch.py
       - sacrifice_web_research.py
       - .github/workflows/outreach_failure_diagnosis.yml
+      - data/outreach_quality_candidates.json
   workflow_dispatch:
 permissions:
   contents: read
@@ -16,6 +17,10 @@ concurrency:
   cancel-in-progress: false
 jobs:
   inspect:
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [historical, candidates]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -24,14 +29,18 @@ jobs:
       OUTREACH_EVIDENCE_DIR: outreach-evidence
     steps:
       - uses: actions/checkout@v4
+      - run: python cost_guard.py
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt
       - run: python -m playwright install --with-deps chromium
-      - run: python diagnose_failed_forms.py
+      - if: matrix.sample == 'historical'
+        run: python diagnose_failed_forms.py
+      - if: matrix.sample == 'candidates'
+        run: python diagnose_failed_forms.py --manifest data/outreach_quality_candidates.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: historical-ten-diagnosis-${{ github.run_id }}
+          name: form-diagnosis-${{ matrix.sample }}-${{ github.run_id }}
           path: outreach-evidence/

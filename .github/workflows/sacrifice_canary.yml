@@ -44,6 +44,8 @@ jobs:
       LEAD_FACTORY_CONFIG_SHEET: Settings
       LEAD_FACTORY_HUMAN_SSOT_SHEET: 営業リスト_Vendor
       LEAD_FACTORY_VERTEX_ALLOWED: FALSE
+      LEAD_FACTORY_PAID_AI_ALLOWED: FALSE
+      LEAD_FACTORY_PAID_CLOUD_ALLOWED: FALSE
       LEAD_FACTORY_ALLOW_EXTERNAL_WRITE: TRUE
       LEAD_FACTORY_SEND_MODE: ENABLED
       LEAD_FACTORY_EXPLICIT_SEND_APPROVAL: TRUE
@@ -83,6 +85,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Mandatory zero paid AI budget gate
+        run: python cost_guard.py
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
