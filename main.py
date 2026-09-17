@@ -160,24 +160,23 @@ async def internal_runtime_guard(request: Request, call_next):
     """
     if request.method == "GET" and request.url.path == "/healthz":
         return await call_next(request)
-    expected = os.getenv("LEAD_FACTORY_INTERNAL_TOKEN", "")
-    supplied = request.headers.get("X-Aone-Internal-Token", "")
-    if not expected or not supplied or not hmac.compare_digest(expected, supplied):
-        return JSONResponse(status_code=401, content={"detail": "internal_runtime_token_required"})
-
-    # Zero-cost Cloud Run quarantine. Stale Scheduler/Cloud Tasks deliveries are
-    # acknowledged with HTTP 200 so they cannot fan out, retry, touch Sheets,
-    # instantiate workers, or trigger any network/model work while the paid-cloud
-    # budget gate is closed.
+    # Zero-cost Cloud Run quarantine runs before authentication. This deliberately
+    # ACKs even stale tasks/schedulers created by older revisions that may not carry
+    # today's internal header, preventing 401 retry storms while the paid-cloud gate
+    # is closed. No factory, Sheets, network, browser or model object is touched.
     if not paid_cloud_allowed():
         return JSONResponse(
             status_code=200,
             content={
                 "status": "BUDGET_BLOCKED_ACK",
-                "path": request.url.path,
                 "paid_cloud_allowed": False,
             },
         )
+
+    expected = os.getenv("LEAD_FACTORY_INTERNAL_TOKEN", "")
+    supplied = request.headers.get("X-Aone-Internal-Token", "")
+    if not expected or not supplied or not hmac.compare_digest(expected, supplied):
+        return JSONResponse(status_code=401, content={"detail": "internal_runtime_token_required"})
     return await call_next(request)
 
 
