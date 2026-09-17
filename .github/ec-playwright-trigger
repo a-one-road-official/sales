@@ -3,3 +3,6 @@ Scope: consume the completed 2026-09-17 EC/BPO attempt manifest; no duplicate ex
 Runtime: existing Playwright/form executor.
 Vertex: forbidden.
 Target workbook: sales_leads（生贄） only.
+
+2026-09-17 DeployNow startup verification after PR #37.
+Account policy remains paused with zero permissions; outbound activation check must skip all company processing.
