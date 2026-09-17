@@ -51,6 +51,12 @@ def main():
             record.update(status='INSPECTION_ERROR', reason=f'{type(exc).__name__}:{exc}')
         (root / (row['source_row'] + '-diagnosis.json')).write_text(json.dumps(record, ensure_ascii=False, indent=2))
         print(json.dumps({k: record.get(k) for k in ('company_name', 'source_row', 'status', 'reason', 'external_submissions')}, ensure_ascii=False), flush=True)
+        # Preserve every attempted page in stdout as well as the artifact. A
+        # final 404 must not conceal an earlier form validation failure.
+        print(json.dumps({'company_name': row['company_name'], 'form_attempts': [
+            {k: attempt.get(k) for k in ('form_url', 'status', 'reason', 'missing_required',
+                                        'expected_message_length', 'actual_message_lengths', 'max_message_length')}
+            for attempt in record.get('form_previews', [])]}, ensure_ascii=False), flush=True)
         form = record.get('form_execution') or {}
         print(json.dumps({'company_name': row['company_name'], 'form_url': form.get('form_url'),
                           'missing_required': form.get('missing_required'), 'core_unfilled': form.get('core_unfilled'),
