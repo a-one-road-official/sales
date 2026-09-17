@@ -87,7 +87,13 @@ def find(rows,dest,record,marker):
 
 def make_row(dest,record,result,marker):
     timestamp=now()
-    src=marker+' '+record['exhibition_proof']['url']
+    source_url=str(record.get('source_record_url') or record.get('technical_proof',{}).get('url') or record.get('identity_proof',{}).get('url') or '')
+    src=marker+' '+source_url
+    japan=record.get('japan') or {}
+    checks=japan.get('checks') or {}
+    locations=checks.get('official_locations') or {}
+    japan_evidence=str(locations.get('url') or '')
+    distributor_only=bool(japan.get('distributor_only'))
     evidence=json.dumps({'policy':result['policy_version'],'payment':result['payment_capacity_level'],
                         'payment_capacity_evidence':record['payment_capacity'],
                         'offer':record['initial_offer'],'japan':record['japan'],
@@ -95,17 +101,17 @@ def make_row(dest,record,result,marker):
     if len(evidence)>45000: raise ValueError('evidence_cell_too_large')
     if dest=='ssot':
         return [record['company_name'],'未接触','Factory',
-                '選定条件確認済・前払い同意は商談時確認',result['country'],'',record['website'],
+                'AUMS Capability OR条件で選定。商用実績・日本代理店・前払いは優先順位情報として追加調査。',result['country'],'',record['website'],
                 record['product_text'][:2000],result['japan_status'],src,timestamp,
-                '代理店のみ' if record.get('japan',{}).get('distributor_only') else '確認範囲で直接拠点なし',
-                record['japan']['checks']['official_locations']['url'],timestamp,domain(record['website']),
-                result['sector'],result['priority_score'],'evidence_checked',
-                '初回:有効リード・顧客/パートナー商談開拓',marker,evidence,timestamp,
-                '確認範囲内の判定。営業前に日本拠点・担当者を再確認。',result['country']]
+                '代理店のみ' if distributor_only else 'UNKNOWN',
+                japan_evidence,timestamp,domain(record['website']),
+                result['sector'],result['priority_score'],'official_url_and_capability_checked',
+                'OR_MATCH: '+', '.join(result.get('hits',[])[:12]),marker,evidence,timestamp,
+                'Commercial Rights / Japan presence / cash timingはWS6・WS8で追加確認。',result['country']]
     return ['',record['company_name'],result['sector'],result['country'],'',record['website'],'',
             '未接触',record['product_text'][:2000],result['japan_status'],src,timestamp,
-            '代理店のみ' if record.get('japan',{}).get('distributor_only') else '確認範囲で直接拠点なし',
-            record['japan']['checks']['official_locations']['url'],timestamp,'確認済','','',timestamp]
+            '代理店のみ' if distributor_only else 'UNKNOWN',
+            japan_evidence,timestamp,'確認済','','',timestamp]
 
 
 class Mirror:

@@ -25,8 +25,8 @@ MAX_AGE_DAYS = @DISCOVERY.WHY_NOW_MAX_AGE_DAYS
 [G6]
 FAIL_ANY = japan subsidiary | japan branch | japan office | exclusive distributor japan
 [FINAL]
-6つ全てPASS = GO
-1つでもFAIL = NO-GO
+REQUIRED_ALL = G1 | G2
+RANK_ONLY = G3 | G4 | G5 | G6
 """
 
 
@@ -86,7 +86,8 @@ def test_japan_hard_off_fails():
     facts["japan_hard_off_terms"] = ["Japan subsidiary"]
     result = evaluate_gate(DOC, base_company(), facts)
     assert result["G6"]["result"] == "FAIL"
-    assert result["final_result"] == "NO-GO"
+    assert result["final_result"] == "GO"
+    assert result["first_failed_gate"] == ""
 
 
 def test_stage_can_satisfy_ability_to_pay():
@@ -95,3 +96,19 @@ def test_stage_can_satisfy_ability_to_pay():
     facts["funding_stage"] = "Series B"
     result = evaluate_gate(DOC, base_company(), facts)
     assert result["G4"]["result"] == "PASS"
+
+
+def test_one_capability_overlap_is_enough_even_when_ranking_gates_fail():
+    facts = base_facts()
+    facts["commercial_proof_terms"] = []
+    facts["employee_count"] = 3
+    facts["funding_stage"] = ""
+    facts["triggers"] = []
+    facts["japan_hard_off_terms"] = ["Japan distributor"]
+    result = evaluate_gate(DOC, base_company(), facts)
+    assert result["G2"]["result"] == "PASS"
+    assert result["G3"]["result"] == "FAIL"
+    assert result["G4"]["result"] == "FAIL"
+    assert result["G5"]["result"] == "PASS"  # exhibition source is a ranking signal
+    assert result["G6"]["result"] == "FAIL"
+    assert result["final_result"] == "GO"

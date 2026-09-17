@@ -60,6 +60,11 @@ def _country_allowed(country: str, configured_regions: list[str]) -> bool:
     regs = {_norm(x) for x in configured_regions}
     if not c:
         return False
+    excluded={"united states", "united states of america", "usa", "u.s.a.", "china", "people's republic of china", "prc", "mainland china", "hong kong", "hong kong sar", "macau", "macao", "japan"}
+    if c in excluded:
+        return False
+    if any(x in regs for x in ("world except us china japan", "world_except_us_china_japan", "world")):
+        return True
     if c in regs:
         return True
     if "europe" in regs and c in EUROPE_COUNTRIES:
@@ -252,16 +257,22 @@ def evaluate_gate(text: str, company: dict, facts: dict) -> dict:
         "evidence": evidence_urls[:8],
     }
 
-    states = [results[f"G{i}"]["result"] for i in range(1, 7)]
-    final = "GO" if all(x == "PASS" for x in states) else "NO-GO"
-    first_failed = next((f"G{i}" for i in range(1, 7) if results[f"G{i}"]["result"] == "FAIL"), "")
+    final_cfg=sections.get("FINAL", {})
+    required_all=_split_values(final_cfg.get("REQUIRED_ALL", "G1 | G2"))
+    required_any=_split_values(final_cfg.get("REQUIRED_ANY", ""))
+    all_pass=all(results.get(k,{}).get("result")=="PASS" for k in required_all)
+    any_pass=(not required_any) or any(results.get(k,{}).get("result")=="PASS" for k in required_any)
+    final = "GO" if all_pass and any_pass else "NO-GO"
+    first_failed = next((gate for gate in required_all if results.get(gate, {}).get("result") == "FAIL"), "")
+    if not first_failed and required_any and not any_pass:
+        first_failed = " | ".join(required_any)
     return {
         "final_result": final,
         **results,
         "projectization_risk": "UNKNOWN",
         "standard_gtm": "TRUE" if final == "GO" else "FALSE",
         "routing": "STANDARD_GTM" if final == "GO" else "NO_GO",
-        "most_important_reason": results[first_failed]["reason"] if first_failed else "all live SSOT gates passed",
+        "most_important_reason": results["G2"]["reason"] if final == "GO" else (results.get(first_failed, {}).get("reason") or "required gate failed"),
         "first_failed_gate": first_failed,
         "missing_evidence": [],
         "research_facts": facts,

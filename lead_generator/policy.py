@@ -1,4 +1,9 @@
-"""Evidence-first qualification; unknown checks never become passes."""
+"""Deterministic AUMS capability qualification.
+
+One evidenced capability overlap is enough to enter the sales inventory.  Company
+identity, official website, headquarters geography and duplicate checks remain
+hard controls; commercial/Japan/rights evidence is ranking metadata.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -10,30 +15,38 @@ import tldextract
 
 _EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
 
-VERSION = "2026-09-17-overnight-v1"
+VERSION = "2026-09-18-aums-any-capability-v1"
 FIRST_MILESTONE = 500
-FINAL_TARGET = 2000
+FINAL_TARGET = 1000
 PRIORITY_COUNTRIES = {"Taiwan", "South Korea", "India", "Israel", "Poland", "Czechia", "Croatia",
                       "Slovakia", "Slovenia", "Estonia", "Latvia", "Lithuania", "Hungary", "Romania",
                       "Bulgaria", "Portugal", "Austria", "Belgium", "Netherlands", "Denmark", "Finland",
                       "Sweden", "Norway", "Switzerland", "Luxembourg", "Malta", "Cyprus", "Greece", "Serbia"}
 SECONDARY_COUNTRIES = {"Germany", "France", "Italy", "Spain"}
+EXCLUDED_COUNTRIES = {"United States", "China", "Japan"}
 COUNTRY_ALIASES = {"korea": "South Korea", "republic of korea": "South Korea", "korea, republic of": "South Korea",
                    "czech republic": "Czechia", "台湾": "Taiwan", "韓国": "South Korea", "インド": "India",
-                   "イスラエル": "Israel", "polska": "Poland", "türkiye": "Turkey"}
+                   "イスラエル": "Israel", "polska": "Poland", "türkiye": "Turkey",
+                   "united states of america": "United States", "usa": "United States", "u.s.a.": "United States",
+                   "people's republic of china": "China", "prc": "China", "mainland china": "China",
+                   "hong kong": "China", "hong kong sar": "China", "macao": "China", "macau": "China"}
 PACKAGES = {"01": "Customer Acquisition", "02": "Partner Development", "03": "Localization",
             "04": "Exhibitions & PR", "05": "FDE & Deployment", "06": "PoC & Validation",
             "07": "Customer Success", "08": "Japan Operations"}
 # Ranking only: do not infer an individual company's cash cycle or fee consent.
 SECTORS = {
-    "warehouse_logistics": (100, ("warehouse automation", "intralogistics", "warehouse management", "sortation", "autonomous forklift", "material handling", "logistics software", "fleet management", "倉儲", "物流自動化", "물류"), ("01", "02", "03")),
-    "industrial_vision": (95, ("machine vision", "visual inspection", "defect detection", "video analytics", "ppe detection", "quality inspection", "機器視覺", "檢測", "머신비전"), ("01", "02", "03")),
-    "rfid_tracking": (95, ("rfid", "asset tracking", "rtls", "real-time location", "track and trace"), ("01", "02")),
-    "maintenance_iot": (90, ("predictive maintenance", "condition monitoring", "industrial iot", "iiot", "vibration sensor", "retrofit"), ("01", "02", "03")),
-    "industrial_data": (90, ("manufacturing execution", "production monitoring", "industrial data", "oee", "digital work instructions"), ("01", "02", "03")),
-    "ot_supply_security": (85, ("ot security", "industrial cybersecurity", "supply chain risk", "ics security"), ("01", "02", "03")),
-    "industrial_automation": (75, ("industrial automation", "factory automation", "robotics", "robotic", "motion control", "machine tools", "工業自動化", "自動化", "로봇"), ("01", "02", "03")),
-    "materials_research": (50, ("additive manufacturing", "metal powder", "atomization", "nanomaterial", "semiconductor", "advanced materials"), ("01", "02", "04")),
+    "inspection_metrology": (120, ("inline metrology", "portable metrology", "3d metrology", "3d scanning", "laser tracker", "photogrammetry", "optical inspection", "industrial inspection", "machine vision", "visual inspection", "quality inspection", "defect detection", "non-destructive testing", "nondestructive testing", "ndt", "weld inspection", "ultrasonic testing", "computed tomography", "industrial ct", "metrology", "機器視覺", "檢測", "머신비전"), ("01", "02", "03", "06")),
+    "heavy_unstructured_handling": (118, ("heavy duty amr", "heavy-duty amr", "outdoor amr", "autonomous transporter", "autonomous mobile robot", "autonomous forklift", "large part handling", "heavy object transport", "material handling", "intralogistics", "warehouse robot", "shipyard logistics", "yard automation", "fleet management", "agv", "amr", "倉儲", "物流自動化", "물류"), ("01", "02", "03", "06")),
+    "metal_am_waam_repair": (116, ("metal additive manufacturing", "wire arc additive", "waam", "directed energy deposition", "ded", "hybrid additive", "hybrid manufacturing", "cold spray", "repair additive", "additive repair", "spare parts additive", "large format additive", "lfam", "metal 3d printing"), ("01", "02", "04", "06")),
+    "advanced_materials_feedstock": (114, ("metal powder", "alloy powder", "powder atomization", "gas atomization", "ultrasonic atomization", "feedstock", "powder recycling", "powder qualification", "wire feedstock", "refractory alloy", "high entropy alloy", "advanced alloy", "advanced materials"), ("01", "02", "04", "06")),
+    "cross_vendor_industrial_data": (112, ("industrial data", "manufacturing data", "dataops", "industrial dataops", "unified namespace", "opc ua", "mqtt", "industrial edge", "edge gateway", "data contextualization", "semantic layer", "manufacturing execution", "mes", "mom", "production monitoring", "oee", "iiot", "industrial iot"), ("01", "02", "03")),
+    "robot_process_orchestration": (110, ("robot orchestration", "multi-robot", "multi robot", "robot fleet", "dynamic scheduling", "production scheduling", "process planning", "robot programming", "no-code robotics", "low-code robotics", "digital twin", "manufacturing simulation", "factory simulation", "robot operating system", "ros industrial", "motion planning"), ("01", "02", "03", "06")),
+    # Adjacent AUMS capabilities are also OR-eligible.  The six gaps above rank first.
+    "adaptive_joining_surface": (96, ("adaptive welding", "robotic welding", "laser welding", "welding automation", "robotic grinding", "surface treatment", "robotic painting", "coating automation", "post-processing automation"), ("01", "02", "03", "06")),
+    "design_simulation_execution": (94, ("generative design", "cad automation", "cam automation", "manufacturing simulation", "process simulation", "production planning", "digital work instructions", "factory ai", "industrial ai", "production optimization"), ("01", "02", "03", "06")),
+    "manipulation_identification": (92, ("robotic manipulation", "bin picking", "grasp planning", "irregular object", "machine tending", "rfid", "rtls", "asset tracking", "track and trace", "traceability"), ("01", "02", "03")),
+    "maintenance_repair": (90, ("predictive maintenance", "condition monitoring", "vibration monitoring", "maintenance software", "mro", "repair automation", "retrofit"), ("01", "02", "03")),
+    "industrial_automation_adjacent": (88, ("industrial automation", "factory automation", "industrial robotics", "robotics", "robotic", "cobot", "machine tool", "cnc", "motion control", "factory software", "manufacturing software", "工業自動化", "自動化", "로봇"), ("01", "02", "03")),
 }
 
 def normalize_country(value):
@@ -71,25 +84,22 @@ def proof_valid(proof):
                 and proof.get("checked_at") and proof.get("http_status") == 200)
 
 def qualification(record, now=None):
-    """All gates are auditable; positive Japan evidence overrides negative scans."""
+    """PASS when one AUMS capability is evidenced and hard controls pass."""
     now = now or datetime.now(timezone.utc)
     reasons, reject = [], []
     if not record.get("company_name") or not domain(record.get("website")):
         reasons.append("identity_unverified")
     country = normalize_country(record.get("country"))
-    if country not in PRIORITY_COUNTRIES | SECONDARY_COUNTRIES:
-        (reasons if not country else reject).append("hq_country_unverified" if not country else "outside_target_geographies")
+    if not country:
+        reasons.append("hq_country_unverified")
+    elif country in EXCLUDED_COUNTRIES:
+        reject.append("excluded_hq_country")
     if not proof_valid(record.get("identity_proof")):
         reasons.append("official_company_identity_unverified")
     if not proof_valid(record.get("country_proof")):
         reasons.append("hq_country_evidence_missing")
-    if not proof_valid(record.get("exhibition_proof")):
-        reasons.append("exhibition_participation_unverified")
-    commercial = record.get("commercial_proof", {})
-    if not proof_valid(commercial):
-        reasons.append("commercial_product_unverified")
-    # Financial disclosure is optional. A commercial proxy needs independent
-    # customer evidence AND repeated marketing spend, and remains labelled a proxy.
+    # Commercial evidence, rights, Japan presence and cash capacity rank the row;
+    # they never suppress a company that matches one capability.
     finance = record.get("payment_capacity", {})
     direct = finance.get("basis") in {"reported_revenue", "reported_profit", "funding", "confirmed_budget"} and proof_valid(finance)
     exhibitions = finance.get("repeat_exhibitions", [])
@@ -97,27 +107,13 @@ def qualification(record, now=None):
     proxy = (finance.get("basis") == "commercial_proxy"
              and proof_valid(finance.get("customer_deployment"))
              and len(distinct_events) >= 2)
-    if not (direct or proxy):
-        reasons.append("payment_capacity_evidence_incomplete")
-    # The record must explicitly scope the first engagement to sales work.
     offer = record.get("initial_offer", {})
-    if offer.get("delivery") not in {"qualified_leads", "customer_appointments", "partner_appointments"}:
-        reasons.append("initial_sales_offer_unscoped")
     if offer.get("requires_full_time_fde") or offer.get("requires_joint_research"):
         reject.append("initial_scope_exceeds_current_capacity")
     japan = record.get("japan", {})
-    if japan.get("direct_presence") or japan.get("country_manager"):
-        reject.append("japan_direct_presence_or_country_manager")
-    checks = japan.get("checks", {})
-    required = ("official_locations", "official_contacts", "linkedin_country_manager", "public_japan_search")
-    for name in required:
-        check = checks.get(name, {})
-        if not proof_valid(check) or check.get("outcome") not in {"no_direct_presence_found", "distributor_only"}:
-            reasons.append("japan_check_incomplete:" + name)
-    # Complete successful searches establish the bounded finding, never absolute absence.
     sector = classify(record.get("product_text", ""))
     if not sector["score"]:
-        reasons.append("industrial_or_logistics_product_unverified")
+        reasons.append("no_aums_capability_overlap")
     if reject:
         decision = "REJECT"
     elif reasons:
@@ -127,6 +123,6 @@ def qualification(record, now=None):
     return {"decision": decision, "reasons": reject + reasons, "policy_version": VERSION,
             "country": country, **sector,
             "priority_score": sector["score"] + (20 if country in PRIORITY_COUNTRIES else 0),
-            "japan_status": "DISTRIBUTOR_ONLY" if japan.get("distributor_only") else "NO_DIRECT_PRESENCE_FOUND_IN_CHECKED_SOURCES",
-            "payment_capacity_level": "COMMERCIAL_PROXY" if proxy else "DOCUMENTED_SIGNAL",
+            "japan_status": "DIRECT_PRESENCE" if japan.get("direct_presence") else ("DISTRIBUTOR_ONLY" if japan.get("distributor_only") else "UNKNOWN"),
+            "payment_capacity_level": "COMMERCIAL_PROXY" if proxy else ("DOCUMENTED_SIGNAL" if direct else "UNKNOWN"),
             "prepayment_willingness": "UNCONFIRMED_UNTIL_COMMERCIAL_DISCUSSION"}

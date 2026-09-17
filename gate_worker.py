@@ -39,9 +39,8 @@ class GateWorker:
         facts = research_gate_facts(self.llm, company_context)
         result = evaluate_gate(gate.text, company_context, facts)
 
-        # The live Doc contract is binary: all six PASS => GO; any FAIL => NO-GO.
-        gate_states = [str(self._gate(result, f"G{i}").get("result", "FAIL")).upper() for i in range(1, 7)]
-        result["final_result"] = "GO" if all(state == "PASS" for state in gate_states) else "NO-GO"
+        # Final eligibility is calculated by the live Doc contract.  G3-G6 may
+        # rank a lead without suppressing a G1+G2 capability match.
 
         now = datetime.now(timezone.utc).isoformat()
         row = {

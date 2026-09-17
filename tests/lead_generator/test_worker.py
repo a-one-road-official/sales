@@ -1,7 +1,7 @@
 import copy
 import tempfile
 import unittest
-from lead_generator.policy import qualification,domain,company_key
+from lead_generator.policy import qualification,domain,company_key,FINAL_TARGET
 from lead_generator.store import Store
 from lead_generator.sync import Mirror,AmbiguousWrite
 
@@ -9,7 +9,7 @@ from lead_generator.sync import Mirror,AmbiguousWrite
 def record():
     p={'url':'https://example.com/evidence','excerpt':'test fixture only', 'checked_at':'2026-09-17T00:00:00+00:00','http_status':200}
     return {'company_name':'Fixture Robotics','website':'https://fixture-robotics.example.com','country':'India',
-      'product_text':'warehouse automation','identity_proof':p,'country_proof':p,'exhibition_proof':p,
+      'product_text':'autonomous mobile robot for material handling','identity_proof':p,'country_proof':p,'exhibition_proof':p,
       'commercial_proof':p,'payment_capacity':dict(p,basis='confirmed_budget'),
       'initial_offer':{'delivery':'qualified_leads'},
       'japan':{'checks':{k:dict(p,outcome='no_direct_presence_found') for k in
@@ -35,24 +35,33 @@ class Tests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.store=Store(self.tmp.name+'/s.sqlite')
         self.store.set('command','START');self.api=Fake();self.m=Mirror(self.store,self.api,'test')
     def tearDown(self):self.store.db.close();self.tmp.cleanup()
-    def test_unknown_is_not_pass(self):
+    def test_unknown_japan_detail_is_ranking_only(self):
         r=record();r['japan']['checks'].pop('linkedin_country_manager')
-        self.assertEqual(qualification(r)['decision'],'REVIEW')
-    def test_country_manager_overrides_other_proofs(self):
+        self.assertEqual(qualification(r)['decision'],'PASS')
+    def test_japan_country_manager_is_ranking_only(self):
         r=record();r['japan']['country_manager']=True
-        self.assertEqual(qualification(r)['decision'],'REJECT')
+        self.assertEqual(qualification(r)['decision'],'PASS')
     def test_distributor_allowed(self):
         r=record();r['japan']['distributor_only']=True
         self.assertEqual(qualification(r)['decision'],'PASS')
+    def test_any_single_aums_capability_is_enough(self):
+        r=record();r['product_text']='portable 3d metrology'
+        self.assertEqual(qualification(r)['decision'],'PASS')
+    def test_us_china_and_japan_are_excluded(self):
+        for country in ('United States','China','Japan'):
+            r=record();r['country']=country
+            self.assertEqual(qualification(r)['decision'],'REJECT')
+    def test_target_is_one_thousand_new_companies(self):
+        self.assertEqual(FINAL_TARGET,1000)
     def test_scope_rejected(self):
         r=record();r['initial_offer']['requires_full_time_fde']=True
         self.assertEqual(qualification(r)['decision'],'REJECT')
-    def test_proxy_requires_independent_commercial_evidence(self):
+    def test_commercial_evidence_is_ranking_only(self):
         r=record();p=r['commercial_proof'];r['payment_capacity']={'basis':'commercial_proxy','customer_deployment':p,
             'repeat_exhibitions':[dict(p,event_id='expo2025'),dict(p,event_id='expo2026')]}
         self.assertEqual(qualification(r)['decision'],'PASS')
         r['payment_capacity']['repeat_exhibitions'][1]['event_id']='expo2025'
-        self.assertEqual(qualification(r)['decision'],'REVIEW')
+        self.assertEqual(qualification(r)['decision'],'PASS')
     def test_retry_after_committed_timeout_does_not_duplicate(self):
         r=record();self.api.fail='sacrifice';self.api.commit_on_fail=True
         self.assertEqual(self.m.sync_one(company_key(r),r),'BOTH_VERIFIED')
