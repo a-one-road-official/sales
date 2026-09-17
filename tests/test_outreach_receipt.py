@@ -22,6 +22,8 @@ def local_site(html, response="Thank you for reaching out. Your message has been
     received = []
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            if self.path.startswith('/capture?'):
+                received.append(self.path)
             self.send_response(200)
             self.send_header("Content-Type", "application/javascript" if self.path.endswith('.js') else "text/html")
             self.end_headers()
@@ -138,6 +140,16 @@ def test_preview_fills_without_sending(monkeypatch):
         result = form_run(url, monkeypatch, preview=True)
         assert result['status'] == 'FORM_PREVIEW_READY'
         assert result['submission_attempted'] is False
+        assert not received
+
+
+@pytest.mark.browser
+def test_readonly_preview_blocks_get_autosave_of_entered_data(monkeypatch):
+    html = '''<form method=get action=/capture><input name=email type=email oninput="fetch('/capture?email='+encodeURIComponent(this.value))">
+    <textarea name=message></textarea><button type=submit>Send</button></form>'''
+    with local_site(html) as (url, received):
+        result = form_run(url, monkeypatch, preview=True)
+        assert result['status'] == 'FORM_PREVIEW_READY', result
         assert not received
 
 

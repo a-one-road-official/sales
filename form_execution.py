@@ -968,10 +968,13 @@ class PublicContactFormExecutor:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=True)
                 page = browser.new_page()
+                preview_filling_started = False
                 if preview_only:
                     # Multi-step forms can transmit partial data on Next. The
                     # forensic preview must never issue such submissions.
-                    page.route("**/*", lambda route: route.continue_() if route.request.method.upper() in {"GET", "HEAD"} else route.abort())
+                    # A GET form or autosave beacon can also carry entered data.
+                    # Freeze network activity before filling, not just POSTs.
+                    page.route("**/*", lambda route: route.continue_() if not preview_filling_started and route.request.method.upper() in {"GET", "HEAD"} else route.abort())
                 try:
                     action_timeout_ms = int(
                         os.getenv("OUTREACH_FORM_ACTION_TIMEOUT_MS", "7000") or 7000
@@ -1035,6 +1038,7 @@ class PublicContactFormExecutor:
                         action_url=action,
                     )
 
+                preview_filling_started = True
                 seen_step_signatures = set()
                 for step_index in range(4):
                     current_step_signature = _visible_step_signature(form)
@@ -1345,14 +1349,13 @@ class PublicContactFormExecutor:
                     control_label = _control_label(submit)
                     if re.search(r"\bnext\b", control_label, re.I):
                         before_click_signature = _visible_step_signature(form)
+                        if not preview_only:
+                            submission_attempted = True  # A server-side step can transmit partial data.
                         try:
                             submit.click(timeout=15000)
-                        except Exception as first_click_error:
-                            _dismiss_cookie_banner([page] + list(page.frames[1:]))
-                            try:
-                                submit.click(timeout=15000)
-                            except Exception:
-                                raise first_click_error
+                        except Exception:
+                            return result_payload("FORM_FAILED" if preview_only else "FORM_UNCONFIRMED",
+                                                  reason="STEP_CLICK_OUTCOME_UNKNOWN")
                         try:
                             page.wait_for_load_state("domcontentloaded", timeout=5000)
                         except Exception:

@@ -3,13 +3,7 @@ on:
   push:
     branches: [codex/outreach-receipt-repair]
     paths:
-      - diagnose_failed_forms.py
-      - form_execution.py
-      - browser_fetch.py
-      - sacrifice_web_research.py
-      - .github/workflows/outreach_failure_diagnosis.yml
-      - data/outreach_quality_candidates.json
-      - data/outreach_bpo_research.json
+      - .github/outreach-diagnosis-trigger
   workflow_dispatch:
 permissions:
   contents: read
