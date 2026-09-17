@@ -135,8 +135,25 @@ jobs:
           cat runtime.log
           exit 1
 
+      - name: Check outbound activation before touching company records
+        id: outbound
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          policy = json.loads(Path("data/contact_policy.json").read_text())
+          active = policy.get("enabled") is True and bool(policy.get("accounts"))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("active=" + str(active).lower() + "\n")
+          if not active:
+              report = {"status": "STARTED_OUTBOUND_BLOCKED", "reason": "policy_paused_or_no_permitted_accounts", "attempted": 0, "success_count": 0}
+              Path("bulk-summary.json").write_text(json.dumps(report, indent=2))
+              print(json.dumps(report))
+          PY
+
       - name: Execute all eligible sacrifice lanes in bounded sequential batches
-        if: ${{ inputs.mode == 'execute' || github.event_name == 'push' }}
+        if: ${{ (inputs.mode == 'execute' || github.event_name == 'push') && steps.outbound.outputs.active == 'true' }}
         run: |
           set -euo pipefail
           python - <<'PY'
