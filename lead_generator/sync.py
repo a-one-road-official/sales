@@ -40,6 +40,7 @@ class Sheets:
         updates={'B47':'配備済','B48':status['control'].get('state',''),
                  'B51':status['seeds'],'B52':status['qualification'].get('PASS',0),
                  'B53':status['both_verified_new'],'B54':now()}
+        updates['B58']=store.db.execute("SELECT count(*) FROM seeds WHERE state='PROFILE_COLLECTED_REVIEW'").fetchone()[0]
         self.request('POST','ssot','/values:batchUpdate',json={'valueInputOption':'RAW','data':[
             {'range':f"'{tab}'!{cell}",'values':[[value]]} for cell,value in updates.items()]})
 
