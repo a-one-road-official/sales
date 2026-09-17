@@ -48,14 +48,28 @@ jobs:
 
       - name: Keep all autonomous execution paused
         run: |
-          set +e
+          set -u
           for JOB in $(gcloud scheduler jobs list --location="$REGION" --project="$PROJECT" --format='value(name)' --filter='name:lead-factory' | sed 's#.*/##'); do
             [ -n "$JOB" ] || continue
             gcloud scheduler jobs pause "$JOB" --location="$REGION" --project="$PROJECT" || true
           done
+
+          ACTIVE_ACCOUNT="$(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -1)"
+          QUEUE_PAUSE_FAILED=0
           for QUEUE in lead-factory-workers lead-factory-priority-workers; do
-            gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT" || true
+            if ! gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT"; then
+              QUEUE_PAUSE_FAILED=1
+            fi
           done
+
+          if [ "$QUEUE_PAUSE_FAILED" -eq 1 ] && [[ "$ACTIVE_ACCOUNT" == *".iam.gserviceaccount.com" ]]; then
+            echo "Queue pause permission is missing; attempting a self-heal IAM grant for $ACTIVE_ACCOUNT"
+            gcloud projects add-iam-policy-binding "$PROJECT"               --member="serviceAccount:$ACTIVE_ACCOUNT"               --role="roles/cloudtasks.admin"               --condition=None || true
+            sleep 10
+            for QUEUE in lead-factory-workers lead-factory-priority-workers; do
+              gcloud tasks queues pause "$QUEUE" --location="$REGION" --project="$PROJECT" || true
+            done
+          fi
 
       - name: Build paused repair image
         run: |
@@ -63,6 +77,24 @@ jobs:
           gcloud auth configure-docker asia-northeast1-docker.pkg.dev --quiet
           IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/aone-lead-factory/aone-lead-factory:${GITHUB_SHA}"
           docker build -t "$IMAGE" .
+
+          # Prove the image itself serves the shallow health endpoint before any
+          # Cloud Run mutation. This catches app/CMD/import regressions locally.
+          CID="$(docker run -d -p 18080:8080             -e LEAD_FACTORY_PAID_CLOUD_ALLOWED=FALSE             -e LEAD_FACTORY_PAID_AI_ALLOWED=FALSE             -e LEAD_FACTORY_VERTEX_ALLOWED=FALSE             -e LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED=FALSE             "$IMAGE")"
+          trap 'docker rm -f "$CID" >/dev/null 2>&1 || true' EXIT
+          for i in $(seq 1 30); do
+            if curl --fail --silent --show-error --max-time 3 http://127.0.0.1:18080/healthz; then
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              docker logs "$CID" || true
+              exit 1
+            fi
+            sleep 1
+          done
+          docker rm -f "$CID" >/dev/null 2>&1 || true
+          trap - EXIT
+
           docker push "$IMAGE"
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
