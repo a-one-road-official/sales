@@ -1,3 +1,5 @@
+import json
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +16,21 @@ def lead(**kw):
 
 def decision(vendor=None, ssot=None, history=()):
     return plan(vendor if vendor is not None else [lead()], ssot or [], history)["companies"][0]
+
+
+@pytest.fixture
+def permitted_candidate(monkeypatch, tmp_path):
+    """Exercise reservation guards with a real, isolated account permit."""
+    candidate = {**lead(), "company_id": "company:abc", "candidate_website": lead()["website"]}
+    policy = {"enabled": True, "accounts": {"company:abc": {
+        **candidate, "mode": "BULK_ALLOWED", "lane": "BPO", "campaign_id": "test",
+        "approved_by": "test-operator", "approval_evidence": "fixture-only",
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+    }}, "campaigns": {"test": {"enabled": True, "mode": "PILOT"}}}
+    path = tmp_path / "policy.json"
+    path.write_text(json.dumps(policy), encoding="utf-8")
+    monkeypatch.setattr("contact_policy.POLICY_PATH", path)
+    return candidate
 
 
 def test_live_uncontacted_can_enter_research_only():
@@ -102,11 +119,11 @@ def test_no_snapshot_fallback_on_live_source_failure():
             live_candidates(repo, "BPO")
 
 
-def test_claim_is_only_written_to_new_workbook_and_requires_ack(monkeypatch):
+def test_claim_is_only_written_to_new_workbook_and_requires_ack(monkeypatch, permitted_candidate):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("GITHUB_WORKFLOW", "生贄 bulk outbound (Playwright/email; Vertex forbidden)")
     repo = MagicMock(spreadsheet_id=WORKBOOK_ID)
-    candidate = {**lead(), "company_id": "company:abc", "candidate_website": lead()["website"]}
+    candidate = permitted_candidate
     with patch("workbook_sales.live_candidates", return_value=[candidate]):
         repo.svc.spreadsheets().values().append().execute.return_value = {"updates": {"updatedRows": 1}}
         claim_candidate(repo, candidate, "BPO", "run1")
@@ -118,21 +135,21 @@ def test_claim_is_only_written_to_new_workbook_and_requires_ack(monkeypatch):
             claim_candidate(repo, candidate, "BPO", "run1")
 
 
-def test_stale_candidate_is_not_claimed(monkeypatch):
+def test_stale_candidate_is_not_claimed(monkeypatch, permitted_candidate):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("GITHUB_WORKFLOW", "生贄 bulk outbound (Playwright/email; Vertex forbidden)")
     repo = MagicMock()
     with patch("workbook_sales.live_candidates", return_value=[]):
         with pytest.raises(ValueError):
-            claim_candidate(repo, {"company_id": "old"}, "BPO", "run")
+            claim_candidate(repo, permitted_candidate, "BPO", "run")
     repo.svc.spreadsheets.assert_not_called()
 
 
-def test_independent_runtime_cannot_start_a_parallel_sender(monkeypatch):
+def test_independent_runtime_cannot_start_a_parallel_sender(monkeypatch, permitted_candidate):
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     repo = MagicMock()
     with pytest.raises(ValueError, match="serialized_github_workflow_required"):
-        claim_candidate(repo, {}, "BPO", "run")
+        claim_candidate(repo, permitted_candidate, "BPO", "run")
     repo.svc.spreadsheets.assert_not_called()
 
 
