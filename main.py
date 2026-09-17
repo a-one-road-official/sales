@@ -5,7 +5,7 @@ import os
 import threading
 import uuid
 
-from cost_guard import assert_zero_ai_budget, require_paid_ai
+from cost_guard import assert_zero_ai_budget, budget_snapshot, paid_cloud_allowed, require_paid_ai
 assert_zero_ai_budget()
 
 import google.auth
@@ -66,7 +66,7 @@ def _run_recovery_pump() -> None:
     _recovery_stop.wait(initial_delay)
     recovery_stage = "SOURCE"
     while not _recovery_stop.is_set():
-        if os.getenv("LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED", "TRUE").upper() == "TRUE":
+        if os.getenv("LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED", "FALSE").upper() == "TRUE":
             try:
                 with _recovery_lock:
                     current_stage = recovery_stage
@@ -105,7 +105,7 @@ def _run_recovery_pump() -> None:
 @app.on_event("startup")
 def start_recovery_pump() -> None:
     global _recovery_thread
-    if os.getenv("LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED", "TRUE").upper() != "TRUE":
+    if os.getenv("LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED", "FALSE").upper() != "TRUE":
         return
     if _recovery_thread and _recovery_thread.is_alive():
         return
@@ -164,6 +164,20 @@ async def internal_runtime_guard(request: Request, call_next):
     supplied = request.headers.get("X-Aone-Internal-Token", "")
     if not expected or not supplied or not hmac.compare_digest(expected, supplied):
         return JSONResponse(status_code=401, content={"detail": "internal_runtime_token_required"})
+
+    # Zero-cost Cloud Run quarantine. Stale Scheduler/Cloud Tasks deliveries are
+    # acknowledged with HTTP 200 so they cannot fan out, retry, touch Sheets,
+    # instantiate workers, or trigger any network/model work while the paid-cloud
+    # budget gate is closed.
+    if not paid_cloud_allowed():
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "BUDGET_BLOCKED_ACK",
+                "path": request.url.path,
+                "paid_cloud_allowed": False,
+            },
+        )
     return await call_next(request)
 
 
@@ -244,6 +258,7 @@ def healthz():
         "external_write": os.getenv("LEAD_FACTORY_ALLOW_EXTERNAL_WRITE", "FALSE").upper() == "TRUE",
         "delete": False,
         "official_site_policy": "VERIFIED_FIRST_PARTY_REQUIRED",
+        "budget": budget_snapshot(),
     }
 
 
