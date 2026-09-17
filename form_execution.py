@@ -538,8 +538,22 @@ def _captcha_present(contexts) -> bool:
             try:
                 locator = context.locator(selector)
                 for index in range(min(locator.count(), 8)):
-                    if locator.nth(index).is_visible():
-                        return True
+                    widget = locator.nth(index)
+                    if not widget.is_visible():
+                        continue
+                    # Google's documented invisible integration decorates the
+                    # ordinary submit button. A badge/config attribute alone is
+                    # not a human challenge. The site's own validation still runs;
+                    # a visible checkbox/image challenge continues to stop us.
+                    tag = widget.evaluate("el => el.tagName.toLowerCase()")
+                    src = str(widget.get_attribute('src') or '')
+                    if widget.get_attribute('data-size') == 'invisible':
+                        continue
+                    if tag in {'button', 'input'} and widget.get_attribute('data-callback') and 'g-recaptcha' in str(widget.get_attribute('class') or ''):
+                        continue
+                    if tag == 'iframe' and '/anchor?' in src and re.search(r'(?:[?&])size=invisible(?:&|$)', src):
+                        continue
+                    return True
             except Exception:
                 continue
         try:

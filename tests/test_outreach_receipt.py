@@ -154,6 +154,24 @@ def test_readonly_preview_blocks_get_autosave_of_entered_data(monkeypatch):
 
 
 @pytest.mark.browser
+def test_passive_recaptcha_button_is_not_a_visible_human_challenge(monkeypatch):
+    html = '<form method=post><input name=email type=email><textarea name=message></textarea><button type=submit class=g-recaptcha data-sitekey=fixture data-callback=normalSiteValidation>Send</button></form>'
+    with local_site(html) as (url, received):
+        result = form_run(url, monkeypatch, preview=True)
+        assert result['status'] == 'FORM_PREVIEW_READY', result
+        assert not received
+
+
+@pytest.mark.browser
+def test_visible_human_challenge_still_stops_submission(monkeypatch):
+    html = '<form method=post><input name=email type=email><textarea name=message></textarea><div class=g-recaptcha data-sitekey=fixture>Verify you are human</div><button type=submit>Send</button></form>'
+    with local_site(html) as (url, received):
+        result = form_run(url, monkeypatch)
+        assert result['reason'] == 'CAPTCHA_PRESENT'
+        assert not received
+
+
+@pytest.mark.browser
 def test_short_form_uses_complete_compact_message_instead_of_truncation():
     html = '<form method=post><input name=email type=email><textarea name=message maxlength=120></textarea><button type=submit>Send</button></form>'
     with local_site(html) as (url, received):
