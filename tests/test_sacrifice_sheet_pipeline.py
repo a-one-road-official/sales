@@ -3,7 +3,7 @@ import hashlib
 import unittest
 from unittest.mock import Mock
 
-from sacrifice_sheet_pipeline import SACRIFICE_ID, SSOT_ID, ORIGIN, SacrificeStore, message_gate, policy, process, research_gate, validate_seed
+from sacrifice_sheet_pipeline import LEGACY_SACRIFICE_ID, SACRIFICE_ID, SSOT_ID, ORIGIN, SacrificeStore, message_gate, policy, process, research_gate, validate_seed
 
 
 class PipelineTests(unittest.TestCase):
@@ -35,6 +35,8 @@ class PipelineTests(unittest.TestCase):
 
     def test_env_must_pin_sacrifice(self):
         with self.assertRaises(ValueError):policy({"SACRIFICE_SPREADSHEET_ID":SSOT_ID})
+        with self.assertRaisesRegex(ValueError,"legacy_sacrifice_disconnected"):
+            policy({"SACRIFICE_SPREADSHEET_ID":LEGACY_SACRIFICE_ID})
         policy({"SACRIFICE_SPREADSHEET_ID":SACRIFICE_ID})
 
     def test_vertex_true_rejected(self):
