@@ -36,6 +36,7 @@ jobs:
         run: |
           python -m compileall .
           pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
           pytest -q
 
       - name: Authenticate to Google Cloud

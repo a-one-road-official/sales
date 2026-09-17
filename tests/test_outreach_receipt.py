@@ -184,6 +184,50 @@ def test_short_form_uses_complete_compact_message_instead_of_truncation():
 
 
 @pytest.mark.browser
+def test_single_line_message_preserves_all_words_and_returns_exact_text():
+    html = '<form method=post><input name=email type=email><input name=message><button type=submit>Send</button></form>'
+    with local_site(html) as (url, received):
+        preview = PublicContactFormExecutor().preview_candidates(form_urls=[url], website=url,
+            company_name='LocalFixture', subject='Partnership', message='Hello team,\n\nA complete partnership proposal.\nKazuma Tamura')
+        assert preview['ready'] is True, preview
+        assert preview['message'] == 'Hello team, A complete partnership proposal. Kazuma Tamura'
+        assert not received
+
+
+@pytest.mark.browser
+def test_country_code_phone_placeholder_and_service_type(monkeypatch):
+    html = '''<form method=post><input name=email type=email required>
+    <input name=phone placeholder="Country code + Phone Number" required>
+    <select name=service_type required><option value=''>Service Type</option><option>Partnership</option></select>
+    <select name=country required><option value=''>Country / Region</option><option>APAC</option></select>
+    <textarea name=message required></textarea><button type=submit>Send</button></form>'''
+    with local_site(html) as (url, received):
+        result = form_run(url, monkeypatch)
+        assert result['status'] == 'FORM_SENT', result
+        from urllib.parse import parse_qs
+        fields = parse_qs(received[0])
+        assert fields['phone'] == ['+818048705690']
+        assert fields['service_type'] == ['Partnership']
+        assert fields['country'] == ['APAC']
+
+
+@pytest.mark.browser
+@pytest.mark.parametrize('optional', [False, True])
+def test_cf7_marketing_consent_is_never_silently_accepted(monkeypatch, optional):
+    html = '''<form method=post><input name=email type=email><textarea name=message></textarea>
+    <span class="wpcf7-acceptance %s"><label><input type=checkbox name=consent>
+    You also agree to receive marketing communications and promotional offers.</label></span>
+    <button type=submit>Send</button></form>''' % ('optional' if optional else '')
+    with local_site(html) as (url, received):
+        result = form_run(url, monkeypatch, preview=True)
+        assert result['status'] == ('FORM_PREVIEW_READY' if optional else 'BLOCKED'), result
+        if not optional:
+            assert result['reason'] == 'MANDATORY_MARKETING_CONSENT'
+        assert result['checkbox_audit'][0]['final_checked'] is False
+        assert not received
+
+
+@pytest.mark.browser
 def test_existing_thank_you_text_does_not_prove_new_receipt(monkeypatch):
     html = '<p>Thank you for reaching out</p><form method=post><input name=email type=email><textarea name=message></textarea><button type=submit>Send</button></form>'
     with local_site(html, response=html) as (url, received):

@@ -145,13 +145,15 @@ def _field_key(el, label: str) -> str:
         return "message"
     if typ == "email" or re.search(r"\b(e[- ]?mail|email)\b", marker):
         return "email"
+    if typ in {"tel", "phone"} or (tag == 'input' and re.search(r"\b(phone|telephone|tel|mobile|電話)\b", marker)):
+        return "phone"
     if re.search(r"gmv[_ -]?range|annual[_ -]?(?:e[_ -]?)?commerce[_ -]?(?:revenue|sales)|annual\s+revenue|年商", marker):
         return "revenue"
     if re.search(r"monthly[_ -]?(?:website[_ -]?)?traffic|website\s+traffic|月間.*(?:traffic|アクセス)", marker):
         return "monthly_traffic"
     if re.search(r"ecommerce[_ -]?platform|e-commerce\s+platform|\bplatform\b", marker):
         return "platform"
-    if re.search(r"reason[_ -]?for[_ -]?contact|(?:type[_ -]?of[_ -]?(?:enquiry|inquiry))|(?:inquiry|enquiry)[_ -]?type|looking\s+to\s+talk|相談先|問い合わせ先", marker):
+    if re.search(r"reason[_ -]?for[_ -]?contact|(?:type[_ -]?of[_ -]?(?:enquiry|inquiry))|(?:inquiry|enquiry|service)[_ -]?type|looking\s+to\s+talk|相談先|問い合わせ先", marker):
         return "reason"
     if re.search(r"how[_ -]?did[_ -]?you[_ -]?(?:learn|hear)|流入元|知ったきっかけ", marker):
         return "discovery_source"
@@ -171,6 +173,10 @@ def _field_key(el, label: str) -> str:
     if re.search(r"\b(last[- _]?name|family[- _]?name|surname|姓)\b", marker):
         return "last_name"
     if re.search(r"\b(country|nation)\b|countryregion(?:_|$)|\b(国|国名)\b", marker):
+        if tag == 'select':
+            options = str(el.inner_text() or '').lower()
+            if 'japan' not in options and re.search(r'\bapac\b|asia[- ]pacific', options):
+                return 'region'
         return "country"
     if re.search(r"\bregion\b", marker):
         return "region"
@@ -198,10 +204,19 @@ def _field_key(el, label: str) -> str:
 
 
 def _required(el) -> bool:
-    return (
+    if (
         el.get_attribute("required") is not None
         or str(el.get_attribute("aria-required") or "").lower() == "true"
-    )
+    ):
+        return True
+    # Contact Form 7 acceptance fields disable submission without setting
+    # HTML required. Its explicit optional class is the only opt-out.
+    if (el.get_attribute("type") or "").lower() == "checkbox":
+        return bool(el.evaluate("""el => {
+            const acceptance = el.closest('.wpcf7-acceptance');
+            return !!acceptance && !acceptance.classList.contains('optional');
+        }"""))
+    return False
 
 
 def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | None:
@@ -850,9 +865,9 @@ class PublicContactFormExecutor:
                                       idempotency_key="read-only-compact-preview", preview_only=True)
                 attempts.append(result)
                 if result["status"] == "FORM_PREVIEW_READY":
-                    return {"form_url": url, "attempts": attempts, "ready": True, "message": compact_message}
+                    return {"form_url": url, "attempts": attempts, "ready": True, "message": result.get("submitted_message", compact_message)}
             if result["status"] == "FORM_PREVIEW_READY":
-                return {"form_url": url, "attempts": attempts, "ready": True, "message": message}
+                return {"form_url": url, "attempts": attempts, "ready": True, "message": result.get("submitted_message", message)}
         return {"form_url": "", "attempts": attempts, "ready": False}
 
     def _existing(
@@ -1126,6 +1141,11 @@ class PublicContactFormExecutor:
                                     item["final_value"] = selected_text or _current_value(el)
                             else:
                                 fill_value = value
+                                if key == "message" and tag == "input":
+                                    # Single-line HTML inputs discard newlines.
+                                    # Preserve word boundaries and return the
+                                    # actual text to the runner for persistence.
+                                    fill_value = re.sub(r"[\r\n]+", " ", value)
                                 if key == "phone":
                                     picker_present, phone_country_ok = _select_phone_country(el, form_context)
                                     item["phone_country"] = (
@@ -1349,6 +1369,8 @@ class PublicContactFormExecutor:
                     if not any(field_status.get(key) == "FILLED" for key in ("name", "company", "email")):
                         core_unfilled.append("identity")
                     if missing_required or core_unfilled:
+                        if any(item.get("action") == "REQUIRED_MARKETING_OPT_IN_BLOCKED" for item in checkbox_audit):
+                            return result_payload("BLOCKED", reason="MANDATORY_MARKETING_CONSENT")
                         return result_payload(
                             "FORM_FAILED",
                             reason="REQUIRED_FIELD_MAPPING_UNCERTAIN",
@@ -1397,18 +1419,21 @@ class PublicContactFormExecutor:
                 actual_messages = []
                 for index in range(fields.count()):
                     el = fields.nth(index)
-                    if _field_key(el, _label_for(el)) == "message":
+                    if el.is_visible() and el.is_enabled() and _field_key(el, _label_for(el)) == "message":
                         actual_messages.append(_current_value(el))
-                if message not in actual_messages:
+                matching_messages = [value for value in actual_messages if value.split() == message.split()]
+                if not matching_messages:
                     limits = [int(item["maxlength"]) for item in field_audit
                               if item.get("key") == "message" and str(item.get("maxlength") or '').isdigit()
                               and int(item["maxlength"]) > 0]
                     return result_payload("FORM_FAILED", reason="MESSAGE_VALUE_MISMATCH",
-                                          max_message_length=min(limits) if limits else None)
+                                          max_message_length=min(limits) if limits else None,
+                                          expected_message_length=len(message),
+                                          actual_message_lengths=[len(value) for value in actual_messages])
                 if contact_policy_blocked(page.locator("body").inner_text()):
                     return result_payload("BLOCKED", reason="CONTACT_POLICY_RESTRICTS_OUTREACH")
                 if preview_only:
-                    return result_payload("FORM_PREVIEW_READY", reason="PREVIEW_NO_SUBMISSION")
+                    return result_payload("FORM_PREVIEW_READY", reason="PREVIEW_NO_SUBMISSION", submitted_message=matching_messages[0])
                 capture("before-submit")
                 submission_attempted = True
                 if not final_submit_once(submit):
