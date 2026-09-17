@@ -8,6 +8,7 @@ import requests
 from .store import Store,now
 from .discovery import fetch_directory,parse_directory
 from .sync import Sheets,Mirror
+from .policy import FINAL_TARGET, FIRST_MILESTONE
 
 
 def worker(store,config_path):
@@ -33,7 +34,7 @@ def worker(store,config_path):
             store.set('heartbeat',now())
             api.publish_status(store)
             completed=set(store.completed())
-            target=min(2000,max(1,int(store.get('target','2000'))))
+            target=min(FINAL_TARGET,max(1,int(store.get('target',str(FINAL_TARGET)))))
             if len(completed)>=target:
                 verified=mirror.reconcile_completed()
                 if verified < target: raise RuntimeError('final_reconciliation_count_mismatch')
@@ -50,7 +51,7 @@ def worker(store,config_path):
             r=candidates[0]
             mirror.sync_one(r['company_key'],json.loads(r['payload']))
             count=len(store.completed())
-            if count>=500 and not store.get('milestone_verified'):
+            if count>=FIRST_MILESTONE and not store.get('milestone_verified'):
                 # Fresh two-book read, verify every completed record before expansion.
                 mirror.reconcile_completed()
                 store.set('milestone_verified',now())

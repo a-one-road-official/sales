@@ -31,7 +31,7 @@ class Store:
         CREATE TABLE IF NOT EXISTS events (
             id INTEGER PRIMARY KEY, occurred_at TEXT, kind TEXT, detail TEXT);
         ''')
-        for k,v in {'command':'STOP','target':'2000','milestone':'500','state':'IDLE'}.items():
+        for k,v in {'command':'STOP','target':'1000','milestone':'500','state':'IDLE'}.items():
             self.db.execute('INSERT OR IGNORE INTO control VALUES (?,?)',(k,v))
         self.db.commit()
 

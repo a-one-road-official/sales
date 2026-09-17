@@ -3,7 +3,11 @@ from urllib.parse import urljoin,urlparse
 from bs4 import BeautifulSoup
 from .store import now
 
-DIRECTORY='https://www.roboticstomorrow.com/company_directory_search.php?Search=active'
+DIRECTORIES=(
+    'https://www.roboticstomorrow.com/company_directory_search.php?Search=active',
+    'https://www.manufacturingtomorrow.com/company_directory_search.php?Search=active',
+)
+DIRECTORY=DIRECTORIES[0]
 
 
 def parse_directory(html,source_url=DIRECTORY):
@@ -21,19 +25,22 @@ def parse_directory(html,source_url=DIRECTORY):
 
 def fetch_directory(session,store):
     # One request per pass, timeout, max bytes; no proxy/challenge circumvention.
-    with session.get(DIRECTORY,timeout=(10,45),stream=True) as response:
-        response.raise_for_status()
-        if 'text/html' not in response.headers.get('Content-Type',''):
-            raise ValueError('unexpected directory content type')
-        parts=[]; size=0
-        for part in response.iter_content(65536):
-            size+=len(part)
-            if size>8_000_000: raise ValueError('directory size limit')
-            parts.append(part)
-        html=b''.join(parts).decode(response.encoding or 'utf-8',errors='replace')
-    rows=list(parse_directory(html))
-    if len(rows)<100:
-        raise ValueError('directory layout changed or challenge: expected >=100 profiles')
-    for row in rows: store.seed(**row)
-    store.event('DIRECTORY_COLLECTED',{'source':DIRECTORY,'profile_links':len(rows)})
-    return len(rows)
+    total=0
+    for directory in DIRECTORIES:
+        with session.get(directory,timeout=(10,60),stream=True) as response:
+            response.raise_for_status()
+            if 'text/html' not in response.headers.get('Content-Type',''):
+                raise ValueError('unexpected directory content type')
+            parts=[]; size=0
+            for part in response.iter_content(65536):
+                size+=len(part)
+                if size>8_000_000: raise ValueError('directory size limit')
+                parts.append(part)
+            html=b''.join(parts).decode(response.encoding or 'utf-8',errors='replace')
+        rows=list(parse_directory(html,directory))
+        if len(rows)<100:
+            raise ValueError('directory layout changed or challenge: expected >=100 profiles')
+        for row in rows: store.seed(**row)
+        total+=len(rows)
+        store.event('DIRECTORY_COLLECTED',{'source':directory,'profile_links':len(rows)})
+    return total
