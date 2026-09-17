@@ -96,3 +96,13 @@ def test_priority_cloud_intake_has_no_push_trigger():
     assert "confirm_paid_cloud" in text
     # This workflow used to execute on every change to itself. Keep it operator-only.
     assert "branches: [main]" not in text
+
+
+def test_zero_cost_quarantine_precedes_internal_authentication():
+    text = Path("main.py").read_text(encoding="utf-8")
+    guard_start = text.index("async def internal_runtime_guard")
+    guard_end = text.index("\ndef _ensure_openai_key", guard_start)
+    guard = text[guard_start:guard_end]
+    assert guard.index("if not paid_cloud_allowed()") < guard.index('expected = os.getenv("LEAD_FACTORY_INTERNAL_TOKEN"')
+    assert '"status": "BUDGET_BLOCKED_ACK"' in guard
+    assert '"path": request.url.path' not in guard
