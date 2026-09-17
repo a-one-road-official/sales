@@ -6,14 +6,17 @@
     "form_url": "https://www.kimonix.com/contact",
     "partner_program_url": "https://www.kimonix.com/become-a-partner",
     "what_it_solves": "Shopifyブランド向けのコレクション並べ替え、マーケット別 merchandising、商品発見のA/Bテスト。公式サイトで確認。",
-    "evidence_urls": ["https://www.kimonix.com/", "https://www.kimonix.com/become-a-partner", "https://www.kimonix.com/contact"],
-    "subject": "A Japan hypothesis for Kimonix",
-    "body": "We’re A-one Road, a Yokohama-based company developing Japan channels for commerce technology. We see a Kimonix opportunity in Shopify collection merchandising for Japanese fashion retailers.\n\nMETI reported on August 26, 2025 that Japan’s 2024 B2C e-commerce market reached ¥26.1 trillion, with apparel at ¥2.8 trillion. For fashion retailers, localized sorting and measurable product discovery matter as seasonal assortments change.\n\nWe can run a paid validation with Japanese fashion retailers, using buyer evidence to select one workflow. For roughly the budget of one major US or German trade show, we can run six months of structured Japan validation. Would it be useful if I sent over the first Japanese fashion retail segment and collection-merchandising workflow I would test?",
+    "evidence_urls": [
+      "https://www.kimonix.com/",
+      "https://www.kimonix.com/become-a-partner",
+      "https://www.kimonix.com/contact"
+    ],
+    "subject": "Japan customer development for Kimonix",
+    "body": "Hi Kimonix team,\n\nI’m Kazuma Tamura, Founder & CEO of A-one road in Japan.\n\nI noticed that Kimonix combines Shopify collection sorting with market-specific merchandising. I’d like to explore whether Japanese fashion brands could be a useful customer segment for you.\n\nWe can help identify prospective customers, approach local partners, and conduct Japanese-language customer discovery to test that opportunity.\n\nIs Japan part of your current expansion plans? If so, would you be open to a 20-minute conversation next week?\nhttps://calendar.app.google/9ZXzJVCiK36rF56Q6\n\nIf this is not relevant, let me know and I won’t follow up.\n\nBest,\nKazuma Tamura\nFounder & CEO | A-one road",
     "message_review": {
-      "decision": "APPROVED",
-      "reviewer": "EC sacrifice pre-send review",
-      "prompt_hash": "sacrifice_ec_prompt_v1",
-      "body_sha256": "297fea58fccd941247f83dce0bc47ddaa255a74edea72f6f9c4f03e1ad3b4dab"
+      "decision": "PENDING_USER_REVIEW",
+      "reviewer": "",
+      "reason": "User requested human review before sending; monetary amounts and budget comparisons removed."
     }
   }
 ]
