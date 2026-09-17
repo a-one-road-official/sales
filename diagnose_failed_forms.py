@@ -38,10 +38,14 @@ def main():
                 if not form_url:
                     record.update(status='NO_CONTACT_FORM', reason='no_verified_contact_page')
                 else:
-                    result = PublicContactFormExecutor().execute(form_url=form_url,
-                        website=site['official_website'], company_name=row['company_name'],
-                        subject=draft['subject'], message=draft['body'],
-                        idempotency_key='diagnostic-preview', preview_only=True)
+                    preview = PublicContactFormExecutor().preview_candidates(
+                        form_urls=[form_url] + urls, website=site['official_website'],
+                        company_name=row['company_name'], subject=draft['subject'], message=draft['body'],
+                        compact_message=draft.get('compact_body', ''))
+                    if preview['ready']:
+                        record['draft']['body'] = preview['message']
+                    record['form_previews'] = preview['attempts']
+                    result = preview['attempts'][-1]
                     record.update(status=result['status'], reason=result.get('reason'), form_execution=result)
         except Exception as exc:
             record.update(status='INSPECTION_ERROR', reason=f'{type(exc).__name__}:{exc}')
@@ -50,7 +54,7 @@ def main():
         form = record.get('form_execution') or {}
         print(json.dumps({'company_name': row['company_name'], 'form_url': form.get('form_url'),
                           'missing_required': form.get('missing_required'), 'core_unfilled': form.get('core_unfilled'),
-                          'fields': [{k: f.get(k) for k in ('key', 'label', 'type', 'required', 'action', 'error')}
+                          'fields': [{k: f.get(k) for k in ('key', 'label', 'type', 'required', 'maxlength', 'action', 'error')}
                                      for f in form.get('field_audit', [])],
                           'pages': [{k: p.get(k) for k in ('url', 'status_code', 'status', 'error')}
                                     for p in record.get('website_research', {}).get('pages', [])]}, ensure_ascii=False), flush=True)

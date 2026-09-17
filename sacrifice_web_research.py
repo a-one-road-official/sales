@@ -27,7 +27,7 @@ CONTACT_WORDS = (
     "get in touch",
     "talk to sales",
     "お問い合わせ",
-    "partnership", "get-in-touch", "book-a-call", "connect-with",
+    "partner", "get-in-touch", "book-a-call", "connect-with",
 )
 
 
@@ -38,7 +38,7 @@ def contact_priority(url: str) -> tuple[int, int]:
     score = 0
     if any(word in segments for word in ('contact', 'inquiry', 'enquiry')):
         score += 20
-    if 'partner' in segments or 'partnership' in segments or 'partnerships' in segments:
+    if any(word in segments for word in ('partner', 'partners', 'partnership', 'partnerships')):
         score += 12
     if any(word in path for word in ('get-in-touch', 'book-a-call', 'talk-to')):
         score += 10
@@ -54,7 +54,7 @@ def contact_priority(url: str) -> tuple[int, int]:
 
 
 def ordered_contact_links(links):
-    cleaned = list(dict.fromkeys(urldefrag(link)[0] for link in links))
+    cleaned = list(dict.fromkeys(urldefrag(link)[0] for link in links if urlparse(link).scheme in {'https', 'http'}))
     return sorted(cleaned, key=contact_priority, reverse=True)
 
 
@@ -252,13 +252,14 @@ def inspect_official_site(
             if isinstance(page, dict)
         ).lower()
         visible_compact = re.sub(r"[^a-z0-9]", "", visible)
-        host_compact = re.sub(r"[^a-z0-9]", "", _host(root).lower())
+        expected_compact = re.sub(r"[^a-z0-9]", "", str(expected_company).lower())
+        redirected_host = _host(pages[0].get("url", root)) if pages else ""
+        root_host = _host(root)
         identity_match = bool(
-            expected_tokens
-            and any(
-                token in visible_compact or token in host_compact
-                for token in expected_tokens
-            )
+            (redirected_host == root_host or redirected_host.endswith('.' + root_host))
+            and expected_compact
+            and (expected_compact in visible_compact or
+                 (expected_tokens and all(token in visible_compact for token in expected_tokens)))
         )
         if not identity_match:
             identity_reason = "expected_company_not_present_in_site_identity"

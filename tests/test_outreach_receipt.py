@@ -64,6 +64,13 @@ def test_fetch_failure_is_not_a_verified_site(monkeypatch):
     assert inspect_official_site('https://acme.example', expected_company='Acme')['status'] == 'UNAVAILABLE'
 
 
+def test_matching_hostname_does_not_verify_a_challenge_or_other_company(monkeypatch):
+    monkeypatch.setattr('sacrifice_web_research._inspect_with_requests', lambda *a, **k: (
+        [{'url': 'https://acme.example', 'status_code': 200, 'title': 'Just a moment', 'text_excerpt': 'Checking your browser'}], set(), [], []))
+    monkeypatch.setenv('OUTREACH_SITE_FETCH_MODE', 'REQUESTS')
+    assert inspect_official_site('https://acme.example', expected_company='Acme')['status'] == 'IDENTITY_MISMATCH'
+
+
 @pytest.mark.parametrize('name,url', [('Tech Mahindra', 'https://www.techmahindra.com'), ('NTT DATA', 'https://www.nttdata.com'), ('Remote CoWorker', 'https://remotecoworker.com')])
 def test_compound_name_is_researched_before_rejection(name, url):
     assert source_website_check({'company_name': name, 'website': url})['status'] == 'UNTRUSTED_POSSIBLE_MATCH'
@@ -131,6 +138,18 @@ def test_preview_fills_without_sending(monkeypatch):
         result = form_run(url, monkeypatch, preview=True)
         assert result['status'] == 'FORM_PREVIEW_READY'
         assert result['submission_attempted'] is False
+        assert not received
+
+
+@pytest.mark.browser
+def test_short_form_uses_complete_compact_message_instead_of_truncation():
+    html = '<form method=post><input name=email type=email><textarea name=message maxlength=120></textarea><button type=submit>Send</button></form>'
+    with local_site(html) as (url, received):
+        short = 'Japan partnership proposal. May we discuss fit? Kazuma Tamura, A-one road.'
+        preview = PublicContactFormExecutor().preview_candidates(form_urls=[url], website=url,
+            company_name='LocalFixture', subject='Partnership', message='Long proposal. ' * 50, compact_message=short)
+        assert preview['ready'] is True, preview
+        assert preview['message'] == short
         assert not received
 
 

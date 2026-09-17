@@ -9,6 +9,7 @@ on:
       - sacrifice_web_research.py
       - .github/workflows/outreach_failure_diagnosis.yml
       - data/outreach_quality_candidates.json
+      - data/outreach_bpo_research.json
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sample: [historical, candidates]
+        sample: [historical, candidates, bpo-research]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -39,6 +40,8 @@ jobs:
         run: python diagnose_failed_forms.py
       - if: matrix.sample == 'candidates'
         run: python diagnose_failed_forms.py --manifest data/outreach_quality_candidates.json
+      - if: matrix.sample == 'bpo-research'
+        run: python diagnose_failed_forms.py --manifest data/outreach_bpo_research.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

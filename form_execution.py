@@ -153,7 +153,7 @@ def _field_key(el, label: str) -> str:
         return "platform"
     if re.search(r"reason[_ -]?for[_ -]?contact|(?:type[_ -]?of[_ -]?(?:enquiry|inquiry))|(?:inquiry|enquiry)[_ -]?type|looking\s+to\s+talk|相談先|問い合わせ先", marker):
         return "reason"
-    if re.search(r"how[_ -]?did[_ -]?you[_ -]?learn|how\s+did\s+you\s+learn|流入元|知ったきっかけ", marker):
+    if re.search(r"how[_ -]?did[_ -]?you[_ -]?(?:learn|hear)|流入元|知ったきっかけ", marker):
         return "discovery_source"
     if re.search(r"category[_ -]?|main\s+category|商品カテゴリ|カテゴリー", marker):
         return "category"
@@ -165,6 +165,8 @@ def _field_key(el, label: str) -> str:
     ):
         return "message"
     if re.search(r"\b(first[- _]?name|given[- _]?name|名)\b", marker):
+        if re.fullmatch(r"\s*(?:name|your name|お名前)\s*\*?\s*", label, re.I):
+            return "name"
         return "first_name"
     if re.search(r"\b(last[- _]?name|family[- _]?name|surname|姓)\b", marker):
         return "last_name"
@@ -811,6 +813,34 @@ class PublicContactFormExecutor:
         self.sheets = sheets
         self.authorization = authorization
 
+    def preview_candidates(self, *, form_urls, website, company_name, subject, message, compact_message=""):
+        """Try up to three official pages without issuing a non-GET request.
+
+        A failed first contact-page discovery does not justify sending to a
+        newsletter or manufacturing a required purchasing-intent answer.
+        """
+        from urllib.parse import urldefrag
+        pages = list(dict.fromkeys(urldefrag(url)[0] for url in form_urls
+                                  if _same_host_or_subdomain(url, website)))[:3]
+        attempts = []
+        for url in pages:
+            result = self.execute(form_url=url, website=website, company_name=company_name,
+                                  subject=subject, message=message,
+                                  idempotency_key="read-only-form-preview", preview_only=True)
+            attempts.append(result)
+            limit = result.get("max_message_length")
+            if (result.get("reason") == "MESSAGE_VALUE_MISMATCH" and compact_message
+                    and limit and len(compact_message) <= limit):
+                result = self.execute(form_url=url, website=website, company_name=company_name,
+                                      subject=subject, message=compact_message,
+                                      idempotency_key="read-only-compact-preview", preview_only=True)
+                attempts.append(result)
+                if result["status"] == "FORM_PREVIEW_READY":
+                    return {"form_url": url, "attempts": attempts, "ready": True, "message": compact_message}
+            if result["status"] == "FORM_PREVIEW_READY":
+                return {"form_url": url, "attempts": attempts, "ready": True, "message": message}
+        return {"form_url": "", "attempts": attempts, "ready": False}
+
     def _existing(
         self,
         idempotency_key: str,
@@ -1040,6 +1070,7 @@ class PublicContactFormExecutor:
                             "label": label,
                             "type": typ,
                             "required": required,
+                            "maxlength": el.get_attribute("maxlength"),
                             "action": "NOT_FILLED",
                             "final_value": "",
                         }
@@ -1352,7 +1383,11 @@ class PublicContactFormExecutor:
                     if _field_key(el, _label_for(el)) == "message":
                         actual_messages.append(_current_value(el))
                 if message not in actual_messages:
-                    return result_payload("FORM_FAILED", reason="MESSAGE_VALUE_MISMATCH")
+                    limits = [int(item["maxlength"]) for item in field_audit
+                              if item.get("key") == "message" and str(item.get("maxlength") or '').isdigit()
+                              and int(item["maxlength"]) > 0]
+                    return result_payload("FORM_FAILED", reason="MESSAGE_VALUE_MISMATCH",
+                                          max_message_length=min(limits) if limits else None)
                 if contact_policy_blocked(page.locator("body").inner_text()):
                     return result_payload("BLOCKED", reason="CONTACT_POLICY_RESTRICTS_OUTREACH")
                 if preview_only:

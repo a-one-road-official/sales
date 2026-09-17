@@ -537,7 +537,15 @@ def _verified_site_draft(candidate: dict, site: dict) -> dict:
         "A-one road Co., Ltd.\n"
         "Yokohama, Japan"
     )
-    return {"subject": subject, "body": body, "draft_source": "verified_site_template"}
+    compact = (
+        f"Hi {company} team,\n\n"
+        "I'm Kazuma Tamura, Founder & CEO of A-one road in Japan. "
+        "We help international businesses explore Japan through customer discovery and partner development.\n\n"
+        "Could your partnerships team discuss whether this fits your Japan priorities? "
+        f"A 20-minute call: {CALENDAR_URL}\n\n"
+        "If irrelevant, let us know and we won't follow up.\nKazuma Tamura"
+    )
+    return {"subject": subject, "body": body, "compact_body": compact, "draft_source": "verified_site_template"}
 
 
 def _cfg_truthy(cfg: dict[str, str], key: str) -> bool:
@@ -841,10 +849,11 @@ def run_ten_sacrifice_batch(
                     fast_sales_gtm_mode
                     and _cfg_truthy(cfg, "OUTREACH_FAST_SALES_GTM_EMAIL_FIRST")
                     and bool(email)
+                    and not _cfg_truthy(cfg, "OUTREACH_PLAYWRIGHT_FORM_ONLY")
                 )
                 prefer_public_form = (
-                    normalized_lane == "EC_SACRIFICE"
-                    and _cfg_truthy(cfg, "OUTREACH_PREFER_PUBLIC_FORM")
+                    _cfg_truthy(cfg, "OUTREACH_PREFER_PUBLIC_FORM")
+                    or _cfg_truthy(cfg, "OUTREACH_PLAYWRIGHT_FORM_ONLY")
                 )
                 playwright_form_only = (
                     _cfg_truthy(cfg, "OUTREACH_PLAYWRIGHT_FORM_ONLY")
@@ -917,18 +926,30 @@ def run_ten_sacrifice_batch(
                         )
                     else:
                         if execute_external:
-                            _persist_draft(sheets, run_id, candidate, result)
                             from form_execution import PublicContactFormExecutor
-                            form_result = PublicContactFormExecutor(sheets=sheets, authorization=authorization).execute(
-                                form_url=form_url,
-                                website=site_url,
-                                message=draft_body,
-                                subject=draft_subject,
-                                company_name=str(candidate.get("company_name") or ""),
-                                idempotency_key=form_key,
-                                draft_id=f"{run_id}:{candidate.get('source_row', '')}",
-                                source_row=str(candidate.get("source_row") or ""),
-                            )
+                            form_executor = PublicContactFormExecutor(sheets=sheets, authorization=authorization)
+                            preview = form_executor.preview_candidates(form_urls=form_links, website=site_url,
+                                company_name=str(candidate.get("company_name") or ""), subject=draft_subject, message=draft_body,
+                                compact_message=draft.get("compact_body", ""))
+                            result["form_previews"] = preview["attempts"]
+                            if preview["ready"]:
+                                draft_body = preview["message"]
+                                draft["body"] = draft_body
+                                result["draft"] = draft
+                                result["message_hash"] = _hash(SENDER_EMAIL, draft_subject, draft_body)
+                                result["audit"].update(body=draft_body, form_url=preview["form_url"], message_hash=result["message_hash"])
+                                _persist_draft(sheets, run_id, candidate, result)
+                                form_result = form_executor.execute(
+                                    form_url=preview["form_url"], website=site_url,
+                                    message=draft_body, subject=draft_subject,
+                                    company_name=str(candidate.get("company_name") or ""),
+                                    idempotency_key=form_key,
+                                    draft_id=f"{run_id}:{candidate.get('source_row', '')}",
+                                    source_row=str(candidate.get("source_row") or ""),
+                                )
+                            else:
+                                form_result = preview["attempts"][-1] if preview["attempts"] else {
+                                    "status": "FORM_FAILED", "reason": "NO_OFFICIAL_FORM_CANDIDATE", "submission_attempted": False}
                         result["external_action"] = form_result.get("status", "FORM_FAILED")
                         result.update(status=form_result.get("status", "FORM_FAILED"), stage="FORM_EXECUTION")
                     result["form_execution"] = form_result

@@ -107,7 +107,7 @@ class TrustedBrowserFetcher:
             final_url = page.url
             links = page.eval_on_selector_all("a[href]", "els => els.map(a => a.href)")
             title = page.title()
-            status = response.status if response else 200
+            status = response.status if response else 0
             browser.close()
 
         safe_links = [u for u in links if isinstance(u, str) and same_host_or_subdomain(u, self.source_url)]
