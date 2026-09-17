@@ -583,6 +583,7 @@ def _form_score(form) -> int:
         visible = 0
         relevant = 0
         textareas = 0
+        messages = 0
         for index in range(fields.count()):
             el = fields.nth(index)
             typ = (el.get_attribute("type") or "text").lower()
@@ -599,6 +600,8 @@ def _form_score(form) -> int:
             label = _label_for(el)
             if _field_key(el, label):
                 relevant += 1
+            if _field_key(el, label) == "message":
+                messages += 1
             if (el.evaluate("el => el.tagName.toLowerCase()") or "").lower() == "textarea":
                 textareas += 1
         submit = form.locator("button[type=submit], input[type=submit], button")
@@ -607,7 +610,7 @@ def _form_score(form) -> int:
             for index in range(min(submit.count(), 8))
             if submit.nth(index).is_visible() and submit.nth(index).is_enabled()
         )
-        return relevant * 20 + visible * 3 + textareas * 4 + submit_visible * 5
+        return messages * 1000 + relevant * 20 + visible * 3 + textareas * 4 + submit_visible * 5
     except Exception:
         return 0
 
@@ -843,6 +846,7 @@ class PublicContactFormExecutor:
         idempotency_key: str,
         draft_id: str = "",
         source_row: str = "",
+        preview_only: bool = False,
     ) -> dict:
         started = datetime.now(timezone.utc).isoformat()
         field_audit = []
@@ -851,6 +855,7 @@ class PublicContactFormExecutor:
         field_status = {key: "NOT_REQUESTED" for key in CORE_FIELDS}
         missing_required = []
         core_unfilled = []
+        initial_success_texts = set()
 
         def result_payload(status: str, *, reason: str = "", **extra) -> dict:
             payload = {
@@ -877,11 +882,11 @@ class PublicContactFormExecutor:
             return payload
 
         from workbook_sales import authorized
-        if not authorized(self.authorization, self.sheets, company_name, website):
+        if not preview_only and not authorized(self.authorization, self.sheets, company_name, website):
             return result_payload("BLOCKED", reason="workbook_authorization_required")
         if not form_url or not _same_host_or_subdomain(form_url, website):
             return result_payload("FORM_FAILED", reason="FORM_HOST_UNVERIFIED")
-        duplicate = self._existing(
+        duplicate = None if preview_only else self._existing(
             idempotency_key,
             company_name=company_name,
             source_row=source_row,
@@ -899,6 +904,10 @@ class PublicContactFormExecutor:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=True)
                 page = browser.new_page()
+                if preview_only:
+                    # Multi-step forms can transmit partial data on Next. The
+                    # forensic preview must never issue such submissions.
+                    page.route("**/*", lambda route: route.continue_() if route.request.method.upper() in {"GET", "HEAD"} else route.abort())
                 try:
                     action_timeout_ms = int(
                         os.getenv("OUTREACH_FORM_ACTION_TIMEOUT_MS", "7000") or 7000
@@ -948,6 +957,11 @@ class PublicContactFormExecutor:
                 if not chosen:
                     return result_payload("FORM_FAILED", reason="FORM_NOT_FOUND")
                 form_context, form = chosen
+                for context in (page, form_context):
+                    try:
+                        initial_success_texts.update(m.group(0).casefold() for m in SUCCESS_RE.finditer(context.locator("body").inner_text()))
+                    except Exception:
+                        pass
                 base_url = getattr(form_context, "url", "") or page.url
                 action = urljoin(base_url, str(form.get_attribute("action") or base_url))
                 if not _form_action_allowed(action, website):
@@ -1266,13 +1280,29 @@ class PublicContactFormExecutor:
                                 reason="MULTI_STEP_NOT_ADVANCED",
                             )
                         continue
+                    # A final submit control ends filling. Repeating the same
+                    # form four times can reset dependent widgets and consent.
+                    break
                 if re.search(r"\bnext\b", control_label, re.I):
                     return result_payload(
                         "FORM_FAILED",
                         reason="MULTI_STEP_NOT_COMPLETED",
                     )
+                if field_status.get("message") != "FILLED":
+                    return result_payload("FORM_FAILED", reason="MESSAGE_FIELD_MISSING")
+                # Verify the actual DOM value, including maxlength truncation,
+                # immediately before the external action.
+                actual_messages = []
+                for index in range(fields.count()):
+                    el = fields.nth(index)
+                    if _field_key(el, _label_for(el)) == "message":
+                        actual_messages.append(_current_value(el))
+                if message not in actual_messages:
+                    return result_payload("FORM_FAILED", reason="MESSAGE_VALUE_MISMATCH")
                 if contact_policy_blocked(page.locator("body").inner_text()):
                     return result_payload("BLOCKED", reason="CONTACT_POLICY_RESTRICTS_OUTREACH")
+                if preview_only:
+                    return result_payload("FORM_PREVIEW_READY", reason="PREVIEW_NO_SUBMISSION")
                 submission_attempted = True
                 if not final_submit_once(submit):
                     # The request may already have reached the recipient. Never
@@ -1304,11 +1334,11 @@ class PublicContactFormExecutor:
                     except Exception:
                         continue
                 visible_text = "\n".join(dict.fromkeys(part for part in visible_parts if part))
-                success_match = SUCCESS_RE.search(visible_text or "")
-                thank_you_url = _is_first_party_thank_you_url(final_url, website)
+                success_match = next((m for m in SUCCESS_RE.finditer(visible_text or "") if m.group(0).casefold() not in initial_success_texts), None)
+                thank_you_url = final_url != form_url and _is_first_party_thank_you_url(final_url, website)
                 if not success_match and not thank_you_url:
                     return result_payload(
-                        "FORM_FAILED",
+                        "FORM_UNCONFIRMED",
                         reason="SUBMISSION_NOT_CONFIRMED",
                         form_url=final_url,
                         confirmation_text=(visible_text or "")[:4000],
@@ -1321,43 +1351,12 @@ class PublicContactFormExecutor:
                     confirmation_text=(visible_text or "")[:4000],
                     finished_at=datetime.now(timezone.utc).isoformat(),
                 )
-                audit_row = {
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "channel": "FORM",
-                    "company_name": company_name,
-                    "website": website,
-                    "email": "PUBLIC_CONTACT_FORM",
-                    "status": "FORM_SENT",
-                    "error_message": "",
-                    "stage": "FORM_EXECUTION",
-                    "idempotency_key": idempotency_key,
-                    "draft_id": draft_id,
-                    "source_row": source_row,
-                    "company_name": company_name,
-                    "lane": self.authorization.lane,
-                    "channel": "FORM",
-                    "status": "FORM_SENT",
-                    "semantic_success": "FORM_CONFIRMED",
-                    "message_id": "",
-                    "subject": subject,
-                    "body": message,
-                    "recipient": "PUBLIC_CONTACT_FORM",
-                    "form_url": final_url,
-                    "confirmation": confirmation,
-                    "executed_at": datetime.now(timezone.utc).isoformat(),
-                }
-                log_error = ""
-                if self.sheets is not None:
-                    try:
-                        self.sheets.append_dict(_execution_log_sheet(), audit_row)
-                    except Exception as exc:
-                        log_error = f"{type(exc).__name__}:{exc}"
-                result["audit_log_written"] = not log_error
-                if log_error:
-                    result["audit_log_error"] = log_error
+                # The batch runner owns the single verified terminal event.
+                # It records failures and successes through the same writer.
+                result["audit_log_written"] = False
                 return result
         except Exception as exc:
-            return result_payload("FORM_FAILED", reason=f"{type(exc).__name__}:{exc}")
+            return result_payload("FORM_UNCONFIRMED" if submission_attempted else "FORM_FAILED", reason=f"{type(exc).__name__}:{exc}")
         finally:
             if browser is not None:
                 try:

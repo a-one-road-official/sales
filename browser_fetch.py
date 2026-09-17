@@ -26,6 +26,10 @@ class TrustedBrowserFetcher:
         self.max_requests = max(0, min(int(max_requests or 0), 5000))
         self.max_bytes = max(1, min(int(max_bytes or 1), 8 * 1024 * 1024))
         self.requests = 0
+        # Page budget and browser subresource budget are different units.
+        # Three pages used to allow only three image/script responses, starving
+        # client-rendered contact forms before their JavaScript could execute.
+        self.max_subrequests = 500
         self._last = 0.0
 
     def _throttle(self):
@@ -47,19 +51,22 @@ class TrustedBrowserFetcher:
         self.requests += 1
         api_payloads: list[dict] = []
         network: list[dict] = []
+        subrequests = 0
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(storage_state=self.storage_state) if self.storage_state else browser.new_context()
             page = context.new_page()
 
             def route_handler(route):
+                nonlocal subrequests
                 req = route.request
                 if req.method.upper() not in ("GET", "HEAD"):
                     route.abort()
                     return
-                if len(network) >= self.max_requests:
+                if subrequests >= self.max_subrequests:
                     route.abort()
                     return
+                subrequests += 1
                 route.continue_()
 
             page.route("**/*", route_handler)

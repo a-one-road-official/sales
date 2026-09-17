@@ -39,12 +39,15 @@ class SacrificeStability:
 
     def record(self, *, lane: str, attempted: int, successes: int,
                critical_errors: list[str], cfg: dict[str, str], batch_id: str | None = None,
-               job_id: str | None = None):
+               job_id: str | None = None, quality: dict | None = None):
         batch_id = batch_id or f"sacrifice-{uuid4()}"
-        required = int(cfg.get("OUTREACH_STABLE_BATCHES_REQUIRED", "3") or 3)
-        minimum = int(cfg.get("OUTREACH_STABLE_BATCH_MIN_SUCCESS", "5") or 5)
+        required = max(1, int(cfg.get("OUTREACH_STABLE_BATCHES_REQUIRED", "1") or 1))
+        minimum = max(7, int(cfg.get("OUTREACH_STABLE_BATCH_MIN_SUCCESS", "7") or 7))
         reset = bool(critical_errors) and _truthy(cfg.get("OUTREACH_CRITICAL_ERROR_RESETS", "TRUE"))
-        status = "BATCH_PASS" if attempted == 10 and successes >= minimum and not reset else "BATCH_FAIL"
+        verified = bool(quality and quality.get("passed") is True and quality.get("ui_verified") is True
+                        and quality.get("denominator") == 10 and quality.get("recorded") == 10
+                        and int(quality.get("accepted", 0)) >= minimum)
+        status = "BATCH_PASS" if attempted == 10 and verified and not critical_errors else "BATCH_FAIL"
         if status == "BATCH_FAIL":
             streak = 0
         else:
@@ -86,4 +89,3 @@ class SacrificeStability:
         return {"batch_id": batch_id, "attempted": attempted, "semantic_success": successes,
                 "critical_errors": sorted(set(critical_errors)), "passing_streak": streak,
                 "stable": promoted, "factory_send_enabled": False}
-

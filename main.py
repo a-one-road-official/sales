@@ -882,6 +882,7 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
         try:
             critical_errors = []
             for item in result.get("results", []) or []:
+                critical_errors.extend(item.get("critical_errors") or [])
                 critical_errors.extend(
                     str(value)
                     for value in (item.get("preflight") or {}).get("critical_errors", [])
@@ -892,6 +893,7 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
                 attempted=int(result.get("attempted", 0) or 0),
                 successes=int(result.get("success_count", 0) or 0),
                 critical_errors=critical_errors,
+                quality=result.get("quality"),
                 cfg=cfg,
                 batch_id=str(result.get("batch_id") or batch_id or "").strip() or None,
             )

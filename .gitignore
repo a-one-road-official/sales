@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+outreach-evidence/
+bulk-summary.json
+runtime.log
+workbook-preflight.json

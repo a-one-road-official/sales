@@ -26,8 +26,8 @@ AUTOPILOT_SHEET = "LeadFactory_ExecutionBatches"
 BATCH_SIZE = 10
 DEFAULT_TARGET_SUCCESSES = 2500
 DEFAULT_MAX_ATTEMPTS = 4000
-DEFAULT_MIN_SUCCESS = 5
-DEFAULT_STABLE_BATCHES = 3
+DEFAULT_MIN_SUCCESS = 7
+DEFAULT_STABLE_BATCHES = 1
 ACTIVE_STATUSES = {"STARTING", "RUNNING", "RUNNING_STABLE", "STOP_REQUESTED"}
 TERMINAL_STATUSES = {
     "COMPLETED_TARGET",
@@ -747,6 +747,7 @@ class BPOAutopilot:
                         attempted=attempted,
                         successes=successes,
                         critical_errors=critical,
+                        quality=result.get("quality"),
                         cfg={
                             **cfg,
                             "OUTREACH_STABLE_BATCHES_REQUIRED": str(state["stable_batches_required"]),

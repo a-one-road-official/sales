@@ -170,7 +170,9 @@ def test_autopilot_runs_multiple_batches_and_checkpoints_state():
     assert all(call["limit"] == 10 for call in calls)
     assert any(row.get("record_type") == "OUTREACH_AUTOPILOT_BATCH" for row in sheets.rows)
     assert sum(row.get("record_type") == "OUTREACH_AUTOPILOT_JOB" for row in sheets.rows) >= 3
-    assert any(row.get("stability_status") == "BATCH_PASS" for row in sheets.rows)
+    # Six reported successes without message/readback/UI evidence cannot meet
+    # the user's seven-of-ten acceptance contract.
+    assert not any(row.get("stability_status") in {"BATCH_PASS", "STABLE"} for row in sheets.rows)
 
 
 

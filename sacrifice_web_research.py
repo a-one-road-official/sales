@@ -52,7 +52,11 @@ def _append_page(
     soup = BeautifulSoup(text, "html.parser")
     found = set(EMAIL_RE.findall(text))
     emails.update(found)
-    page_forms = [current] if soup.find_all("form") else []
+    # Newsletter/search/login forms cannot carry an outreach message. Embedded
+    # contact forms are opened by the executor from the contact links below.
+    def message_form(form):
+        return bool(form.find("textarea") or form.find("input", attrs={"name": re.compile(r"message|inquiry|enquiry|comment", re.I)}))
+    page_forms = [current] if any(message_form(f) for f in soup.find_all("form")) else []
     forms.extend(page_forms)
     pages.append(
         {
@@ -204,7 +208,7 @@ def inspect_official_site(
             "forms": [],
         }
 
-    ok = any(int(page.get("status_code", 0) or 0) < 400 for page in pages)
+    ok = any(200 <= int(page.get("status_code", 0) or 0) < 400 for page in pages)
     identity_match = True
     identity_reason = ""
     if expected_company and ok:

@@ -1,0 +1,37 @@
+name: Historical last-ten form diagnosis (no send)
+on:
+  push:
+    branches: [codex/outreach-receipt-repair]
+    paths:
+      - diagnose_failed_forms.py
+      - form_execution.py
+      - browser_fetch.py
+      - sacrifice_web_research.py
+      - .github/workflows/outreach_failure_diagnosis.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: outreach-failure-diagnosis
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      LEAD_FACTORY_VERTEX_ALLOWED: FALSE
+      OUTREACH_SITE_FETCH_MODE: PLAYWRIGHT
+      OUTREACH_EVIDENCE_DIR: outreach-evidence
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: python diagnose_failed_forms.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: historical-ten-diagnosis-${{ github.run_id }}
+          path: outreach-evidence/
