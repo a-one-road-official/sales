@@ -1,6 +1,6 @@
 name: Deploy paused SSOT history repair
 # A1 repair redeploy: central Status guard + action ledger + Gmail backfill policy.
-# zero-cost-hardening-deploy: 2026-09-16
+# DeployNow: account permissions and eight-product catalog, 2026-09-17.
 
 on:
   workflow_dispatch:
@@ -89,5 +89,7 @@ jobs:
           set -euo pipefail
           gcloud run services describe "$SERVICE" \
             --region="$REGION" --project="$PROJECT" \
-            --format="yaml(status.latestReadyRevisionName,spec.template.spec.containers[0].env)"
+            --format="yaml(status.latestReadyRevisionName,status.conditions)"
+          URL="$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format='value(status.url)')"
+          curl --fail --silent --show-error --max-time 60 "$URL/healthz"
           echo "Zero-cost repair revision deployed. Paid cloud, paid AI, schedulers, queues, outbound writes, CRM Status writes, human review, HTTP self-fallback, daily rollover and autonomous capacity expansion remain disabled."

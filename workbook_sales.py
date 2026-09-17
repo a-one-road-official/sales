@@ -230,8 +230,10 @@ class SendAuthorization:
 
 
 def authorized(auth, sheets, company_name: str, website: str) -> bool:
+    from contact_policy import block_reason
     return (
         isinstance(auth, SendAuthorization)
+        and not block_reason(auth.company_id, company_name, website, auth.lane)
         and getattr(sheets, "spreadsheet_id", "") == WORKBOOK_ID
         and name_key(auth.company_name) == name_key(company_name)
         and bool(host(website)) and host(auth.website) == host(website)
@@ -245,6 +247,11 @@ def claim_candidate(sheets, candidate: dict, lane: str, run_id: str) -> SendAuth
     serialization. Sheets append itself is NOT a distributed compare-and-swap.
     Do not run multiple independent workers against this workbook.
     """
+    from contact_policy import block_reason
+    blocked = block_reason(norm(candidate.get("company_id")), candidate.get("company_name", ""),
+                           candidate.get("candidate_website") or candidate.get("website", ""), lane)
+    if blocked:
+        raise ValueError(blocked)
     if os.getenv("GITHUB_ACTIONS") != "true" or os.getenv("GITHUB_WORKFLOW") != "生贄 bulk outbound (Playwright/email; Vertex forbidden)":
         raise ValueError("serialized_github_workflow_required_for_send")
     fresh = live_candidates(sheets, lane)

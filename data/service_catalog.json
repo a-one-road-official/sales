@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "source": "Company introduction September 2026 page 11; user pricing instruction",
+  "unit_price": {
+    "USD": 1000,
+    "JPY": 150000,
+    "EUR": {
+      "min": 850,
+      "max": 900
+    }
+  },
+  "billing_period": null,
+  "quantity_limits": null,
+  "pricing_is_live_fx": false,
+  "automatic_binding_quote_allowed": false,
+  "services": [
+    {
+      "id": "01",
+      "name_ja": "顧客開拓",
+      "name_en": "Customer Acquisition",
+      "scope": "リード獲得・アプローチ・商談化"
+    },
+    {
+      "id": "02",
+      "name_ja": "パートナー開拓",
+      "name_en": "Partner Development",
+      "scope": "代理店・販売パートナー開拓"
+    },
+    {
+      "id": "03",
+      "name_ja": "ローカライズ",
+      "name_en": "Localization",
+      "scope": "日本向け資料・コンテンツ・メッセージ調整"
+    },
+    {
+      "id": "04",
+      "name_ja": "展示会・PR",
+      "name_en": "Exhibitions & PR",
+      "scope": "展示会・イベント・広報"
+    },
+    {
+      "id": "05",
+      "name_ja": "FDE・導入",
+      "name_en": "FDE & Deployment",
+      "scope": "技術適合・実装・導入支援"
+    },
+    {
+      "id": "06",
+      "name_ja": "PoC・検証",
+      "name_en": "PoC & Validation",
+      "scope": "試験設計・KPI設定・実証"
+    },
+    {
+      "id": "07",
+      "name_ja": "カスタマーサクセス",
+      "name_en": "Customer Success",
+      "scope": "導入後の定着・利用拡大"
+    },
+    {
+      "id": "08",
+      "name_ja": "日本事業運営",
+      "name_en": "Japan Operations",
+      "scope": "採用・商談・法務等の運営支援"
+    }
+  ]
+}
