@@ -48,7 +48,7 @@ jobs:
       LEAD_FACTORY_GMAIL_IMPERSONATE: admin@a1-road.com
       LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       OUTREACH_EXECUTION_LOG_SHEET: outreach_engine_log
-      OUTREACH_EXECUTION_LOG_MAX_ROW: "1000"
+      OUTREACH_EXECUTION_LOG_MAX_ROW: "5000"
       OUTREACH_ALLOWED_LANES: "EC_SACRIFICE,BPO"
       OUTREACH_SACRIFICE_LANES: "EC_SACRIFICE,BPO"
       OUTREACH_SACRIFICE_TARGET_COMPANIES: "*"
@@ -174,8 +174,45 @@ jobs:
                   raise RuntimeError(f"{lane} batch {sequence} HTTP {exc.code}: {body[:4000]}") from exc
 
           for lane in lanes:
+              consecutive_errors = 0
               for sequence in range(1, max_batches + 1):
-                  result = call(lane, sequence)
+                  try:
+                      result = call(lane, sequence)
+                  except Exception as exc:
+                      compact = {
+                          "lane": lane,
+                          "sequence": sequence,
+                          "run_id": None,
+                          "attempted": 0,
+                          "success_count": 0,
+                          "email_success_count": 0,
+                          "form_success_count": 0,
+                          "failure_count": 0,
+                          "source_remaining_count": None,
+                          "external_action": "BATCH_ERROR",
+                          "vertex_allowed": False,
+                          "production_ssot_touched": False,
+                          "batch_error": f"{type(exc).__name__}: {exc}"[:4000],
+                      }
+                      summaries.append(compact)
+                      print(json.dumps(compact, ensure_ascii=False), flush=True)
+                      consecutive_errors += 1
+                      if consecutive_errors >= 3:
+                          print(
+                              json.dumps(
+                                  {
+                                      "lane": lane,
+                                      "status": "LANE_STOPPED_AFTER_THREE_BATCH_ERRORS",
+                                  },
+                                  ensure_ascii=False,
+                              ),
+                              flush=True,
+                          )
+                          break
+                      time.sleep(min(30, 5 * consecutive_errors))
+                      continue
+
+                  consecutive_errors = 0
                   compact = {
                       "lane": lane,
                       "sequence": sequence,
@@ -189,6 +226,7 @@ jobs:
                       "external_action": result.get("external_action"),
                       "vertex_allowed": result.get("vertex_allowed"),
                       "production_ssot_touched": result.get("production_ssot_touched"),
+                      "history_error": result.get("history_error", ""),
                   }
                   summaries.append(compact)
                   print(json.dumps(compact, ensure_ascii=False), flush=True)
