@@ -31,7 +31,14 @@ def reason(policy, company_id, company_name, website, lane, now=None):
         if expiry.tzinfo is None or now >= expiry:
             return 'account_permission_expired'
         campaign = policy['campaigns'][account['campaign_id']]
-        if campaign.get('enabled') is not True or campaign.get('quality_passed') is not True or not campaign.get('quality_evidence'):
+        if campaign.get('enabled') is not True:
+            return 'campaign_disabled'
+        # Quality evidence is earned through a bounded pilot. Named accounts,
+        # existing history locks and explicit permission still apply to each send.
+        pilot_accounts = [a for a in policy['accounts'].values()
+                          if a.get('campaign_id') == account['campaign_id'] and a.get('mode') == 'BULK_ALLOWED']
+        pilot = campaign.get('mode') == 'PILOT' and 1 <= len(pilot_accounts) <= 10
+        if not pilot and (campaign.get('quality_passed') is not True or not campaign.get('quality_evidence')):
             return 'campaign_quality_unapproved'
         return ''
     except (KeyError, TypeError, ValueError, AttributeError):
