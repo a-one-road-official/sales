@@ -445,7 +445,18 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
         result["audit_log_error"] = f"{type(exc).__name__}:{exc}"
 
 
+def _assert_no_monetary_content(draft: dict) -> None:
+    """Keep initial outreach free of prices, budgets, and monetary comparisons."""
+    text = "\n".join(str(draft.get(key) or "") for key in ("subject", "body", "compact_body"))
+    if re.search(r"[$€£¥￥]|\b(?:USD|EUR|GBP|JPY)\b|\b\d[\d,.]*\s*(?:dollars?|euros?|yen)\b|\b(?:budget|pricing|price|fee|fees|trade show|exhibition cost)\b|金額|万円|億円|料金|予算", text, re.I):
+        raise ValueError("initial_outreach_monetary_content")
+
+
 def _persist_draft(sheets, run_id, candidate, result):
+    _assert_no_monetary_content(result['draft'])
+    review = result['draft'].get('message_review')
+    if review is not None and review.get('decision') != 'APPROVED':
+        raise ValueError('message_awaiting_user_review')
     from outreach_evidence import append_verified
     draft = result["draft"]
     if not draft.get("subject") or not draft.get("body"):
@@ -491,6 +502,18 @@ def _research_urls(site: dict, research: dict, form_url: str = "") -> list[str]:
 
 def _verified_site_draft(candidate: dict, site: dict) -> dict:
     """Create a bounded test message from verified site evidence without an LLM wait."""
+    from pathlib import Path
+    campaign_path = Path(__file__).with_name("data") / "sacrifice_oss_campaign.json"
+    if campaign_path.exists():
+        for prepared in json.loads(campaign_path.read_text(encoding="utf-8")):
+            if (prepared.get("company_name") == candidate.get("company_name")
+                    and _host(prepared.get("website")) == _host(site.get("official_website"))
+                    and _host(prepared.get("website"))):
+                draft = {key: prepared.get(key, "") for key in ("subject", "body")}
+                draft["draft_source"] = "prepared_campaign_review"
+                draft["message_review"] = prepared.get("message_review", {})
+                _assert_no_monetary_content(draft)
+                return draft
     company = str(candidate.get("company_name") or "").strip()
     lane = str(candidate.get("sacrifice_lane") or "").strip().upper()
     titles = [
@@ -518,7 +541,7 @@ def _verified_site_draft(candidate: dict, site: dict) -> dict:
     else:
         proposition = (
             "A-one road helps international software companies validate Japan through "
-            "customer discovery, partner development, and first conversations with "
+            "identifying prospective customers, approaching local partners, and arranging first conversations with "
             "Japanese retailers and e-commerce operators."
         )
     subject = f"Japan market opportunity for {company}"
@@ -527,8 +550,8 @@ def _verified_site_draft(candidate: dict, site: dict) -> dict:
         "I’m Kazuma Tamura, Founder & CEO of A-one road in Japan. "
         f"I’ve been reviewing the product information published on your official website, including “{reference}”.\n\n"
         f"{proposition}\n\n"
-        "I’d like to explore whether a focused Japan conversation could be useful for "
-        "your current priorities.\n\n"
+        "Would Japan customer discovery and local partner outreach fit "
+        "your current expansion priorities?\n\n"
         "Would you be open to a 20–30 minute conversation? "
         f"If so, you can choose a time here: {CALENDAR_URL}\n\n"
         "If this is not relevant, please let us know and we will not follow up.\n\n"
