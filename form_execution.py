@@ -11,6 +11,8 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 import time
+import hashlib
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
@@ -108,7 +110,8 @@ def _label_for(el) -> str:
                     const parent = el.closest('label');
                     if (parent) return (parent.innerText || '').trim();
                     const wrapper = el.parentElement;
-                    return wrapper ? (wrapper.innerText || '').trim().slice(0, 300) : '';
+                    if (!wrapper || wrapper.tagName === 'FORM' || wrapper.querySelectorAll('input,textarea,select').length > 1) return '';
+                    return (wrapper.innerText || '').trim().slice(0, 300);
                 }"""
             )
             or ""
@@ -138,6 +141,8 @@ def _field_key(el, label: str) -> str:
     marker = _marker(el, label)
     typ = (el.get_attribute("type") or "text").lower()
     tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
+    if tag == "textarea":
+        return "message"
     if typ == "email" or re.search(r"\b(e[- ]?mail|email)\b", marker):
         return "email"
     if re.search(r"gmv[_ -]?range|annual[_ -]?(?:e[_ -]?)?commerce[_ -]?(?:revenue|sales)|annual\s+revenue|年商", marker):
@@ -146,9 +151,9 @@ def _field_key(el, label: str) -> str:
         return "monthly_traffic"
     if re.search(r"ecommerce[_ -]?platform|e-commerce\s+platform|\bplatform\b", marker):
         return "platform"
-    if re.search(r"reason[_ -]?for[_ -]?contact|looking\s+to\s+talk|相談先|問い合わせ先", marker):
+    if re.search(r"reason[_ -]?for[_ -]?contact|(?:type[_ -]?of[_ -]?(?:enquiry|inquiry))|(?:inquiry|enquiry)[_ -]?type|looking\s+to\s+talk|相談先|問い合わせ先", marker):
         return "reason"
-    if re.search(r"how[_ -]?did[_ -]?you[_ -]?learn|how\s+did\s+you\s+learn|流入元|知ったきっかけ", marker):
+    if re.search(r"how[_ -]?did[_ -]?you[_ -]?(?:learn|hear)|流入元|知ったきっかけ", marker):
         return "discovery_source"
     if re.search(r"category[_ -]?|main\s+category|商品カテゴリ|カテゴリー", marker):
         return "category"
@@ -160,11 +165,15 @@ def _field_key(el, label: str) -> str:
     ):
         return "message"
     if re.search(r"\b(first[- _]?name|given[- _]?name|名)\b", marker):
+        if re.fullmatch(r"\s*(?:name|your name|お名前)\s*\*?\s*", label, re.I):
+            return "name"
         return "first_name"
     if re.search(r"\b(last[- _]?name|family[- _]?name|surname|姓)\b", marker):
         return "last_name"
     if re.search(r"\b(country|nation)\b|countryregion(?:_|$)|\b(国|国名)\b", marker):
         return "country"
+    if re.search(r"\bregion\b", marker):
+        return "region"
     if re.search(r"industry(?:_|$)|\bindustry\b|業種", marker):
         return "industry"
     if re.search(r"\b(postal|postcode|zip|郵便)\b", marker):
@@ -223,9 +232,11 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
     if key == "last_name":
         return "Tamura"
     if key == "phone":
-        return "+818048705690" if re.search(r"country|国|international|国際", marker) else "08048705690"
+        return "+818048705690"
     if key == "country":
         return "Japan"
+    if key == "region":
+        return "Asia Pacific"
     if key == "postal_code":
         return "220-0072"
     if key == "state":
@@ -246,9 +257,10 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
 def _select_option(el, key: str) -> tuple[bool, str]:
     wanted = {
         "country": ("japan", "日本", "jp"),
+        "region": ("apac", "asia pacific", "asia-pacific", "asia"),
         "state": ("kanagawa", "神奈川"),
         "industry": ("consulting", "professional services", "other"),
-        "reason": ("partnership", "partner inquiry", "business development", "other"),
+        "reason": ("partnership", "partner", "business development", "other"),
         "discovery_source": ("found you online", "online marketing"),
         "category": ("other",),
         "platform": ("other",),
@@ -335,7 +347,11 @@ def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
     """Select a visible option from a HubSpot-style custom dropdown."""
     wanted = {
         "country": ("japan", "日本"),
-        "reason": ("partnership", "partner inquiry", "business development", "other"),
+        "region": ("apac", "asia pacific", "asia-pacific", "asia"),
+        "state": ("kanagawa", "神奈川"),
+        "industry": ("consulting", "professional services", "other"),
+        "role": ("founder", "ceo", "chief executive", "owner"),
+        "reason": ("partnership", "partner", "business development", "other"),
         "discovery_source": ("found you online", "online marketing"),
         "category": ("other",),
         "platform": ("other",),
@@ -365,6 +381,8 @@ def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
     wanted_tokens = tuple(
         _normalise_choice_text(token) for token in wanted if _normalise_choice_text(token)
     )
+    if not wanted_tokens:
+        return False, ""
 
     try:
         el.click(timeout=5000)
@@ -520,8 +538,22 @@ def _captcha_present(contexts) -> bool:
             try:
                 locator = context.locator(selector)
                 for index in range(min(locator.count(), 8)):
-                    if locator.nth(index).is_visible():
-                        return True
+                    widget = locator.nth(index)
+                    if not widget.is_visible():
+                        continue
+                    # Google's documented invisible integration decorates the
+                    # ordinary submit button. A badge/config attribute alone is
+                    # not a human challenge. The site's own validation still runs;
+                    # a visible checkbox/image challenge continues to stop us.
+                    tag = widget.evaluate("el => el.tagName.toLowerCase()")
+                    src = str(widget.get_attribute('src') or '')
+                    if widget.get_attribute('data-size') == 'invisible':
+                        continue
+                    if tag in {'button', 'input'} and widget.get_attribute('data-callback') and 'g-recaptcha' in str(widget.get_attribute('class') or ''):
+                        continue
+                    if tag == 'iframe' and '/anchor?' in src and re.search(r'(?:[?&])size=invisible(?:&|$)', src):
+                        continue
+                    return True
             except Exception:
                 continue
         try:
@@ -583,6 +615,7 @@ def _form_score(form) -> int:
         visible = 0
         relevant = 0
         textareas = 0
+        messages = 0
         for index in range(fields.count()):
             el = fields.nth(index)
             typ = (el.get_attribute("type") or "text").lower()
@@ -599,6 +632,8 @@ def _form_score(form) -> int:
             label = _label_for(el)
             if _field_key(el, label):
                 relevant += 1
+            if _field_key(el, label) == "message":
+                messages += 1
             if (el.evaluate("el => el.tagName.toLowerCase()") or "").lower() == "textarea":
                 textareas += 1
         submit = form.locator("button[type=submit], input[type=submit], button")
@@ -607,7 +642,7 @@ def _form_score(form) -> int:
             for index in range(min(submit.count(), 8))
             if submit.nth(index).is_visible() and submit.nth(index).is_enabled()
         )
-        return relevant * 20 + visible * 3 + textareas * 4 + submit_visible * 5
+        return messages * 1000 + relevant * 20 + visible * 3 + textareas * 4 + submit_visible * 5
     except Exception:
         return 0
 
@@ -792,6 +827,34 @@ class PublicContactFormExecutor:
         self.sheets = sheets
         self.authorization = authorization
 
+    def preview_candidates(self, *, form_urls, website, company_name, subject, message, compact_message=""):
+        """Try up to three official pages without issuing a non-GET request.
+
+        A failed first contact-page discovery does not justify sending to a
+        newsletter or manufacturing a required purchasing-intent answer.
+        """
+        from urllib.parse import urldefrag
+        pages = list(dict.fromkeys(urldefrag(url)[0] for url in form_urls
+                                  if _same_host_or_subdomain(url, website)))[:3]
+        attempts = []
+        for url in pages:
+            result = self.execute(form_url=url, website=website, company_name=company_name,
+                                  subject=subject, message=message,
+                                  idempotency_key="read-only-form-preview", preview_only=True)
+            attempts.append(result)
+            limit = result.get("max_message_length")
+            if (result.get("reason") == "MESSAGE_VALUE_MISMATCH" and compact_message
+                    and limit and len(compact_message) <= limit):
+                result = self.execute(form_url=url, website=website, company_name=company_name,
+                                      subject=subject, message=compact_message,
+                                      idempotency_key="read-only-compact-preview", preview_only=True)
+                attempts.append(result)
+                if result["status"] == "FORM_PREVIEW_READY":
+                    return {"form_url": url, "attempts": attempts, "ready": True, "message": compact_message}
+            if result["status"] == "FORM_PREVIEW_READY":
+                return {"form_url": url, "attempts": attempts, "ready": True, "message": message}
+        return {"form_url": "", "attempts": attempts, "ready": False}
+
     def _existing(
         self,
         idempotency_key: str,
@@ -843,6 +906,7 @@ class PublicContactFormExecutor:
         idempotency_key: str,
         draft_id: str = "",
         source_row: str = "",
+        preview_only: bool = False,
     ) -> dict:
         started = datetime.now(timezone.utc).isoformat()
         field_audit = []
@@ -851,8 +915,26 @@ class PublicContactFormExecutor:
         field_status = {key: "NOT_REQUESTED" for key in CORE_FIELDS}
         missing_required = []
         core_unfilled = []
+        initial_success_texts = set()
+        page = None
+        screenshots = {}
+
+        def capture(stage):
+            directory = os.getenv("OUTREACH_EVIDENCE_DIR", "")
+            if not directory or page is None:
+                return
+            try:
+                root = Path(directory)
+                root.mkdir(parents=True, exist_ok=True)
+                key = hashlib.sha256((idempotency_key + ':' + company_name).encode()).hexdigest()[:20]
+                path = root / f"{key}-{stage}.png"
+                page.screenshot(path=str(path), timeout=5000)
+                screenshots[stage] = str(path)
+            except Exception:
+                pass
 
         def result_payload(status: str, *, reason: str = "", **extra) -> dict:
+            capture("outcome")
             payload = {
                 "status": status,
                 "company_name": company_name,
@@ -862,6 +944,7 @@ class PublicContactFormExecutor:
                 "field_audit": field_audit,
                 "checkbox_audit": checkbox_audit,
                 "submission_attempted": submission_attempted,
+                "screenshots": dict(screenshots),
                 "field_status": dict(field_status),
                 "missing_required": list(missing_required),
                 "core_unfilled": list(core_unfilled),
@@ -877,11 +960,11 @@ class PublicContactFormExecutor:
             return payload
 
         from workbook_sales import authorized
-        if not authorized(self.authorization, self.sheets, company_name, website):
+        if not preview_only and not authorized(self.authorization, self.sheets, company_name, website):
             return result_payload("BLOCKED", reason="workbook_authorization_required")
         if not form_url or not _same_host_or_subdomain(form_url, website):
             return result_payload("FORM_FAILED", reason="FORM_HOST_UNVERIFIED")
-        duplicate = self._existing(
+        duplicate = None if preview_only else self._existing(
             idempotency_key,
             company_name=company_name,
             source_row=source_row,
@@ -899,6 +982,13 @@ class PublicContactFormExecutor:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=True)
                 page = browser.new_page()
+                preview_filling_started = False
+                if preview_only:
+                    # Multi-step forms can transmit partial data on Next. The
+                    # forensic preview must never issue such submissions.
+                    # A GET form or autosave beacon can also carry entered data.
+                    # Freeze network activity before filling, not just POSTs.
+                    page.route("**/*", lambda route: route.continue_() if not preview_filling_started and route.request.method.upper() in {"GET", "HEAD"} else route.abort())
                 try:
                     action_timeout_ms = int(
                         os.getenv("OUTREACH_FORM_ACTION_TIMEOUT_MS", "7000") or 7000
@@ -948,6 +1038,11 @@ class PublicContactFormExecutor:
                 if not chosen:
                     return result_payload("FORM_FAILED", reason="FORM_NOT_FOUND")
                 form_context, form = chosen
+                for context in (page, form_context):
+                    try:
+                        initial_success_texts.update(m.group(0).casefold() for m in SUCCESS_RE.finditer(context.locator("body").inner_text()))
+                    except Exception:
+                        pass
                 base_url = getattr(form_context, "url", "") or page.url
                 action = urljoin(base_url, str(form.get_attribute("action") or base_url))
                 if not _form_action_allowed(action, website):
@@ -957,6 +1052,7 @@ class PublicContactFormExecutor:
                         action_url=action,
                     )
 
+                preview_filling_started = True
                 seen_step_signatures = set()
                 for step_index in range(4):
                     current_step_signature = _visible_step_signature(form)
@@ -992,6 +1088,7 @@ class PublicContactFormExecutor:
                             "label": label,
                             "type": typ,
                             "required": required,
+                            "maxlength": el.get_attribute("maxlength"),
                             "action": "NOT_FILLED",
                             "final_value": "",
                         }
@@ -1214,10 +1311,30 @@ class PublicContactFormExecutor:
                         )
 
                     radios = form.locator("input[type=radio]")
+                    radio_groups = {}
                     for index in range(radios.count()):
                         el = radios.nth(index)
-                        if el.is_visible() and el.is_enabled() and _required(el) and not el.is_checked():
-                            missing_required.append(f"radio_required_{index}:{_marker(el, _label_for(el))}")
+                        if el.is_visible() and el.is_enabled():
+                            group = el.get_attribute("name") or f"unnamed_{index}"
+                            radio_groups.setdefault(group, []).append(el)
+                    for group, controls in radio_groups.items():
+                        if any(el.is_checked() for el in controls):
+                            continue
+                        required = any(_required(el) for el in controls)
+                        if not required:
+                            continue
+                        # Choose only a truthful partnership/general inquiry or
+                        # sender role. Never invent a purchasing intention.
+                        match = next((el for el in controls if re.search(
+                            r"\bpartners?(?:hips?)?\b|\bothers?\b|general (?:inquiry|enquiry)|founder|\bceo\b",
+                            _label_for(el), re.I)), None)
+                        if match is not None:
+                            try:
+                                match.check()
+                            except Exception:
+                                pass
+                        if not any(el.is_checked() for el in controls):
+                            missing_required.append(f"radio_required:{group}")
 
                     core_present = {
                         key for key in CORE_FIELDS
@@ -1246,14 +1363,13 @@ class PublicContactFormExecutor:
                     control_label = _control_label(submit)
                     if re.search(r"\bnext\b", control_label, re.I):
                         before_click_signature = _visible_step_signature(form)
+                        if not preview_only:
+                            submission_attempted = True  # A server-side step can transmit partial data.
                         try:
                             submit.click(timeout=15000)
-                        except Exception as first_click_error:
-                            _dismiss_cookie_banner([page] + list(page.frames[1:]))
-                            try:
-                                submit.click(timeout=15000)
-                            except Exception:
-                                raise first_click_error
+                        except Exception:
+                            return result_payload("FORM_FAILED" if preview_only else "FORM_UNCONFIRMED",
+                                                  reason="STEP_CLICK_OUTCOME_UNKNOWN")
                         try:
                             page.wait_for_load_state("domcontentloaded", timeout=5000)
                         except Exception:
@@ -1266,13 +1382,34 @@ class PublicContactFormExecutor:
                                 reason="MULTI_STEP_NOT_ADVANCED",
                             )
                         continue
+                    # A final submit control ends filling. Repeating the same
+                    # form four times can reset dependent widgets and consent.
+                    break
                 if re.search(r"\bnext\b", control_label, re.I):
                     return result_payload(
                         "FORM_FAILED",
                         reason="MULTI_STEP_NOT_COMPLETED",
                     )
+                if field_status.get("message") != "FILLED":
+                    return result_payload("FORM_FAILED", reason="MESSAGE_FIELD_MISSING")
+                # Verify the actual DOM value, including maxlength truncation,
+                # immediately before the external action.
+                actual_messages = []
+                for index in range(fields.count()):
+                    el = fields.nth(index)
+                    if _field_key(el, _label_for(el)) == "message":
+                        actual_messages.append(_current_value(el))
+                if message not in actual_messages:
+                    limits = [int(item["maxlength"]) for item in field_audit
+                              if item.get("key") == "message" and str(item.get("maxlength") or '').isdigit()
+                              and int(item["maxlength"]) > 0]
+                    return result_payload("FORM_FAILED", reason="MESSAGE_VALUE_MISMATCH",
+                                          max_message_length=min(limits) if limits else None)
                 if contact_policy_blocked(page.locator("body").inner_text()):
                     return result_payload("BLOCKED", reason="CONTACT_POLICY_RESTRICTS_OUTREACH")
+                if preview_only:
+                    return result_payload("FORM_PREVIEW_READY", reason="PREVIEW_NO_SUBMISSION")
+                capture("before-submit")
                 submission_attempted = True
                 if not final_submit_once(submit):
                     # The request may already have reached the recipient. Never
@@ -1304,11 +1441,11 @@ class PublicContactFormExecutor:
                     except Exception:
                         continue
                 visible_text = "\n".join(dict.fromkeys(part for part in visible_parts if part))
-                success_match = SUCCESS_RE.search(visible_text or "")
-                thank_you_url = _is_first_party_thank_you_url(final_url, website)
+                success_match = next((m for m in SUCCESS_RE.finditer(visible_text or "") if m.group(0).casefold() not in initial_success_texts), None)
+                thank_you_url = final_url != form_url and _is_first_party_thank_you_url(final_url, website)
                 if not success_match and not thank_you_url:
                     return result_payload(
-                        "FORM_FAILED",
+                        "FORM_UNCONFIRMED",
                         reason="SUBMISSION_NOT_CONFIRMED",
                         form_url=final_url,
                         confirmation_text=(visible_text or "")[:4000],
@@ -1321,43 +1458,12 @@ class PublicContactFormExecutor:
                     confirmation_text=(visible_text or "")[:4000],
                     finished_at=datetime.now(timezone.utc).isoformat(),
                 )
-                audit_row = {
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "channel": "FORM",
-                    "company_name": company_name,
-                    "website": website,
-                    "email": "PUBLIC_CONTACT_FORM",
-                    "status": "FORM_SENT",
-                    "error_message": "",
-                    "stage": "FORM_EXECUTION",
-                    "idempotency_key": idempotency_key,
-                    "draft_id": draft_id,
-                    "source_row": source_row,
-                    "company_name": company_name,
-                    "lane": self.authorization.lane,
-                    "channel": "FORM",
-                    "status": "FORM_SENT",
-                    "semantic_success": "FORM_CONFIRMED",
-                    "message_id": "",
-                    "subject": subject,
-                    "body": message,
-                    "recipient": "PUBLIC_CONTACT_FORM",
-                    "form_url": final_url,
-                    "confirmation": confirmation,
-                    "executed_at": datetime.now(timezone.utc).isoformat(),
-                }
-                log_error = ""
-                if self.sheets is not None:
-                    try:
-                        self.sheets.append_dict(_execution_log_sheet(), audit_row)
-                    except Exception as exc:
-                        log_error = f"{type(exc).__name__}:{exc}"
-                result["audit_log_written"] = not log_error
-                if log_error:
-                    result["audit_log_error"] = log_error
+                # The batch runner owns the single verified terminal event.
+                # It records failures and successes through the same writer.
+                result["audit_log_written"] = False
                 return result
         except Exception as exc:
-            return result_payload("FORM_FAILED", reason=f"{type(exc).__name__}:{exc}")
+            return result_payload("FORM_UNCONFIRMED" if submission_attempted else "FORM_FAILED", reason=f"{type(exc).__name__}:{exc}")
         finally:
             if browser is not None:
                 try:

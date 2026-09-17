@@ -1,0 +1,43 @@
+name: Historical last-ten form diagnosis (no send)
+on:
+  push:
+    branches: [codex/outreach-receipt-repair]
+    paths:
+      - .github/outreach-diagnosis-trigger
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: outreach-failure-diagnosis
+  cancel-in-progress: false
+jobs:
+  inspect:
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [historical, candidates, bpo-research]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      LEAD_FACTORY_VERTEX_ALLOWED: FALSE
+      OUTREACH_SITE_FETCH_MODE: PLAYWRIGHT
+      OUTREACH_EVIDENCE_DIR: outreach-evidence
+    steps:
+      - uses: actions/checkout@v4
+      - run: python cost_guard.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - run: python -m playwright install --with-deps chromium
+      - if: matrix.sample == 'historical'
+        run: python diagnose_failed_forms.py
+      - if: matrix.sample == 'candidates'
+        run: python diagnose_failed_forms.py --manifest data/outreach_quality_candidates.json
+      - if: matrix.sample == 'bpo-research'
+        run: python diagnose_failed_forms.py --manifest data/outreach_bpo_research.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: form-diagnosis-${{ matrix.sample }}-${{ github.run_id }}
+          path: outreach-evidence/

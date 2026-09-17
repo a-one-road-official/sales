@@ -77,8 +77,9 @@ def _preferred_form_url(company_name: str, website: str, links: list[str]) -> st
     root_host = _host(website)
     if hint:
         return hint
+    from sacrifice_web_research import ordered_contact_links, contact_priority
     candidates = []
-    for value in _unique(links):
+    for value in ordered_contact_links(links):
         if not root_host:
             continue
         host = _host(value)
@@ -89,12 +90,12 @@ def _preferred_form_url(company_name: str, website: str, links: list[str]) -> st
         def has_path_token(marker: str) -> bool:
             token = re.sub(r"[-_]+", " ", marker)
             return bool(re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", normalized_path))
-        score = sum(3 for marker in FORM_PATH_MARKERS if has_path_token(marker))
+        score = contact_priority(value)[0]
         score -= sum(2 for marker in ("newsletter", "subscribe", "login", "signup") if has_path_token(marker))
         score -= sum(1 for marker in ("pricing", "features", "product", "platform") if has_path_token(marker))
         if score > 0:
-            candidates.append((score, value))
-    return max(candidates, default=(0, ""))[1]
+            candidates.append(value)
+    return candidates[0] if candidates else ""
 
 
 _PLACEHOLDER_EMAIL_DOMAINS = {
@@ -413,7 +414,7 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
         "source_row": source_row,
         "company_name": candidate.get("company_name", ""),
         "lane": str(result.get("lane") or candidate.get("sacrifice_lane") or "EC_SACRIFICE").strip().upper(),
-        "channel": "FORM" if result.get("stage") == "FORM_EXECUTION" else "EMAIL",
+        "channel": "FORM" if result.get("form_execution") else "EMAIL" if result.get("execution") else "NONE",
         "status": result.get("status", "FAILED"),
         "semantic_success": result.get("status") in {"SENT", "FORM_SENT"},
         "message_id": execution.get("message_id", ""),
@@ -433,41 +434,36 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
             "error_message": reason,
             "stage": "BATCH_ATTEMPT",
         }
+    from outreach_evidence import append_verified
+    record["idempotency_key"] = f"{run_id}:{source_row}:result"
+    record["semantic_success"] = bool(record["semantic_success"])
     try:
-        existing = _read_sheet_dicts_once(
-            sheets,
-            _execution_log_sheet(),
-            "U",
-            max_row=_execution_log_max_row(),
-        )
-        if any(str(row.get("idempotency_key") or "") == key for row in existing):
-            return
-    except Exception:
-        pass
-    last_error = None
-    for attempt in range(4):
-        try:
-            if _execution_log_sheet() == "outreach_engine_log":
-                headers = [
-                    "timestamp", "channel", "company_name", "website", "email",
-                    "status", "error_message", "subject", "body", "stage",
-                    "idempotency_key", "draft_id", "source_row", "lane",
-                    "semantic_success", "message_id", "thread_id", "form_url",
-                    "confirmation", "recipient", "executed_at",
-                ]
-                sheets.append(
-                    _execution_log_sheet(),
-                    [record.get(header, "") for header in headers],
-                )
-            else:
-                sheets.append_dict(_execution_log_sheet(), record)
-            return
-        except Exception as exc:
-            last_error = exc
-            if attempt < 3:
-                time.sleep(2 * (attempt + 1))
-    if last_error:
-        result.setdefault("audit_log_error", f"{type(last_error).__name__}:{last_error}")
+        result["audit_range"] = append_verified(sheets, record)
+        result["audit_log_verified"] = True
+    except Exception as exc:
+        result["audit_log_verified"] = False
+        result["audit_log_error"] = f"{type(exc).__name__}:{exc}"
+
+
+def _persist_draft(sheets, run_id, candidate, result):
+    from outreach_evidence import append_verified
+    draft = result["draft"]
+    if not draft.get("subject") or not draft.get("body"):
+        raise ValueError("empty_outreach_message")
+    now = datetime.now(timezone.utc).isoformat()
+    row = {
+        "timestamp": now, "executed_at": now,
+        "company_name": candidate["company_name"],
+        "website": candidate.get("candidate_website", ""),
+        "subject": draft["subject"], "body": draft["body"],
+        "channel": (result.get("audit") or {}).get("channel", ""),
+        "recipient": (result.get("audit") or {}).get("recipient", ""),
+        "form_url": (result.get("audit") or {}).get("form_url", ""),
+        "source_row": candidate.get("source_row", ""), "lane": result["lane"],
+        "draft_id": run_id, "stage": "PRE_SEND", "status": "PREPARED",
+        "idempotency_key": f"{run_id}:{candidate['source_row']}:prepared",
+    }
+    result["draft_saved_range"] = append_verified(sheets, row)
 
 
 def _audit_base(candidate: dict) -> dict:
@@ -541,7 +537,15 @@ def _verified_site_draft(candidate: dict, site: dict) -> dict:
         "A-one road Co., Ltd.\n"
         "Yokohama, Japan"
     )
-    return {"subject": subject, "body": body, "draft_source": "verified_site_template"}
+    compact = (
+        f"Hi {company} team,\n\n"
+        "I'm Kazuma Tamura, Founder & CEO of A-one road in Japan. "
+        "We help international businesses explore Japan through customer discovery and partner development.\n\n"
+        "Could your partnerships team discuss whether this fits your Japan priorities? "
+        f"A 20-minute call: {CALENDAR_URL}\n\n"
+        "If irrelevant, let us know and we won't follow up.\nKazuma Tamura"
+    )
+    return {"subject": subject, "body": body, "compact_body": compact, "draft_source": "verified_site_template"}
 
 
 def _cfg_truthy(cfg: dict[str, str], key: str) -> bool:
@@ -594,6 +598,8 @@ def run_ten_sacrifice_batch(
     if normalized_lane not in {"EC_SACRIFICE", "BPO", "SALES_GTM"}:
         raise ValueError("unsupported_sacrifice_lane")
     cfg = dict(cfg or {})
+    from cost_guard import assert_zero_ai_budget
+    assert_zero_ai_budget(cfg)
     sheets = getattr(executor, "sheets", None)
     if execute_external and getattr(sheets, "spreadsheet_id", "") != WORKBOOK_ID:
         raise ValueError("automatic_outreach_requires_new_workbook")
@@ -669,11 +675,6 @@ def run_ten_sacrifice_batch(
     prompt_title = str(cfg.get("OUTREACH_PROMPT_DOC_TITLE") or PROMPT_DOC_TITLE).strip()
     prompt, prompt_meta = drive.read_live_prompt_by_title(prompt_title)
 
-    # Reserve the selected rows before browser work starts. This protects the
-    # next call from duplicate external actions after a partial batch failure.
-    if execute_external:
-        _mark_runtime_consumed(normalized_lane, candidates)
-
     results = []
 
     for candidate in candidates:
@@ -693,6 +694,7 @@ def run_ten_sacrifice_batch(
         try:
             if execute_external:
                 authorization = claim_candidate(sheets, candidate, normalized_lane, run_id)
+                _mark_runtime_consumed(normalized_lane, [candidate])
                 executor.workbook_authorization = authorization
             evidence = candidate.get("candidate_website_evidence", {})
             source_site_url = str(candidate.get("candidate_website") or "").strip()
@@ -763,7 +765,7 @@ def run_ten_sacrifice_batch(
                 # Only pages where the inspector found an actual HTML form are
                 # eligible for form submission. A marketing/persona/contact link
                 # without a form must fall through to email research.
-                form_links = _unique(list(site.get("forms") or []))
+                form_links = _unique(list(site.get("forms") or []) + list(site.get("contact_links") or []))
                 preferred_form = _preferred_form_url(
                     str(candidate.get("company_name") or "").strip(),
                     str(site.get("official_website") or site_url),
@@ -847,14 +849,14 @@ def run_ten_sacrifice_batch(
                     fast_sales_gtm_mode
                     and _cfg_truthy(cfg, "OUTREACH_FAST_SALES_GTM_EMAIL_FIRST")
                     and bool(email)
+                    and not _cfg_truthy(cfg, "OUTREACH_PLAYWRIGHT_FORM_ONLY")
                 )
                 prefer_public_form = (
-                    normalized_lane == "EC_SACRIFICE"
-                    and _cfg_truthy(cfg, "OUTREACH_PREFER_PUBLIC_FORM")
+                    _cfg_truthy(cfg, "OUTREACH_PREFER_PUBLIC_FORM")
+                    or _cfg_truthy(cfg, "OUTREACH_PLAYWRIGHT_FORM_ONLY")
                 )
                 playwright_form_only = (
-                    normalized_lane == "EC_SACRIFICE"
-                    and _cfg_truthy(cfg, "OUTREACH_PLAYWRIGHT_FORM_ONLY")
+                    _cfg_truthy(cfg, "OUTREACH_PLAYWRIGHT_FORM_ONLY")
                 )
                 if (
                     (
@@ -925,16 +927,29 @@ def run_ten_sacrifice_batch(
                     else:
                         if execute_external:
                             from form_execution import PublicContactFormExecutor
-                            form_result = PublicContactFormExecutor(sheets=sheets, authorization=authorization).execute(
-                                form_url=form_url,
-                                website=site_url,
-                                message=draft_body,
-                                subject=draft_subject,
-                                company_name=str(candidate.get("company_name") or ""),
-                                idempotency_key=form_key,
-                                draft_id=f"{run_id}:{candidate.get('source_row', '')}",
-                                source_row=str(candidate.get("source_row") or ""),
-                            )
+                            form_executor = PublicContactFormExecutor(sheets=sheets, authorization=authorization)
+                            preview = form_executor.preview_candidates(form_urls=form_links, website=site_url,
+                                company_name=str(candidate.get("company_name") or ""), subject=draft_subject, message=draft_body,
+                                compact_message=draft.get("compact_body", ""))
+                            result["form_previews"] = preview["attempts"]
+                            if preview["ready"]:
+                                draft_body = preview["message"]
+                                draft["body"] = draft_body
+                                result["draft"] = draft
+                                result["message_hash"] = _hash(SENDER_EMAIL, draft_subject, draft_body)
+                                result["audit"].update(body=draft_body, form_url=preview["form_url"], message_hash=result["message_hash"])
+                                _persist_draft(sheets, run_id, candidate, result)
+                                form_result = form_executor.execute(
+                                    form_url=preview["form_url"], website=site_url,
+                                    message=draft_body, subject=draft_subject,
+                                    company_name=str(candidate.get("company_name") or ""),
+                                    idempotency_key=form_key,
+                                    draft_id=f"{run_id}:{candidate.get('source_row', '')}",
+                                    source_row=str(candidate.get("source_row") or ""),
+                                )
+                            else:
+                                form_result = preview["attempts"][-1] if preview["attempts"] else {
+                                    "status": "FORM_FAILED", "reason": "NO_OFFICIAL_FORM_CANDIDATE", "submission_attempted": False}
                         result["external_action"] = form_result.get("status", "FORM_FAILED")
                         result.update(status=form_result.get("status", "FORM_FAILED"), stage="FORM_EXECUTION")
                     result["form_execution"] = form_result
@@ -1027,6 +1042,7 @@ def run_ten_sacrifice_batch(
                     elif execute_external:
                         if executor is None:
                             raise RuntimeError("sacrifice_executor_not_configured")
+                        _persist_draft(sheets, run_id, candidate, result)
                         execution = executor.execute(row, cfg)
                         if execution.get("status") == "STALE_PROMPT":
                             if deterministic_draft:
@@ -1078,8 +1094,13 @@ def run_ten_sacrifice_batch(
         )
         result["critical_errors"] = sorted(critical_errors)
         results.append(result)
+        from outreach_evidence import save_local_evidence
+        save_local_evidence(run_id, result)
         if execute_external:
             _record_attempt(sheets, run_id=run_id, candidate=candidate, result=result)
+            save_local_evidence(run_id, result)
+            if not result.get("audit_log_verified"):
+                break  # Repair recording before starting another external action.
 
     # Keep the batch ledger truthful: operational lanes consume every row
     # attempted in this batch, while the legacy EC lane consumes only its
@@ -1089,7 +1110,10 @@ def run_ten_sacrifice_batch(
         normalized_lane == "EC_SACRIFICE"
         and _cfg_truthy(cfg, "OUTREACH_SACRIFICE_CONSUME_FAILED")
     ):
+        processed = {item.get("source_row") for item in results}
         for item in candidates:
+            if item.get("source_row") not in processed:
+                continue
             consumed_after.update(_candidate_consumption_keys(item))
     consumed_after |= _runtime_consumed_source_keys(normalized_lane)
     source_consumed_count = len(consumed_after)
@@ -1123,6 +1147,16 @@ def run_ten_sacrifice_batch(
         for item in results
         if item.get("status") == "FORM_SENT"
     ]
+    from outreach_evidence import quality_summary
+    quality = quality_summary(results)
+    if execute_external:
+        from outreach_evidence import write_dashboard
+        try:
+            write_dashboard(sheets, run_id, results, quality)
+        except Exception as exc:
+            quality.update(passed=False, ui_verified=False, ui_error=f"{type(exc).__name__}:{exc}")
+    for item in results:
+        save_local_evidence(run_id, item)
     success_count = len(email_message_ids) + len(form_confirmations)
     attempted = len(results)
     unconfirmed_count = sum(bool(r.get("status") in {"FORM_UNCONFIRMED", "SENT_UNVERIFIED"} or (
@@ -1130,6 +1164,7 @@ def run_ten_sacrifice_batch(
     )) for r in results)
     return {
         "run_id": run_id,
+        "quality": quality,
         "batch_id": batch_token,
         "status": "EXHAUSTED" if attempted == 0 else "COMPLETE",
         "source": "sales_leads",

@@ -7,6 +7,28 @@ from typing import Mapping
 FALSE_VALUES = {"", "0", "FALSE", "NO", "OFF", "DISABLED"}
 TRUE_VALUES = {"1", "TRUE", "YES", "ON", "ENABLED"}
 
+# User-declared budget, exhausted on 2026-09-17. Never reset from the clock,
+# environment, Sheets settings, a deployment, or an automatic repair.
+AI_API_BUDGET_LIMIT_JPY = 10000
+AI_API_REMAINING_BUDGET_JPY = 0
+PAID_AI_FORBIDDEN = True
+
+
+def assert_zero_ai_budget(config: Mapping[str, object] | None = None) -> None:
+    """Reject a deployment/startup attempting to reopen paid inference."""
+    sources = [os.environ, config or {}]
+    flags = ("LEAD_FACTORY_PAID_AI_ALLOWED", "LEAD_FACTORY_VERTEX_ALLOWED", "PAID_AI_ENABLED")
+    for source in sources:
+        for key in flags:
+            if str(source.get(key, "FALSE")).strip().upper() not in FALSE_VALUES:
+                raise RuntimeError("paid_ai_budget_exhausted:" + key)
+    if not PAID_AI_FORBIDDEN or AI_API_REMAINING_BUDGET_JPY != 0:
+        raise RuntimeError("deployment_requires_zero_paid_ai_budget")
+
+
+def require_paid_ai(action: str) -> None:
+    raise RuntimeError("paid_ai_budget_exhausted:" + str(action or "unknown"))
+
 
 def _truthy(value: object, default: bool = False) -> bool:
     raw = str(value or "").strip().upper()
@@ -32,8 +54,8 @@ def paid_cloud_allowed() -> bool:
 
 
 def paid_ai_allowed() -> bool:
-    """Paid model/search usage requires both the global cloud budget gate and an AI opt-in."""
-    return paid_cloud_allowed() and env_truthy("LEAD_FACTORY_PAID_AI_ALLOWED", default=False)
+    """Budget is exhausted; environment opt-ins cannot authorize more spend."""
+    return False
 
 
 def autonomous_capacity_allowed() -> bool:
@@ -86,8 +108,17 @@ def budget_snapshot() -> dict[str, object]:
     return {
         "paid_cloud_allowed": paid_cloud_allowed(),
         "paid_ai_allowed": paid_ai_allowed(),
+        "ai_api_budget_limit_jpy": AI_API_BUDGET_LIMIT_JPY,
+        "ai_api_remaining_budget_jpy": AI_API_REMAINING_BUDGET_JPY,
+        "ai_budget_basis": "user_declared_exhausted_2026-09-17",
         "autonomous_capacity_expansion": autonomous_capacity_allowed(),
         "auto_rollover_daily_goal": daily_rollover_allowed(),
         "http_self_fallback": http_self_fallback_allowed(),
         "cloud_run": is_cloud_run(),
     }
+
+
+if __name__ == "__main__":
+    import json
+    assert_zero_ai_budget()
+    print(json.dumps(budget_snapshot(), sort_keys=True))

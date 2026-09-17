@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from uuid import uuid4
 
 
@@ -29,6 +30,11 @@ class SacrificeStability:
         self.sheets = sheets
 
     def _batches(self):
+        from workbook_sales import WORKBOOK_ID
+        if getattr(self.sheets, "spreadsheet_id", "") == WORKBOOK_ID:
+            from workbook_sales import WorkbookReader
+            rows = WorkbookReader(self.sheets.svc).rows(WORKBOOK_ID, "outreach_engine_log", "U", {"stage", "body"})
+            return [json.loads(row["body"]) for row in rows if row.get("stage") == "QUALITY_BATCH"]
         try:
             reader = getattr(self.sheets, "rows_as_dicts_once", None)
             if callable(reader):
@@ -39,12 +45,15 @@ class SacrificeStability:
 
     def record(self, *, lane: str, attempted: int, successes: int,
                critical_errors: list[str], cfg: dict[str, str], batch_id: str | None = None,
-               job_id: str | None = None):
+               job_id: str | None = None, quality: dict | None = None):
         batch_id = batch_id or f"sacrifice-{uuid4()}"
-        required = int(cfg.get("OUTREACH_STABLE_BATCHES_REQUIRED", "3") or 3)
-        minimum = int(cfg.get("OUTREACH_STABLE_BATCH_MIN_SUCCESS", "5") or 5)
+        required = max(1, int(cfg.get("OUTREACH_STABLE_BATCHES_REQUIRED", "1") or 1))
+        minimum = max(7, int(cfg.get("OUTREACH_STABLE_BATCH_MIN_SUCCESS", "7") or 7))
         reset = bool(critical_errors) and _truthy(cfg.get("OUTREACH_CRITICAL_ERROR_RESETS", "TRUE"))
-        status = "BATCH_PASS" if attempted == 10 and successes >= minimum and not reset else "BATCH_FAIL"
+        verified = bool(quality and quality.get("passed") is True and quality.get("ui_verified") is True
+                        and quality.get("denominator") == 10 and quality.get("recorded") == 10
+                        and int(quality.get("accepted", 0)) >= minimum)
+        status = "BATCH_PASS" if attempted == 10 and verified and not critical_errors else "BATCH_FAIL"
         if status == "BATCH_FAIL":
             streak = 0
         else:
@@ -74,7 +83,7 @@ class SacrificeStability:
             streak += 1
         promoted = streak >= required
         now = datetime.now(timezone.utc).isoformat()
-        self.sheets.append_dict("LeadFactory_ExecutionBatches", {
+        record = {
             "record_type": "OUTREACH_STABILITY_BATCH",
             "job_id": str(job_id or "").strip(),
             "batch_id": batch_id, "lane": lane, "started_at": now,
@@ -82,8 +91,18 @@ class SacrificeStability:
             "semantic_success": successes, "critical_errors": ",".join(sorted(set(critical_errors))),
             "stability_status": "STABLE" if promoted else status,
             "reset_reason": "critical_error" if reset else ("threshold" if status == "BATCH_FAIL" else ""),
-        })
+        }
+        from workbook_sales import WORKBOOK_ID
+        if getattr(self.sheets, "spreadsheet_id", "") == WORKBOOK_ID:
+            from outreach_evidence import append_verified
+            append_verified(self.sheets, {
+                "timestamp": now, "executed_at": now, "channel": "QUALITY",
+                "stage": "QUALITY_BATCH", "status": record["stability_status"],
+                "lane": lane, "idempotency_key": batch_id + ":quality",
+                "body": json.dumps({**record, "quality": quality}, ensure_ascii=False),
+            })
+        else:
+            self.sheets.append_dict("LeadFactory_ExecutionBatches", record)
         return {"batch_id": batch_id, "attempted": attempted, "semantic_success": successes,
                 "critical_errors": sorted(set(critical_errors)), "passing_streak": streak,
                 "stable": promoted, "factory_send_enabled": False}
-
