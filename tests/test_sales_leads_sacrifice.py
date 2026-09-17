@@ -29,6 +29,10 @@ def test_source_snapshot_is_valid_json():
     assert all(row.get("record_origin") == "SACRIFICE_EC" for row in rows)
 
 
+def test_zero_limit_selects_no_company():
+    assert sacrifice_candidates([{"record_origin": "SACRIFICE_EC", "company_name": "Acme"}], limit=0) == []
+
+
 
 def test_form_selector_does_not_treat_salesforce_as_sales_page():
     selected = _preferred_form_url(

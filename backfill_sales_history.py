@@ -211,7 +211,7 @@ def main() -> None:
 
     row_lookup = {int(row["row_number"]): row for row in rows}
     changed_rows = 0
-    status_restored = 0
+    status_review_candidates = 0
     events_added = 0
 
     for row_number, events in events_by_row.items():
@@ -246,8 +246,7 @@ def main() -> None:
             fields["営業メール宛先"] = latest.get("recipient")
         current_status = str(row.get("Status") or "").strip()
         if current_status in UNTOUCHED:
-            fields["Status"] = "送付済み"
-            status_restored += 1
+            status_review_candidates += 1
 
         sheets._narrow_update_sales_fields(
             row_number, fields,
@@ -256,6 +255,7 @@ def main() -> None:
             reason=f"high_confidence_match:{earliest.get('match_basis') or latest.get('match_basis')}",
             evidence=f"gmail_message:{latest.get('message_id') or ''}",
             audit_event_id=f"gmail-status:{latest.get('message_id') or row_number}",
+            expected_company_name=row.get("company_name", ""),
         )
 
     summary = {
@@ -265,7 +265,9 @@ def main() -> None:
         "matched_rows": len(events_by_row),
         "changed_rows": changed_rows,
         "events_added": events_added,
-        "statuses_restored": status_restored,
+        "statuses_restored": 0,
+        "status_review_candidates": status_review_candidates,
+        "status_write_policy": "HUMAN_OWNED_PRESERVED",
         "basis_counts": dict(basis_counts),
         "unmatched_messages": unmatched,
         "ambiguous_messages": ambiguous,

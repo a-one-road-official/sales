@@ -864,7 +864,7 @@ def _run_sales_leads_sacrifice(payload: dict | None, *, scheduled: bool) -> dict
         lf.drive,
         cfg.get("OUTREACH_PROMPT_DOC_TITLE", "outreach_prompt_production_v1"),
         lane=lane,
-    ) if execute_external else None
+    )
     with _sacrifice_lock:
         result = run_ten_sacrifice_batch(
             llm=lf.llm,

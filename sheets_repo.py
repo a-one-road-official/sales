@@ -31,6 +31,7 @@ from sales_history import (
     SALES_HISTORY_FIELDS,
     append_history,
     guarded_status,
+    guarded_sales_fields,
     has_contact_history,
     history_event_from_execution,
     history_has_event,
@@ -279,12 +280,8 @@ class SheetsRepo:
     def _update_dict_fields(self, sheet: str, row_number: int, changes: dict) -> None:
         if not changes:
             return
-        if sheet == "営業リスト＿Factory/BPO":
-            self._narrow_update_sales_fields(
-                int(row_number), dict(changes), source="DICT_UPDATE",
-                writer="SHEETS_REPO", reason="centralized SSOT field update",
-            )
-            return
+        if str(sheet).strip("'") in {"営業リスト＿Factory/BPO", "営業リスト_Vendor", "営業リスト＿Vendor", "マスタ＿営業リスト"}:
+            raise RuntimeError("sales_identity_required:use_guarded_writer")
         headers_rows = self.read(f"{sheet}!1:1")
         headers = headers_rows[0] if headers_rows else []
         for key in changes:
@@ -563,7 +560,7 @@ class SheetsRepo:
             return (start, end)
 
     def update_row(self, sheet: str, row_number: int, values: list) -> None:
-        if sheet == "営業リスト＿Factory/BPO":
+        if str(sheet).strip("'") in {"営業リスト＿Factory/BPO", "営業リスト_Vendor", "営業リスト＿Vendor", "マスタ＿営業リスト"}:
             raise RuntimeError("direct_ssot_row_write_blocked:use_guarded_status_writer")
         self._execute_write(lambda: self.svc.spreadsheets().values().update(
             spreadsheetId=self.spreadsheet_id,
@@ -576,9 +573,10 @@ class SheetsRepo:
     def update_range(self, range_: str, values: list[list]) -> None:
         """Narrow values update; SSOT Status writes must use the central guard."""
         ref = str(range_ or "").replace("'", "")
-        if ref.startswith("営業リスト＿Factory/BPO!"):
-            target = ref.split("!", 1)[1].split(":", 1)[0]
-            if not target.endswith("1"):
+        if ref.split("!", 1)[0] in {"営業リスト＿Factory/BPO", "営業リスト_Vendor", "営業リスト＿Vendor", "マスタ＿営業リスト"}:
+            target = ref.split("!", 1)[1]
+            # Exact row 1 only. B11/B21 and A1:Z100 are NOT header writes.
+            if not re.fullmatch(r"\$?[A-Z]+\$?1(?::\$?[A-Z]+\$?1)?", target) or len(values) != 1:
                 raise RuntimeError("direct_ssot_range_write_blocked:use_guarded_status_writer")
         self._execute_write(lambda: self.svc.spreadsheets().values().update(
             spreadsheetId=self.spreadsheet_id,
@@ -1156,14 +1154,14 @@ class SheetsRepo:
 
     def _sales_row_dict_by_number(self, row_number: int) -> dict:
         sheet, _ = self._human_ssot_config()
-        headers_rows = self.read(f"'{sheet}'!1:1")
+        headers_rows = self.read_once(f"'{sheet}'!1:1")
         if not headers_rows:
             return {}
         headers = [str(x or "").strip() for x in headers_rows[0]]
         if not headers:
             return {}
         last_col = self._column_letter(len(headers))
-        values = self.read(f"'{sheet}'!A{int(row_number)}:{last_col}{int(row_number)}")
+        values = self.read_once(f"'{sheet}'!A{int(row_number)}:{last_col}{int(row_number)}")
         if not values:
             return {}
         row = list(values[0]) + [""] * max(0, len(headers) - len(values[0]))
@@ -1244,6 +1242,9 @@ class SheetsRepo:
         source_row = str(record.get("source_row") or "").strip()
         row_number = int(source_row) if source_row.isdigit() else 0
         row = self._sales_row_dict_by_number(row_number) if row_number >= 2 else {}
+        expected_company = str(record.get("company_name") or "").strip()
+        if row and (not expected_company or self._normalize_name(row.get("company_name", "")) != self._normalize_name(expected_company)):
+            raise RuntimeError("sales_history_row_identity_changed")
         if not row:
             company = str(record.get("company_name") or "").strip()
             match = self.find_sales_match(company, "") if company else None
@@ -1285,6 +1286,7 @@ class SheetsRepo:
             reason=str(record.get("reason") or "durable sales history event"),
             evidence=str(evidence or ""),
             audit_event_id=f"status:{audit_id}",
+            expected_company_name=row.get("company_name", ""),
         )
         return {"row_number": row_number, "written": True, "contacted": is_contact_event(event)}
 
@@ -1298,17 +1300,20 @@ class SheetsRepo:
         reason: str = "",
         evidence: str = "",
         audit_event_id: str = "",
+        expected_company_name: str = "",
     ) -> None:
         sheet, _ = self._human_ssot_config()
         row_before = self._sales_row_dict_by_number(int(row_number))
         if not row_before:
             raise RuntimeError(f"sales_row_not_found:{row_number}")
+        if not expected_company_name or self._normalize_name(expected_company_name) != self._normalize_name(row_before.get("company_name", "")):
+            raise RuntimeError("sales_row_identity_changed_or_missing")
         headers_rows = self.read(f"'{sheet}'!1:1")
         if not headers_rows:
             raise RuntimeError(f"missing_header:{sheet}")
         headers = headers_rows[0]
         index = {str(h): i for i, h in enumerate(headers) if h}
-        normalized_fields = dict(fields or {})
+        normalized_fields = guarded_sales_fields(row_before, dict(fields or {}), source=source)
         requested_status = None
         effective_status = None
         if "Status" in normalized_fields:
@@ -1357,7 +1362,8 @@ class SheetsRepo:
                     "code_version": os.getenv("GITHUB_SHA") or os.getenv("CODE_VERSION") or "unknown",
                     "idempotency_key": event_id,
                 })
-                readback = self.read(f"'{sheet}'!B{row_number}:B{row_number}")
+                status_col = self._column_letter(index["Status"] + 1)
+                readback = self.read_once(f"'{sheet}'!{status_col}{row_number}:{status_col}{row_number}")
                 actual = str(readback[0][0] if readback and readback[0] else "").strip()
                 if actual != new_status:
                     raise RuntimeError(f"ssot_status_readback_mismatch:{row_number}:{actual}:{new_status}")
@@ -1389,7 +1395,7 @@ class SheetsRepo:
             values["website"] = candidate.get("website")
         if candidate.get("domain"):
             values["original_domain"] = self._normalize_domain(candidate.get("domain"))
-        self._narrow_update_sales_fields(row_number, values)
+        self._narrow_update_sales_fields(row_number, values, expected_company_name=candidate.get("company_name", ""))
 
 
     def find_sales_match(self, company_name: str, domain_or_website: str = "") -> dict | None:

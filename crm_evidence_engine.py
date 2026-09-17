@@ -478,15 +478,16 @@ def run_crm_evidence_tick(factory, *, limit: int = 12) -> dict:
                 writer="CRM_EVIDENCE_ENGINE",
                 reason=decision.yomi_reason or decision.stage or "CRM evidence update",
                 evidence=decision.yomi_source or "",
+                expected_company_name=row.get("company_name", ""),
             )
             try:
                 factory.sheets.append_operational_event({
                     "occurred_at": now,
-                    "event_type": "CRM_EVIDENCE_UPDATE",
+                    "event_type": "CRM_EVIDENCE_PROPOSAL",
                     "company_name": company,
                     "reason_code": decision.yomi or decision.stage or "PRE_FORECAST",
                     "reason_note": decision.yomi_reason,
-                    "match_status": decision.status,
+                    "match_status": _norm(row.get("Status")),
                 })
             except Exception:
                 pass
@@ -497,6 +498,8 @@ def run_crm_evidence_tick(factory, *, limit: int = 12) -> dict:
     return {
         "selected": len(rows),
         "updated": updated,
+        "updated_scope": "EVIDENCE_FIELDS_ONLY",
+        "sales_statuses_updated": 0,
         "skipped_no_evidence": skipped,
         "errors": errors[:50],
     }

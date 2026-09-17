@@ -218,22 +218,12 @@ def _research(factory, row: dict) -> dict:
     return _normalize(value)
 
 
-def _write(factory, sheet: str, headers: list[str], number: int, changes: dict) -> None:
-    positions = {str(header).strip(): i for i, header in enumerate(headers) if str(header).strip()}
-    data = []
-    for key, value in changes.items():
-        if key in positions:
-            data.append({
-                "range": "'{}'!{}{}".format(sheet.replace("'", "''"), _col(positions[key]), number),
-                "values": [[value]],
-            })
-    if data:
-        factory.sheets._execute_write(
-            lambda: factory.sheets.svc.spreadsheets().values().batchUpdate(
-                spreadsheetId=factory.sheets.spreadsheet_id,
-                body={"valueInputOption": "RAW", "data": data},
-            ).execute()
-        )
+def _write(factory, sheet: str, headers: list[str], number: int, changes: dict, *, company_name: str) -> None:
+    if factory.sheets._human_ssot_config()[0] != sheet:
+        raise RuntimeError("review_sheet_identity_mismatch")
+    factory.sheets._narrow_update_sales_fields(
+        number, changes, source="HUMAN_SSOT_REVIEW", expected_company_name=company_name,
+    )
 
 
 def _reason(old: str, review_date: str, value: dict) -> str:
@@ -273,15 +263,15 @@ def _changes(row: dict, value: dict, review_date: str) -> dict:
 def _process_one(factory, sheet: str, headers: list[str], row: dict, review_date: str) -> dict:
     number = int(row["row_number"])
     previous = _text(row.get("reviewed_at", ""))
-    _write(factory, sheet, headers, number, {"reviewed_at": "IN_PROGRESS:{}:{}".format(review_date, number)})
+    _write(factory, sheet, headers, number, {"reviewed_at": "IN_PROGRESS:{}:{}".format(review_date, number)}, company_name=row.get("company_name", ""))
     try:
         value = _research(factory, row)
         if value.get("status") != "COMPLETE":
             raise RuntimeError(value.get("error") or "research_incomplete")
-        _write(factory, sheet, headers, number, _changes(row, value, review_date))
+        _write(factory, sheet, headers, number, _changes(row, value, review_date), company_name=row.get("company_name", ""))
         return {"row_number": number, "company_name": _text(row.get("company_name")), "status": "COMPLETE", "category": value["category"]}
     except Exception as exc:
-        _write(factory, sheet, headers, number, {"reviewed_at": previous})
+        _write(factory, sheet, headers, number, {"reviewed_at": previous}, company_name=row.get("company_name", ""))
         print(
             "human-ssot-review:error row={} company={} error={}:{}".format(
                 number, _text(row.get("company_name")), type(exc).__name__, exc

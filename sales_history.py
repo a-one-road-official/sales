@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
-UNTOUCHED_STATUSES = {"", "未接触", "判定中"}
+UNTOUCHED_STATUSES = {"", "未接触", "判定中", "未選択", "未設定"}
 CONTACTED_STATUSES = {
     "送付済み",
     "送信済み",
@@ -98,13 +99,23 @@ def _event_key(event: dict) -> str:
 
 
 def append_history(existing: Any, event: dict, *, max_events: int = 200) -> str:
+    if text(existing):
+        try:
+            parsed = json.loads(text(existing))
+        except (ValueError, TypeError) as exc:
+            raise ValueError("corrupt_sales_history_preserved") from exc
+        if not isinstance(parsed, list) or any(not isinstance(item, dict) for item in parsed):
+            raise ValueError("corrupt_sales_history_preserved")
     history = parse_history(existing)
     normalized = {str(k): v for k, v in dict(event or {}).items() if v not in (None, "")}
     key = _event_key(normalized)
     if key and any(_event_key(item) == key for item in history):
-        return json.dumps(history[-max_events:], ensure_ascii=False, separators=(",", ":"))
+        return json.dumps(history, ensure_ascii=False, separators=(",", ":"))
     history.append(normalized)
-    return json.dumps(history[-max_events:], ensure_ascii=False, separators=(",", ":"))
+    rendered = json.dumps(history, ensure_ascii=False, separators=(",", ":"))
+    if len(history) > max_events or len(rendered) > 45000:
+        raise ValueError("sales_history_capacity_requires_archival")
+    return rendered
 
 
 def history_has_event(existing: Any, event: dict) -> bool:
@@ -116,15 +127,19 @@ def history_has_event(existing: Any, event: dict) -> bool:
 def is_contact_event(event: dict) -> bool:
     status = text(event.get("status")).upper()
     event_type = text(event.get("event_type") or event.get("action_type")).upper()
-    return status in SUCCESS_EVENT_STATUSES or event_type in SUCCESS_EVENT_TYPES
+    return (status in SUCCESS_EVENT_STATUSES or event_type in SUCCESS_EVENT_TYPES
+            or text(event.get("to_status")) in CONTACTED_STATUSES)
 
 
 def has_contact_history(row: dict) -> bool:
     status = text(row.get("Status"))
     if status in CONTACTED_STATUSES:
         return True
-    if text(row.get(FIRST_CONTACTED_FIELD)) or text(row.get(LAST_OUTBOUND_MESSAGE_ID_FIELD)):
+    if any(text(row.get(k)) for k in SALES_HISTORY_FIELDS if k != HISTORY_FIELD):
         return True
+    raw = text(row.get(HISTORY_FIELD))
+    if raw and not parse_history(raw) and raw not in {"[]", "null"}:
+        return True  # corrupt history must not reopen outreach
     return any(is_contact_event(item) for item in parse_history(row.get(HISTORY_FIELD)))
 
 
@@ -152,9 +167,12 @@ def guarded_status(current: Any, requested: Any, *, row: dict | None = None, sou
     # Existing factual contact evidence can heal a corrupted/uncontacted display.
     contacted = has_contact_history(row)
     if contacted and requested_value in UNTOUCHED_STATUSES:
-        return current_value if current_value in CONTACTED_STATUSES else "送付済み"
+        return current_value if current_value not in UNTOUCHED_STATUSES else "送付済み"
     if contacted and requested_value in CLASSIFICATION_STATUSES:
-        return current_value if current_value in CONTACTED_STATUSES else "送付済み"
+        return current_value if current_value not in UNTOUCHED_STATUSES else "送付済み"
+
+
+    # Existing human-owned status remains authoritative.
 
     # Gate is allowed only to initialize an untouched screened row.
     if source_key == "GATE" and current_value == "判定中" and requested_value == "未接触":
@@ -179,6 +197,63 @@ def guarded_status(current: Any, requested: Any, *, row: dict | None = None, sou
     if requested_value != current_value:
         return current_value
     return current_value
+
+
+HUMAN_OWNED_FIELDS = {
+    "Status", "接触状況", "Stage", "Yomi", "Probability", "Deal_Amount_USD",
+    "Expected_Close", "Next_Action", "Due", "Risk", "Owner", "担当者", "期限",
+    "営業メール承認", "営業メール送信可否",
+}
+IDENTITY_FIELDS = {"company_name", "website", "LF_lead_id", "OPP_ID"}
+
+
+def guarded_sales_fields(current: dict, changes: dict, *, source: str) -> dict:
+    """Omit human-owned cells from automatic writes, including unchanged values.
+
+    Rewriting a previously read Status can undo a concurrent human edit. Omitting
+    the cell entirely avoids that lost-update race for human-owned fields.
+    """
+    if text(source).upper() in HUMAN_STATUS_SOURCES:
+        return dict(changes)
+    last_fields = {LAST_OUTBOUND_AT_FIELD, LAST_OUTBOUND_MESSAGE_ID_FIELD,
+                   LAST_OUTBOUND_THREAD_ID_FIELD, LAST_OUTBOUND_RECIPIENT_FIELD}
+    keep_last = False
+    if text(current.get(LAST_OUTBOUND_AT_FIELD)) and last_fields.intersection(changes):
+        try:
+            old = datetime.fromisoformat(text(current[LAST_OUTBOUND_AT_FIELD]).replace("Z", "+00:00"))
+            new = datetime.fromisoformat(text(changes.get(LAST_OUTBOUND_AT_FIELD)).replace("Z", "+00:00"))
+            keep_last = old.tzinfo is None or new.tzinfo is None or new <= old
+        except (TypeError, ValueError):
+            keep_last = True
+    safe = {}
+    for key, value in changes.items():
+        if keep_last and key in last_fields:
+            continue
+        if key in HUMAN_OWNED_FIELDS:
+            continue
+        if key in IDENTITY_FIELDS and text(current.get(key)):
+            continue
+        if text(current.get(key)) and not text(value):
+            continue
+        if key == HISTORY_FIELD:
+            # A caller may carry an older snapshot. Merge into the freshly read
+            # history instead of replacing it and losing another writer's event.
+            merged = current.get(HISTORY_FIELD, "")
+            if text(value):
+                try:
+                    incoming = json.loads(text(value))
+                except (ValueError, TypeError) as exc:
+                    raise ValueError("invalid_history_patch") from exc
+                if not isinstance(incoming, list) or any(not isinstance(e, dict) for e in incoming):
+                    raise ValueError("invalid_history_patch")
+                for event in incoming:
+                    merged = append_history(merged, event)
+            safe[key] = merged
+            continue
+        if key == FIRST_CONTACTED_FIELD and text(current.get(key)):
+            continue
+        safe[key] = value
+    return safe
 
 
 def history_event_from_execution(record: dict) -> dict:

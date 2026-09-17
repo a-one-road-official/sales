@@ -291,6 +291,9 @@ def _live_sales_gtm_rows(sheets) -> list[dict]:
 
 def load_rows_for_lane(lane: str, sheets=None) -> list[dict]:
     """Load the lane snapshot plus explicit live BPO or 営業/GTM rows."""
+    if sheets is not None:
+        from workbook_sales import live_candidates
+        return live_candidates(sheets, str(lane or "").strip().upper())
     normalized_lane = str(lane or "").strip().upper()
     if normalized_lane == "BPO":
         source_path = BPO_SOURCE_PATH
@@ -364,6 +367,8 @@ def sacrifice_candidates(
     lane: str = "EC_SACRIFICE",
 ) -> list[dict]:
     """Select only the explicitly permitted lane and preserve provenance."""
+    if int(limit) <= 0:
+        return []
     normalized_lane = str(lane or "EC_SACRIFICE").strip().upper()
     if normalized_lane not in {"EC_SACRIFICE", "BPO", "SALES_GTM"}:
         raise RuntimeError("unsupported_sacrifice_lane")
@@ -390,8 +395,9 @@ def sacrifice_candidates(
         evidence = source_website_check(row)
         company_name = str(row.get("company_name") or "").strip()
         allow_shared_non_factory_sheet = (
-            normalized_lane in {"BPO", "SALES_GTM"}
-            and row_domain in {BPO_DOMAIN, SALES_GTM_DOMAIN}
+            (normalized_lane in {"BPO", "SALES_GTM"}
+            and row_domain in {BPO_DOMAIN, SALES_GTM_DOMAIN})
+            or row.get("record_origin") == "workbook-sales-v1"
         )
         if company_name in FACTORY_OR_INDUSTRIAL_NAMES or is_forbidden_factory_target(
             row,
@@ -399,6 +405,8 @@ def sacrifice_candidates(
         ):
             continue
         selected.append({
+            "company_id": row.get("company_id", ""),
+            "references": row.get("references", []),
             "sacrifice_lane": normalized_lane,
             "source": "sales_leads",
             "source_sheet": row.get("source_sheet", "営業リスト_Vendor"),
@@ -448,4 +456,3 @@ def make_research_context(candidate: dict) -> dict:
         "source_record": f"sales_leads:{source_sheet}:{candidate['source_row']}",
         "instruction": "Verify official company website and contact evidence independently. Never trust the candidate URL without evidence.",
     }
-

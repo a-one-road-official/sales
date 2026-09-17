@@ -188,65 +188,35 @@ def install(cls):
             if name and existing_name == name:
                 return row
         return None
-    def update(self, row_number, changes):
-        hs = headers(self)
-        index = {h: i for i, h in enumerate(hs) if h}
-        normalized = dict(changes or {})
-        if "Status" in normalized and hasattr(self, "_narrow_update_sales_fields"):
-            self._narrow_update_sales_fields(
-                int(row_number), normalized, source="SINGLE_SHEET",
-                writer="SINGLE_SHEET", reason="single-sheet status write",
-            )
-            return
-        data = []
-        for key, value in normalized.items():
-            if key not in index:
-                continue
-            col = self._column_letter(index[key] + 1)
-            data.append({"range": f"'{SSOT}'!{col}{int(row_number)}", "values": [[value]]})
-        if data:
-            self._execute_write(lambda: self.svc.spreadsheets().values().batchUpdate(
-                spreadsheetId=self.spreadsheet_id,
-                body={"valueInputOption": "RAW", "data": data},
-            ).execute())
+    def update(self, source_row, changes):
+        # Carry the observed identity through to the final guarded writer.
+        if not isinstance(source_row, dict):
+            raise RuntimeError("sales_row_identity_required")
+        self._narrow_update_sales_fields(
+            int(source_row["row_number"]), dict(changes or {}), source="SINGLE_SHEET",
+            writer="SINGLE_SHEET", reason="single-sheet field update",
+            expected_company_name=source_row.get("company_name", ""),
+        )
 
 
     def append_intake(self, payload):
         hs = headers(self)
-        index = {h: i for i, h in enumerate(hs) if h}
-        vals = native_read(self, f"'{SSOT}'!A2:A")
-        last_used = 1
-        for n, row in enumerate(vals, start=2):
-            if row and str(row[0] or "").strip():
-                last_used = n
-        target = last_used + 1
-        meta = self.svc.spreadsheets().get(
+        if not hs or not str(payload.get("company_name") or "").strip():
+            raise RuntimeError("intake_identity_required")
+        last_col = self._column_letter(len(hs))
+        # Server-side insertion: concurrent intake cannot overwrite the same
+        # client-computed last row, including rows with an empty company cell.
+        result = self._execute_write(lambda: self.svc.spreadsheets().values().append(
             spreadsheetId=self.spreadsheet_id,
-            fields="sheets(properties(sheetId,title,gridProperties(rowCount)))",
-        ).execute()
-        props = next((x.get("properties", {}) for x in meta.get("sheets", [])
-                      if x.get("properties", {}).get("title") == SSOT), None)
-        if props is None:
-            raise RuntimeError("missing_sheet:営業リスト＿Factory/BPO")
-        row_count = int((props.get("gridProperties") or {}).get("rowCount") or 0)
-        if target > row_count:
-            self._execute_write(lambda: self.svc.spreadsheets().batchUpdate(
-                spreadsheetId=self.spreadsheet_id,
-                body={"requests": [{"appendDimension": {
-                    "sheetId": int(props["sheetId"]), "dimension": "ROWS",
-                    "length": max(100, target - row_count),
-                }}]},
-            ).execute())
-        data = []
-        for key, value in payload.items():
-            if key in index:
-                col = self._column_letter(index[key] + 1)
-                data.append({"range": f"'{SSOT}'!{col}{target}", "values": [[value]]})
-        self._execute_write(lambda: self.svc.spreadsheets().values().batchUpdate(
-            spreadsheetId=self.spreadsheet_id,
-            body={"valueInputOption": "RAW", "data": data},
+            range=f"'{SSOT}'!A:{last_col}", valueInputOption="RAW",
+            insertDataOption="INSERT_ROWS", body={"values": [[payload.get(h, "") for h in hs]]},
         ).execute())
-        return target
+        import re
+        updated = (result or {}).get("updates", {})
+        match = re.search(r"!A(\d+):", str(updated.get("updatedRange", "")))
+        if updated.get("updatedRows") != 1 or not match:
+            raise RuntimeError("intake_append_result_unconfirmed")
+        return int(match.group(1))
 
     def list_sources(self):
         from source_universe import BOOTSTRAP_SOURCES
@@ -484,7 +454,7 @@ def install(cls):
         canonical = str(website or f"https://{domain}").strip()
         from source_universe import normalize_country
         normalized_hq_country = normalize_country(hq_country or row.get("LF_hq_country", ""))
-        update(self, row["row_number"], {
+        update(self, row, {
             "website": canonical,
             "original_domain": domain,
             "LF_domain": domain,
@@ -518,7 +488,7 @@ def install(cls):
         )
         if existing_domain:
             source_type = str(row.get("LF_source_type") or "").upper()
-            update(self, row["row_number"], {
+            update(self, row, {
                 "LF_intake_status": (
                     "READY_FOR_MITTELSTAND_GATE"
                     if source_type.startswith("MITTELSTAND_")
@@ -527,7 +497,7 @@ def install(cls):
                 "LF_screening_status": "PENDING",
             })
             return
-        update(self, row["row_number"], {
+        update(self, row, {
             "website": "", "original_domain": "", "LF_domain": "", "LF_website": "",
             "LF_normalized_domain": "", "LF_intake_status": "NEEDS_DOMAIN",
             "LF_screening_status": "PENDING",
@@ -559,7 +529,7 @@ def install(cls):
                 "LF_intake_status": "SCREENED_NO_GO",
                 "営業判定": status,
             })
-        update(self, row["row_number"], changes)
+        update(self, row, changes)
 
     def append_action_event(self, row):
         if not callable(native_append_action_event):
@@ -605,20 +575,20 @@ def install(cls):
         if sheet in {"LeadFactory_GateResults", "LeadFactory_MittelstandResults"}:
             evidence = row.get("evidence") or row.get("G6_evidence") or row.get("M3_evidence") or ""
             reason = row.get("most_important_reason") or row.get("selection_reason") or row.get("G6_reason") or row.get("M3_reason") or ""
-            update(self, target["row_number"], {
+            update(self, target, {
                 "selection_reason": reason,
                 "research_sources": evidence,
                 "reviewed_at": row.get("evaluated_at") or datetime.now(timezone.utc).isoformat(),
             })
             return
         if sheet == "LeadFactory_ContactResearch":
-            update(self, target["row_number"], {
+            update(self, target, {
                 "営業メール宛先": row.get("email") or row.get("contact_email") or row.get("recipient") or "",
                 "営業メール根拠": row.get("evidence") or row.get("reason") or "",
             })
             return
         if sheet == "LeadFactory_MessageDrafts":
-            update(self, target["row_number"], {
+            update(self, target, {
                 "営業メール宛先": row.get("to") or row.get("email") or row.get("recipient") or "",
                 "営業メール件名": row.get("subject") or "",
                 "営業メール本文": row.get("body") or row.get("message") or "",
@@ -627,7 +597,7 @@ def install(cls):
                 "営業メール状態": row.get("status") or row.get("prompt_status") or "DRAFT_READY",
             })
             return
-        update(self, target["row_number"], {
+        update(self, target, {
             "営業メール承認": row.get("approved") or row.get("approval") or "FALSE",
             "営業メール送信可否": row.get("execution_allowed") or "FALSE",
             "営業メール状態": row.get("status") or "READY",
@@ -951,14 +921,14 @@ def install(cls):
             mapped["営業メール状態"] = changes["status"]
         if "prompt_status" in changes:
             mapped["営業メール状態"] = changes["prompt_status"]
-        update(self, row["row_number"], mapped)
+        update(self, row, mapped)
         return True
 
     def update_approval_queue_for_draft(self, draft_id, changes):
         row = find(self, lead_id=draft_id)
         if not row:
             return False
-        update(self, row["row_number"], {
+        update(self, row, {
             "営業メール承認": changes.get("approved") or changes.get("approval") or "",
             "営業メール送信可否": changes.get("execution_allowed") or "",
             "営業メール状態": changes.get("status") or "",
