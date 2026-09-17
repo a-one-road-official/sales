@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import ssl
 import threading
 import time
 import uuid
@@ -128,6 +129,10 @@ class SheetsRepo:
                     # ticks are active, so let the read retry cross that window.
                     delay = min(70.0, 15.0 * (attempt + 1)) if status == 429 else min(8.0, 2 ** attempt)
                     time.sleep(delay)
+                except (ssl.SSLError, OSError):
+                    if attempt == 4:
+                        raise
+                    time.sleep(min(8.0, 2 ** attempt))
             return []
 
 
@@ -138,16 +143,33 @@ class SheetsRepo:
             cached = self._read_cache.get(range_)
             if cached and self._read_cache_ttl and now - cached[0] < self._read_cache_ttl:
                 return [list(row) for row in cached[1]]
-            elapsed = time.monotonic() - self._last_read_at
-            if elapsed < self._read_min_interval:
-                time.sleep(self._read_min_interval - elapsed)
-            res = self.svc.spreadsheets().values().get(
-                spreadsheetId=self.spreadsheet_id, range=range_
-            ).execute()
-            self._last_read_at = time.monotonic()
-            values = res.get("values", [])
-            self._read_cache[range_] = (self._last_read_at, [list(row) for row in values])
-            return [list(row) for row in values]
+            last_error = None
+            for attempt in range(5):
+                elapsed = time.monotonic() - self._last_read_at
+                if elapsed < self._read_min_interval:
+                    time.sleep(self._read_min_interval - elapsed)
+                try:
+                    res = self.svc.spreadsheets().values().get(
+                        spreadsheetId=self.spreadsheet_id, range=range_
+                    ).execute()
+                    self._last_read_at = time.monotonic()
+                    values = res.get("values", [])
+                    self._read_cache[range_] = (self._last_read_at, [list(row) for row in values])
+                    return [list(row) for row in values]
+                except HttpError as exc:
+                    status = getattr(exc.resp, "status", None)
+                    if status not in {429, 500, 502, 503, 504} or attempt == 4:
+                        raise
+                    last_error = exc
+                    time.sleep(min(8.0, 2 ** attempt))
+                except (ssl.SSLError, OSError) as exc:
+                    last_error = exc
+                    if attempt == 4:
+                        raise
+                    time.sleep(min(8.0, 2 ** attempt))
+            if last_error:
+                raise last_error
+            return []
 
 
     def _execute_write(self, operation):
@@ -166,6 +188,10 @@ class SheetsRepo:
                 except HttpError as exc:
                     status = getattr(exc.resp, "status", None)
                     if status not in {429, 500, 502, 503, 504} or attempt == 4:
+                        raise
+                    time.sleep(min(8.0, 2 ** attempt))
+                except (ssl.SSLError, OSError):
+                    if attempt == 4:
                         raise
                     time.sleep(min(8.0, 2 ** attempt))
         return None
