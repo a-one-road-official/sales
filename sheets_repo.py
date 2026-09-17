@@ -316,248 +316,84 @@ class SheetsRepo:
 
 
     def append_dict_preserving_previous_row_structure(self, sheet: str, row: dict, min_row: int | None = None) -> int:
-        with self._write_lock:
-            """Write a new human-facing lead into the first empty SSOT row.
-
-
-            Invariants:
-            - Never append at the physical sheet tail merely because formulas exist there.
-            - For the sales SSOT, start at the configured human append anchor and fill downward.
-            - Preserve existing formulas/CRM values in unrelated columns.
-            - Copy only user-entered format + data validation from the nearest prior populated lead row.
-            - Write only fields explicitly present in ``row``.
-            """
-            headers_rows = self.read(f"'{sheet}'!1:1")
-            if not headers_rows:
-                raise RuntimeError(f"missing_header:{sheet}")
-            headers = headers_rows[0]
-            header_index = {str(h): i for i, h in enumerate(headers) if h}
-            cfg = self.get_config()
-            is_human_ssot = sheet == cfg.get("LEAD_FACTORY_HUMAN_SSOT_SHEET", "営業リスト＿Factory/BPO")
-            if is_human_ssot:
-                from promotion_accounting import validate_new_sales_payload
-                validate_new_sales_payload(row, headers)
-
-
-            cfg = cfg if is_human_ssot else {}
-            if min_row is None:
-                try:
-                    min_row = int(cfg.get("LEAD_FACTORY_HUMAN_APPEND_MIN_ROW", "2") or 2)
-                except Exception:
-                    min_row = 2
-            min_row = max(2, int(min_row))
-
-
-            meta = self.svc.spreadsheets().get(
-                spreadsheetId=self.spreadsheet_id,
-                fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))",
-            ).execute()
-            props = None
-            for item in meta.get("sheets", []):
-                p = item.get("properties", {})
-                if p.get("title") == sheet:
-                    props = p
-                    break
-            if props is None:
-                raise RuntimeError(f"missing_sheet:{sheet}")
-
-
-            sheet_id = int(props["sheetId"])
-            row_count = int(props.get("gridProperties", {}).get("rowCount", 0) or 0)
-            if min_row > row_count:
-                self.svc.spreadsheets().batchUpdate(
-                    spreadsheetId=self.spreadsheet_id,
-                    body={"requests": [{
-                        "appendDimension": {
-                            "sheetId": sheet_id, "dimension": "ROWS", "length": min_row - row_count + 100
-                        }
-                    }]},
-                ).execute()
-                row_count = min_row + 99
-
-
-            # Find the first empty company-name cell from the human append anchor downward.
-            scan = self.read(f"'{sheet}'!A{min_row}:A{row_count}")
-            new_row_number = min_row
-            for offset in range(max(0, row_count - min_row + 1)):
-                value = ""
-                if offset < len(scan) and scan[offset]:
-                    value = str(scan[offset][0] or "").strip()
-                if not value:
-                    new_row_number = min_row + offset
-                    break
-            else:
-                new_row_number = row_count + 1
-                self.svc.spreadsheets().batchUpdate(
-                    spreadsheetId=self.spreadsheet_id,
-                    body={"requests": [{
-                        "appendDimension": {"sheetId": sheet_id, "dimension": "ROWS", "length": 100}
-                    }]},
-                ).execute()
-
-
-            # Nearest prior populated human lead row is the structure template.
-            prior = self.read(f"'{sheet}'!A1:A{new_row_number - 1}")
-            template_row = 1
-            for idx in range(len(prior) - 1, -1, -1):
-                if prior[idx] and str(prior[idx][0] or "").strip():
-                    template_row = idx + 1
-                    break
-
-
-            last_col = self._column_letter(len(headers))
-            structure = self.svc.spreadsheets().get(
-                spreadsheetId=self.spreadsheet_id,
-                ranges=[f"'{sheet}'!A{template_row}:{last_col}{template_row}"],
-                includeGridData=True,
-                fields="sheets(data(rowData(values(userEnteredFormat,dataValidation))))",
-            ).execute()
-            cells = []
-            try:
-                cells = structure["sheets"][0]["data"][0]["rowData"][0].get("values", [])
-            except Exception:
-                cells = []
-            if cells:
-                formatted = []
-                for i in range(len(headers)):
-                    src = cells[i] if i < len(cells) else {}
-                    dst = {}
-                    if "userEnteredFormat" in src:
-                        dst["userEnteredFormat"] = src["userEnteredFormat"]
-                    if "dataValidation" in src:
-                        dst["dataValidation"] = src["dataValidation"]
-                    formatted.append(dst)
-                self.svc.spreadsheets().batchUpdate(
-                    spreadsheetId=self.spreadsheet_id,
-                    body={"requests": [{
-                        "updateCells": {
-                            "start": {"sheetId": sheet_id, "rowIndex": new_row_number - 1, "columnIndex": 0},
-                            "rows": [{"values": formatted}],
-                            "fields": "userEnteredFormat,dataValidation",
-                        }
-                    }]},
-                ).execute()
-
-
-            # Only touch explicitly supplied fields; never blank unrelated CRM/formula columns.
-            data = []
-            for key, value in row.items():
-                if key not in header_index:
-                    continue
-                col = self._column_letter(header_index[key] + 1)
-                data.append({"range": f"'{sheet}'!{col}{new_row_number}", "values": [[value]]})
-            if data:
-                self.svc.spreadsheets().values().batchUpdate(
-                    spreadsheetId=self.spreadsheet_id,
-                    body={"valueInputOption": "RAW", "data": data},
-                ).execute()
-            return new_row_number
-
+        first, _ = self.append_rows_preserving_previous_row_structure(sheet, [row], min_row or 2)
+        return first
 
     def append_rows_preserving_previous_row_structure(
         self, sheet: str, rows: list[dict], start_row: int
     ) -> tuple[int, int]:
-        """Write intake rows at the physical bottom and retain SSOT row structure."""
+        """Allocate new rows on the server; a stale client row number cannot reset CRM.
+
+        start_row is retained for caller compatibility, not used as a write address.
+        Existing cells (including formulas and Status) are never an update target.
+        The one append is not retried here: a lost response needs reconciliation.
+        """
         if not rows:
             return (0, 0)
         with self._write_lock:
-            headers_rows = self.read(f"'{sheet}'!1:1")
+            quoted = "'" + str(sheet).strip("'").replace("'", "''") + "'"
+            headers_rows = self.read(f"{quoted}!1:1")
             if not headers_rows:
                 raise RuntimeError(f"missing_header:{sheet}")
             headers = [str(h or "").strip() for h in headers_rows[0]]
             if sheet == "営業リスト＿Factory/BPO":
                 from promotion_accounting import validate_new_sales_payload
                 for row in rows:
-                    is_pipeline_intake = (
-                        str(row.get("record_origin") or "").upper() == "LEADFACTORY"
-                        and str(row.get("LF_screening_status") or "").upper() == "PENDING"
-                        and str(row.get("Status") or "") == "判定中"
-                    )
-                    if not is_pipeline_intake:
+                    intake = (str(row.get("record_origin") or "").upper() == "LEADFACTORY"
+                              and str(row.get("LF_screening_status") or "").upper() == "PENDING"
+                              and str(row.get("Status") or "") == "判定中")
+                    if not intake:
                         validate_new_sales_payload(row, headers)
-
-            start = max(2, int(start_row))
-            end = start + len(rows) - 1
-            meta = self.svc.spreadsheets().get(
-                spreadsheetId=self.spreadsheet_id,
-                fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))",
-            ).execute()
-            props = next(
-                (
-                    item.get("properties", {})
-                    for item in meta.get("sheets", [])
-                    if item.get("properties", {}).get("title") == sheet
-                ),
-                None,
-            )
-            if props is None:
-                raise RuntimeError(f"missing_sheet:{sheet}")
-            sheet_id = int(props["sheetId"])
-            row_count = int(props.get("gridProperties", {}).get("rowCount", 0) or 0)
-            if end > row_count:
-                self.svc.spreadsheets().batchUpdate(
-                    spreadsheetId=self.spreadsheet_id,
-                    body={"requests": [{
-                        "appendDimension": {
-                            "sheetId": sheet_id,
-                            "dimension": "ROWS",
-                            "length": end - row_count + 100,
-                        }
-                    }]},
-                ).execute()
-
-            prior = self.read(f"'{sheet}'!A1:A{max(1, start - 1)}")
-            template_row = 1
-            for idx in range(len(prior) - 1, -1, -1):
-                if prior[idx] and str(prior[idx][0] or "").strip():
-                    template_row = idx + 1
-                    break
-            source = {
-                "sheetId": sheet_id,
-                "startRowIndex": template_row - 1,
-                "endRowIndex": template_row,
-                "startColumnIndex": 0,
-                "endColumnIndex": len(headers),
-            }
-            destination = {
-                "sheetId": sheet_id,
-                "startRowIndex": start - 1,
-                "endRowIndex": end,
-                "startColumnIndex": 0,
-                "endColumnIndex": len(headers),
-            }
-            self.svc.spreadsheets().batchUpdate(
-                spreadsheetId=self.spreadsheet_id,
-                body={"requests": [
-                    {"copyPaste": {"source": source, "destination": destination, "pasteType": "PASTE_FORMAT"}},
-                    {"copyPaste": {"source": source, "destination": destination, "pasteType": "PASTE_DATA_VALIDATION"}},
-                ]},
-            ).execute()
-
             last_col = self._column_letter(len(headers))
-            values = [[row.get(header, "") for header in headers] for row in rows]
-            api_responses = []
-            for offset in range(0, len(values), 250):
-                chunk = values[offset:offset + 250]
-                chunk_start = start + offset
-                chunk_end = chunk_start + len(chunk) - 1
-                response = self.svc.spreadsheets().values().update(
-                    spreadsheetId=self.spreadsheet_id,
-                    range=f"'{sheet}'!A{chunk_start}:{last_col}{chunk_end}",
-                    valueInputOption="RAW",
-                    body={"values": chunk},
-                ).execute()
-                api_responses.append(response)
+            response = self.svc.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=f"{quoted}!A:{last_col}",
+                valueInputOption="RAW", insertDataOption="INSERT_ROWS",
+                body={"values": [[row.get(h, "") for h in headers] for row in rows]},
+            ).execute()
+            updated = str(response.get("updates", {}).get("updatedRange", ""))
+            match = re.search(r"![A-Z]+(\d+):[A-Z]+(\d+)$", updated)
+            if not match:
+                raise RuntimeError("append_committed_range_unknown:reconcile_before_retry")
+            first, last = map(int, match.groups())
+            if last - first + 1 != len(rows):
+                raise RuntimeError("append_committed_count_mismatch:reconcile_before_retry")
             with self._read_lock:
                 self._read_cache.clear()
             self._last_append_metrics = {
-                "sheet": sheet,
-                "target_start_row": start,
-                "target_end_row": end,
-                "target_range": f"'{sheet}'!A{start}:{last_col}{end}",
-                "api_responses": api_responses,
+                "sheet": sheet, "target_start_row": first, "target_end_row": last,
+                "target_range": updated, "api_responses": [response],
             }
-            return (start, end)
+            # Formatting failures cannot cause a second append on caller retry.
+            # INSERT_ROWS retains surrounding row structure where Sheets supports it.
+            # Explicitly copy only format/validation to the newly returned row range.
+            try:
+                meta = self.svc.spreadsheets().get(
+                    spreadsheetId=self.spreadsheet_id,
+                    ranges=[f"{quoted}!A{max(1, first - 1)}:{last_col}{max(1, first - 1)}"],
+                    includeGridData=True,
+                    fields="sheets(properties(sheetId,title),data(rowData(values(userEnteredFormat,dataValidation))))",
+                ).execute()
+                target = next(x for x in meta.get("sheets", []) if x.get("properties", {}).get("title") == str(sheet).strip("'"))
+                source_cells = target.get("data", [{}])[0].get("rowData", [{}])[0].get("values", [])
+                formatted = []
+                for i in range(len(headers)):
+                    cell = dict(source_cells[i]) if i < len(source_cells) else {}
+                    fmt = dict(cell.get("userEnteredFormat", {}))
+                    if "textFormat" in fmt:
+                        fmt["textFormat"] = {k: v for k, v in fmt["textFormat"].items() if k != "link"}
+                    formatted.append({"userEnteredFormat": fmt, **({"dataValidation": cell["dataValidation"]} if "dataValidation" in cell else {})})
+                self.svc.spreadsheets().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body={"requests": [{"updateCells": {
+                        "start": {"sheetId": target["properties"]["sheetId"], "rowIndex": first - 1, "columnIndex": 0},
+                        "rows": [{"values": formatted} for _ in rows],
+                        "fields": "userEnteredFormat,dataValidation",
+                    }}]},
+                ).execute()
+            except Exception as exc:
+                self._last_append_metrics["format_warning"] = type(exc).__name__
+            return first, last
 
     def update_row(self, sheet: str, row_number: int, values: list) -> None:
         if str(sheet).strip("'") in {"営業リスト＿Factory/BPO", "営業リスト_Vendor", "営業リスト＿Vendor", "マスタ＿営業リスト"}:
