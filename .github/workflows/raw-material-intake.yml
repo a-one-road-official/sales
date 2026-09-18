@@ -1,0 +1,37 @@
+name: Raw material intake (Python only)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '13,43 * * * *'
+  push:
+    branches: [main]
+    paths: ['refinery/.run']
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: aone-private-raw-material-writer
+  cancel-in-progress: false
+jobs:
+  intake:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      LEAD_FACTORY_VERTEX_ALLOWED: 'FALSE'
+      LEAD_FACTORY_PAID_AI_ALLOWED: 'FALSE'
+      LEAD_FACTORY_PAID_CLOUD_ALLOWED: 'FALSE'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --disable-pip-version-check -r refinery/requirements.txt
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: Append public exhibit material to the private raw tab
+        run: python -m refinery.worker
+      # No model calls, cloud deployment, send operation, artifact or cache upload.
