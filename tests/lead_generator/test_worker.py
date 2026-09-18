@@ -35,7 +35,7 @@ class Tests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.store=Store(self.tmp.name+'/s.sqlite')
         self.store.set('command','START');self.api=Fake();self.m=Mirror(self.store,self.api,'test')
     def tearDown(self):self.store.db.close();self.tmp.cleanup()
-    def test_unknown_is_not_pass(self):
+    def test_unknown_japan_check_is_not_pass(self):
         r=record();r['japan']['checks'].pop('linkedin_country_manager')
         self.assertEqual(qualification(r)['decision'],'REVIEW')
     def test_country_manager_overrides_other_proofs(self):
@@ -47,12 +47,21 @@ class Tests(unittest.TestCase):
     def test_scope_rejected(self):
         r=record();r['initial_offer']['requires_full_time_fde']=True
         self.assertEqual(qualification(r)['decision'],'REJECT')
-    def test_proxy_requires_independent_commercial_evidence(self):
+    def test_payment_capacity_is_ranking_signal(self):
         r=record();p=r['commercial_proof'];r['payment_capacity']={'basis':'commercial_proxy','customer_deployment':p,
             'repeat_exhibitions':[dict(p,event_id='expo2025'),dict(p,event_id='expo2026')]}
         self.assertEqual(qualification(r)['decision'],'PASS')
+        self.assertEqual(qualification(r)['payment_capacity_level'],'COMMERCIAL_PROXY')
         r['payment_capacity']['repeat_exhibitions'][1]['event_id']='expo2025'
-        self.assertEqual(qualification(r)['decision'],'REVIEW')
+        self.assertEqual(qualification(r)['decision'],'PASS')
+        self.assertEqual(qualification(r)['payment_capacity_level'],'UNVERIFIED_RANKING_SIGNAL')
+    def test_excluded_us_rejected(self):
+        r=record();r['country']='United States'
+        self.assertEqual(qualification(r)['decision'],'REJECT')
+    def test_vdma_membership_is_valid_or_signal_without_exhibition(self):
+        r=record();r.pop('exhibition_proof');r.pop('commercial_proof');r['payment_capacity']={}
+        r['source_family']='vdma_members'
+        self.assertEqual(qualification(r)['decision'],'PASS')
     def test_retry_after_committed_timeout_does_not_duplicate(self):
         r=record();self.api.fail='sacrifice';self.api.commit_on_fail=True
         self.assertEqual(self.m.sync_one(company_key(r),r),'BOTH_VERIFIED')
