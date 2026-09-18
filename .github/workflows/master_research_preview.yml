@@ -48,3 +48,5 @@ jobs:
           if-no-files-found: warn
 
 # Rerun live preview after independent-engine search recovery.
+
+# Verify source-scoped queries and LLM query refinement.
