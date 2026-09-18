@@ -82,6 +82,8 @@ def generate_email(candidate, site, *, model_call=None):
     research task, never a generic-template fallback or permission to send.
     """
     packet = candidate.get("japan_research") or site.get("japan_research") or {}
+    if packet.get("research_prompt_hash") and packet["research_prompt_hash"] != read_prompt()[1]:
+        raise ValueError("MASTER_PROMPT_CHANGED_RESEARCH_AGAIN")
     if not packet.get("facts") or not packet.get("maturity_searches"):
         raise ValueError("JAPAN_RESEARCH_REQUIRED")
     facts = {str(f["id"]): f for f in packet["facts"] if f.get("id") and f.get("url") and f.get("text") and f.get("retrieved_at")}
