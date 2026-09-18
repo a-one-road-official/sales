@@ -1,0 +1,89 @@
+name: Outreach master verification
+on:
+  push:
+    branches: [codex/outreach-review-no-prices-20260918]
+    paths: [".github/master-verify-trigger"]
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  routing:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      OUTREACH_LOCAL_MODEL: qwen2.5:7b
+      LEAD_FACTORY_VERTEX_ALLOWED: FALSE
+      LEAD_FACTORY_PAID_AI_ALLOWED: FALSE
+      LEAD_FACTORY_PAID_CLOUD_ALLOWED: FALSE
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install read-only verification dependencies
+        run: pip install google-auth google-api-python-client requests beautifulsoup4 playwright pydantic-settings python-dotenv
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: Read current routing without sends or record changes
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from google.auth import default
+          from googleapiclient.discovery import build
+          from workbook_sales import WorkbookReader
+          creds, _ = default(scopes=['https://www.googleapis.com/auth/spreadsheets.readonly'])
+          snapshot = WorkbookReader(build('sheets','v4',credentials=creds,cache_discovery=False)).snapshot()
+          print(json.dumps({'routing_counts':snapshot['counts'],'reasons':dict(Counter(r['reason'] for r in snapshot['companies']))}))
+          print(json.dumps({'eligible':[{'company_name':r['company_name'],'website':r['website'],'company_id':r['company_id'],'lane':r['lane']} for r in snapshot['companies'] if r['route']=='AUTO_RESEARCH']},ensure_ascii=False))
+          PY
+  generate:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OUTREACH_LOCAL_MODEL: qwen2.5:7b
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install requests beautifulsoup4 ddgs pypdf playwright
+      - name: Install free local inference
+        run: |
+          curl --fail --location --max-time 120 https://ollama.com/install.sh -o /tmp/install-ollama.sh
+          sh /tmp/install-ollama.sh
+          ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 1
+          done
+          ollama pull qwen2.5:7b
+      - name: Generate through the shared master with real local AI
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from outreach_master import generate_email, validate_email
+          fixture = json.loads(Path('data/outreach_master_preview.json').read_text())
+          draft = generate_email(fixture['candidate'], fixture['site'])
+          print(json.dumps({'real_inference':True,'words':validate_email(draft),'draft':draft},ensure_ascii=False))
+          PY
+  research:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install requests beautifulsoup4 ddgs pypdf
+      - name: Verify live public search and primary-source fetch
+        run: |
+          python - <<'PY'
+          from japan_research import search_public, fetch_primary, primary_url
+          hits = search_public('site:mhlw.go.jp 2026 労働経済動向調査')
+          urls = [h.get('href','') for h in hits if primary_url(h.get('href',''))]
+          if not urls:
+              raise SystemExit('PRIMARY_SEARCH_UNAVAILABLE')
+          source = fetch_primary(urls[0])
+          print({'primary_search_results':len(urls),'fetched_url':source['url'],'source_characters':len(source['text'])})
+          PY

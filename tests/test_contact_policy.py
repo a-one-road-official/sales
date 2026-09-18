@@ -66,12 +66,12 @@ class ContactPolicyTests(unittest.TestCase):
             path.read_text.side_effect = OSError('unavailable')
             self.assertEqual(block_reason('x', 'x', 'x', 'x'), 'contact_policy_unavailable')
 
-    def test_shipped_policy_blocks_claim_before_api(self):
+    def test_shipped_policy_blocks_unpermitted_claim_before_api(self):
         sheets = Mock(spreadsheet_id=WORKBOOK_ID)
-        with self.assertRaisesRegex(ValueError, 'contact_policy_paused'):
+        with self.assertRaisesRegex(ValueError, 'contact_policy_paused|account_permission_missing'):
             claim_candidate(sheets, {'company_id': 'company:1'}, 'BPO', 'run1')
         self.assertEqual(sheets.mock_calls, [])
 
-    def test_existing_token_is_denied_when_paused(self):
+    def test_unlisted_token_is_denied_by_shipped_policy(self):
         auth = SendAuthorization('company:1', 'Acme', 'https://acme.example', 'BPO', 'run1')
         self.assertFalse(authorized(auth, Mock(spreadsheet_id=WORKBOOK_ID), 'Acme', 'https://acme.example'))

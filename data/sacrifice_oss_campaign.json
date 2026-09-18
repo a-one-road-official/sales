@@ -6,14 +6,18 @@
     "form_url": "https://www.kimonix.com/contact",
     "partner_program_url": "https://www.kimonix.com/become-a-partner",
     "what_it_solves": "Shopifyブランド向けのコレクション並べ替え、マーケット別 merchandising、商品発見のA/Bテスト。公式サイトで確認。",
-    "evidence_urls": ["https://www.kimonix.com/", "https://www.kimonix.com/become-a-partner", "https://www.kimonix.com/contact"],
-    "subject": "A Japan hypothesis for Kimonix",
-    "body": "We’re A-one Road, a Yokohama-based company developing Japan channels for commerce technology. We see a Kimonix opportunity in Shopify collection merchandising for Japanese fashion retailers.\n\nMETI reported on August 26, 2025 that Japan’s 2024 B2C e-commerce market reached ¥26.1 trillion, with apparel at ¥2.8 trillion. For fashion retailers, localized sorting and measurable product discovery matter as seasonal assortments change.\n\nWe can run a paid validation with Japanese fashion retailers, using buyer evidence to select one workflow. For roughly the budget of one major US or German trade show, we can run six months of structured Japan validation. Would it be useful if I sent over the first Japanese fashion retail segment and collection-merchandising workflow I would test?",
+    "evidence_urls": [
+      "https://www.kimonix.com/",
+      "https://www.kimonix.com/become-a-partner",
+      "https://www.kimonix.com/contact"
+    ],
+    "subject": "Kimonix’s Japan rollout for Shopify fashion retailers",
+    "body": "Hi Kimonix team,\n\nWe’re A-one Road, a Yokohama-based company supporting technology businesses in Japan. We see a specific opportunity for Kimonix in automating collection sorting for Japanese Shopify fashion retailers, which is why we’re reaching out.\n\nJapan’s May 2026 labour survey recorded staffing shortages at 34% of wholesale/retail establishments. Automating repetitive collection sorting gives fashion teams a concrete way to reduce manual merchandising workloads.\n\nWe can lead a year of paid Japan market development: assess retailer requirements, shape a localized adoption plan, and develop partner channels around this workflow. Direct evidence from Japanese buyers will guide the practical introduction strategy and subsequent expansion. Can we help build Kimonix’s Japan rollout around this segment?\n\nhttps://calendar.app.google/adKEhXC4UWhQXfJp6\n\nBest regards,\nKazuma Tamura\nFounder & CEO, A-one Road Co., Ltd. (Yokohama, Japan)\n\n────────────────────\nすべての「隠れた価値」の語り部に。\nUnearth All \"Hidden\" Value.\nエーワンロード株式会社 / A-one road Co., Ltd.\n代表取締役　田村 一馬 / Kazuma Tamura, Founder & CEO\n〒220-0072 神奈川県横浜市西区浅間町1丁目4-3 ウィザードビル402\n古物商許可｜第306622619455号\nWebsite｜https://a-oneroad.com/\nBlog｜https://note.com/kazumat\nE-mail｜admin@a1-road.com\nMobile｜+81 80-4870-5690\n────────────────────",
     "message_review": {
-      "decision": "APPROVED",
-      "reviewer": "EC sacrifice pre-send review",
-      "prompt_hash": "sacrifice_ec_prompt_v1",
-      "body_sha256": "297fea58fccd941247f83dce0bc47ddaa255a74edea72f6f9c4f03e1ad3b4dab"
-    }
+      "decision": "PENDING_USER_REVIEW",
+      "reviewer": "",
+      "reason": "Annual Japan rollout support; review sample only, not a runtime generation fallback."
+    },
+    "runtime_generation": false
   }
 ]

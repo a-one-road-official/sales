@@ -32,8 +32,8 @@ concurrency:
 jobs:
   sacrifice-bulk:
     if: >-
-      ${{ (github.event_name == 'workflow_dispatch')
-      || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'RUN_SACRIFICE_BULK')) }}
+      ${{ github.event.repository.private == false && ((github.event_name == 'workflow_dispatch')
+      || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'RUN_SACRIFICE_BULK'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -57,7 +57,7 @@ jobs:
       OUTREACH_EXECUTION_LOG_MAX_ROW: "5000"
       OUTREACH_ALLOWED_LANES: "EC_SACRIFICE,BPO,SALES_GTM"
       OUTREACH_SACRIFICE_LANES: "EC_SACRIFICE,BPO,SALES_GTM"
-      OUTREACH_SACRIFICE_TARGET_COMPANIES: "*"
+      OUTREACH_SACRIFICE_TARGET_COMPANIES: "Searchanise,Boost Commerce"
       OUTREACH_SACRIFICE_SEND_ENABLED: TRUE
       OUTREACH_BPO_SEND_ENABLED: TRUE
       OUTREACH_SALES_GTM_SEND_ENABLED: TRUE
@@ -76,11 +76,12 @@ jobs:
       OUTREACH_AUTOPILOT_ENABLED: FALSE
       OUTREACH_AUTOPILOT_AUTOSTART: FALSE
       LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED: FALSE
+      OUTREACH_LOCAL_MODEL: qwen2.5:7b
       PYTHONUNBUFFERED: "1"
       OUTREACH_EVIDENCE_DIR: outreach-evidence
       OUTREACH_STABLE_BATCH_MIN_SUCCESS: "7"
       OUTREACH_STABLE_BATCHES_REQUIRED: "1"
-      INSPECTION_LANE: ${{ inputs.lane || 'BPO' }}
+      INSPECTION_LANE: ${{ inputs.lane || 'EC_SACRIFICE' }}
 
     steps:
       - name: Checkout
@@ -130,6 +131,39 @@ jobs:
           set -euo pipefail
           python workbook_sales.py --check --output workbook-preflight.json
 
+      - name: Check outbound activation before touching company records
+        id: outbound
+        env:
+          OUTREACH_REQUEST_EXECUTE: ${{ inputs.mode == 'execute' || github.event_name == 'push' }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          policy = json.loads(Path("data/contact_policy.json").read_text())
+          active = policy.get("enabled") is True and bool(policy.get("accounts"))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("active=" + str(active).lower() + "\n")
+          if not active:
+              report = {"status": "STARTED_OUTBOUND_BLOCKED", "reason": "policy_paused_or_no_permitted_accounts", "attempted": 0, "success_count": 0}
+              Path("bulk-summary.json").write_text(json.dumps(report, indent=2))
+              print(json.dumps(report))
+              if os.environ.get("OUTREACH_REQUEST_EXECUTE") == "true":
+                  raise SystemExit("OUTBOUND_NOT_STARTED: no permitted accounts")
+          PY
+
+      - name: Install free local inference
+        if: ${{ inputs.mode == 'execute' || github.event_name == 'push' }}
+        run: |
+          curl --fail --location --max-time 120 https://ollama.com/install.sh -o /tmp/install-ollama.sh
+          sh /tmp/install-ollama.sh
+          ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 1
+          done
+          ollama pull qwen2.5:7b
+
       - name: Start isolated local sacrifice runtime
         if: ${{ inputs.mode == 'execute' || github.event_name == 'push' }}
         run: |
@@ -148,23 +182,6 @@ jobs:
           done
           cat runtime.log
           exit 1
-
-      - name: Check outbound activation before touching company records
-        id: outbound
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-          policy = json.loads(Path("data/contact_policy.json").read_text())
-          active = policy.get("enabled") is True and bool(policy.get("accounts"))
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              output.write("active=" + str(active).lower() + "\n")
-          if not active:
-              report = {"status": "STARTED_OUTBOUND_BLOCKED", "reason": "policy_paused_or_no_permitted_accounts", "attempted": 0, "success_count": 0}
-              Path("bulk-summary.json").write_text(json.dumps(report, indent=2))
-              print(json.dumps(report))
-          PY
 
       - name: Execute all eligible sacrifice lanes in bounded sequential batches
         if: ${{ (inputs.mode == 'execute' || github.event_name == 'push') && steps.outbound.outputs.active == 'true' }}
@@ -201,7 +218,7 @@ jobs:
                   method="POST",
               )
               try:
-                  with urllib.request.urlopen(request, timeout=900) as response:
+                  with urllib.request.urlopen(request, timeout=6600) as response:
                       return json.loads(response.read().decode("utf-8"))
               except urllib.error.HTTPError as exc:
                   body = exc.read().decode("utf-8", errors="replace")
