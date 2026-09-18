@@ -1,7 +1,11 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from sales_leads_sacrifice_run import _with_prepared_contact_evidence, run_ten_sacrifice_batch
+from sales_leads_sacrifice_run import (
+    _verified_form_links,
+    _with_prepared_contact_evidence,
+    run_ten_sacrifice_batch,
+)
 from workbook_sales import WORKBOOK_ID
 
 
@@ -51,3 +55,12 @@ def test_prepared_same_domain_contact_page_can_verify_opaque_root(monkeypatch):
     assert result["site_host"] == "stamped.io"
     assert result["prepared_contact_fallback"] == contact_page
     assert result["emails"] == ["support@stamped.io"]
+
+
+def test_contact_navigation_link_is_not_treated_as_verified_form():
+    site = {
+        "forms": ["https://vendor.example/contact-with-form"],
+        "contact_links": ["https://vendor.example/request-demo"],
+    }
+
+    assert _verified_form_links(site) == ["https://vendor.example/contact-with-form"]
