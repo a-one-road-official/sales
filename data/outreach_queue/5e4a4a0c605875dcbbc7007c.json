@@ -1,0 +1,62 @@
+{
+  "company_id": "company:5e4a4a0c605875dcbbc7007c",
+  "company_name": "Sparq",
+  "website": "https://www.sparq.ai/",
+  "generated_at": "2026-09-18T02:31:52Z",
+  "generator": "chatgpt_master_agent",
+  "research": {
+    "buyer_segment": "Japanese Shopify online eyewear retailers",
+    "workflow": "frame filtering",
+    "japan_maturity": "UNKNOWN",
+    "maturity_searches": [
+      {
+        "query": "\"Sparq\" Japan customers partners office",
+        "checked_at": "2026-09-18T02:31:52Z",
+        "finding": "Search returned no usable Japan activity evidence. Official partner and product pages reviewed; Japan presence remains UNKNOWN."
+      },
+      {
+        "query": "\"Sparq\" 日本 導入 Shopify",
+        "checked_at": "2026-09-18T02:31:52Z",
+        "finding": "Results included unrelated same-name products; no matching Japan customer or partner verified."
+      }
+    ],
+    "official_evidence": [
+      {
+        "url": "https://www.sparq.ai/",
+        "finding": "Official product search and filtering platform for Shopify. Designer Frame Outlet customer example supports online eyewear workflow fit; proposed Japanese segment is an application hypothesis."
+      },
+      {
+        "url": "https://www.sparq.ai/partners",
+        "finding": "Agency partner program exists; reviewed named partners without a verified Japan deployment."
+      },
+      {
+        "url": "https://www.sparq.ai/privacy",
+        "finding": "First-party page publishes hello@sparq.ai."
+      }
+    ],
+    "fact": {
+      "text": "Japan’s May 2026 labour survey found regular-staff shortages at 34% of surveyed wholesale/retail establishments.",
+      "url": "https://www.mhlw.go.jp/toukei/itiran/roudou/koyou/keizai/2605/dl/7roudoukeizaidouko.pdf",
+      "source_locator": "PDF page 7, Table 3, wholesale/retail row, May 2026 shortage column. Scope: establishments with at least 30 regular workers; weighted establishment results, excluding nonresponses. Not skincare- or eyewear-specific.",
+      "source_excerpt": "卸 売 業 ， 小 売 業 34 3 31 33 3 30 34 3 31",
+      "retrieved_at": "2026-09-18T02:31:52Z"
+    }
+  },
+  "review": {
+    "fact_supported": true,
+    "workflow_fit": true,
+    "buyer_specific": true,
+    "presence_neutral": true,
+    "no_price": true,
+    "no_outcome_promises": true
+  },
+  "draft": {
+    "subject": "Sparq — Japan rollout for online eyewear discovery",
+    "body": "Hi Sparq team,\n\nWe’re A-one Road, a Yokohama-based company supporting commerce technology companies with Japan market development. We see an opportunity for Sparq in frame filtering for Japanese Shopify online eyewear retailers, helping shoppers narrow large assortments.\n\nJapan’s May 2026 labour survey found regular-staff shortages at 34% of surveyed wholesale/retail establishments. For eyewear teams facing staffing constraints, self-service frame discovery could reduce repetitive product-selection inquiries.\n\nWe can lead one year of paid Japan market development, identifying the initial entry application, evaluating buyer requirements, shaping local introduction, and developing partner channels. Japanese buyer evidence would determine filter vocabulary and deployment priorities. Can we help plan and execute Sparq’s Japan rollout around this eyewear application?\n\nhttps://calendar.app.google/adKEhXC4UWhQXfJp6\n\nBest regards,\nKazuma Tamura\nFounder & CEO, A-one Road Co., Ltd. (Yokohama, Japan)\n\n────────────────────\nすべての「隠れた価値」の語り部に。\nUnearth All \"Hidden\" Value.\nエーワンロード株式会社 / A-one road Co., Ltd.\n代表取締役　田村 一馬 / Kazuma Tamura, Founder & CEO\n〒220-0072 神奈川県横浜市西区浅間町1丁目4-3 ウィザードビル402\n古物商許可｜第306622619455号\nWebsite｜https://a-oneroad.com/\nBlog｜https://note.com/kazumat\nE-mail｜admin@a1-road.com\nMobile｜+81 80-4870-5690\n────────────────────",
+    "master_prompt_hash": "98df862427ba378948e76552152ff9fa32147f04782664933f8f9f7935006ceb"
+  },
+  "contact_pages": [
+    "https://www.sparq.ai/privacy",
+    "https://www.sparq.ai/partners"
+  ]
+}
