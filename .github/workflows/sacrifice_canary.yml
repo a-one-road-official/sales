@@ -66,7 +66,9 @@ jobs:
       OUTREACH_SITE_FETCH_MODE: PLAYWRIGHT
       OUTREACH_SITE_RPS: "0.5"
       OUTREACH_SITE_MAX_PAGES: "3"
-      OUTREACH_PLAYWRIGHT_FORM_ONLY: TRUE
+      OUTREACH_PLAYWRIGHT_FORM_ONLY: FALSE
+      OUTREACH_VERIFIED_EMAIL_FIRST: TRUE
+      OUTREACH_PREPARED_DRAFTS_ONLY: TRUE
       OUTREACH_PREFER_PUBLIC_FORM: TRUE
       OUTREACH_FORM_AUDIT_TEMPLATE_ONLY: TRUE
       OUTREACH_DETERMINISTIC_DRAFT: TRUE
@@ -151,18 +153,6 @@ jobs:
               if os.environ.get("OUTREACH_REQUEST_EXECUTE") == "true":
                   raise SystemExit("OUTBOUND_NOT_STARTED: no permitted accounts")
           PY
-
-      - name: Install free local inference
-        if: ${{ inputs.mode == 'execute' || github.event_name == 'push' }}
-        run: |
-          curl --fail --location --max-time 120 https://ollama.com/install.sh -o /tmp/install-ollama.sh
-          sh /tmp/install-ollama.sh
-          ollama serve > /tmp/ollama.log 2>&1 &
-          for i in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
-            sleep 1
-          done
-          ollama pull qwen2.5:7b
 
       - name: Start isolated local sacrifice runtime
         if: ${{ inputs.mode == 'execute' || github.event_name == 'push' }}
@@ -282,6 +272,8 @@ jobs:
                       "history_error": result.get("history_error", ""),
                       "routing": result.get("routing", {}),
                       "quality": result.get("quality", {}),
+                      "status": result.get("status"),
+                      "results_summary": [{"company": x.get("company_name"), "status": x.get("status"), "stage": x.get("stage"), "error": x.get("error_message"), "send_reserved": x.get("send_reserved"), "external_action": x.get("external_action")} for x in result.get("results", [])],
                   }
                   summaries.append(compact)
                   print(json.dumps(compact, ensure_ascii=False), flush=True)

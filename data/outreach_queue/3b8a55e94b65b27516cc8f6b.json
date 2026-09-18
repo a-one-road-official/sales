@@ -1,0 +1,54 @@
+{
+  "company_id": "company:3b8a55e94b65b27516cc8f6b",
+  "company_name": "Searchanise",
+  "website": "https://searchanise.io/",
+  "generated_at": "2026-09-18T01:34:31.603205+00:00",
+  "generator": "chatgpt_master_agent",
+  "research": {
+    "buyer_segment": "Japanese Shopify apparel retailers",
+    "workflow": "catalog search",
+    "japan_maturity": "UNKNOWN",
+    "official_evidence": [
+      {
+        "url": "https://searchanise.io/",
+        "finding": "Official commerce product discovery platform; proposed apparel workflow is an application hypothesis, not a customer claim."
+      }
+    ],
+    "maturity_searches": [
+      {
+        "query": "\"Searchanise\" Japan customers partners office",
+        "checked_at": "2026-09-18",
+        "finding": "No conclusion of absence. Broader Japan activity remains unconfirmed."
+      },
+      {
+        "query": "\"Searchanise\" 日本 導入 代理店",
+        "checked_at": "2026-09-18",
+        "finding": "Japanese agency implementation guides found for Boost Commerce; no absence assumed.",
+        "evidence_urls": []
+      }
+    ],
+    "fact": {
+      "text": "Japan’s May 2026 labour survey found regular-staff shortages at 34% of surveyed wholesale/retail establishments.",
+      "url": "https://www.mhlw.go.jp/toukei/itiran/roudou/koyou/keizai/2605/dl/7roudoukeizaidouko.pdf",
+      "source_locator": "Page 7, Table 3, wholesale/retail row, May 2026 shortage column; regular staff, surveyed establishments, not apparel-specific.",
+      "source_excerpt": "卸 売 業 ， 小 売 業 34 3 31 33 3 30 34 3 31",
+      "retrieved_at": "2026-09-18"
+    }
+  },
+  "review": {
+    "fact_supported": true,
+    "workflow_fit": true,
+    "buyer_specific": true,
+    "presence_neutral": true,
+    "no_price": true,
+    "no_outcome_promises": true
+  },
+  "draft": {
+    "subject": "Searchanise — Japan rollout for Shopify apparel retailers",
+    "body": "Hi Searchanise team,\n\nWe’re A-one Road, a Yokohama-based company helping technology companies develop their Japan business. We see a specific opportunity for Searchanise in catalog search for Japanese Shopify apparel retailers, which is why we’re reaching out.\n\nJapan’s May 2026 labour survey found regular-staff shortages at 34% of surveyed wholesale/retail establishments. For lean apparel teams, improving catalog search could reduce the manual work needed to keep products discoverable.\n\nWe can lead one year of paid Japan market development focused on this workflow, including buyer interviews, local requirements, and a practical route to market. Japanese buyer feedback would shape application priorities and local rollout. Can we help build Searchanise’s Japan expansion around these retailers?\n\nhttps://calendar.app.google/adKEhXC4UWhQXfJp6\n\nBest regards,\nKazuma Tamura\nFounder & CEO, A-one Road Co., Ltd. (Yokohama, Japan)\n\n────────────────────\nすべての「隠れた価値」の語り部に。\nUnearth All \"Hidden\" Value.\nエーワンロード株式会社 / A-one road Co., Ltd.\n代表取締役　田村 一馬 / Kazuma Tamura, Founder & CEO\n〒220-0072 神奈川県横浜市西区浅間町1丁目4-3 ウィザードビル402\n古物商許可｜第306622619455号\nWebsite｜https://a-oneroad.com/\nBlog｜https://note.com/kazumat\nE-mail｜admin@a1-road.com\nMobile｜+81 80-4870-5690\n────────────────────",
+    "master_prompt_hash": "98df862427ba378948e76552152ff9fa32147f04782664933f8f9f7935006ceb"
+  },
+  "contact_pages": [
+    "https://searchanise.io/contact-us/"
+  ]
+}
