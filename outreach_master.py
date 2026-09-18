@@ -70,7 +70,7 @@ def local_ai(messages):
         headers={"Content-Type":"application/json"}, method="POST")
     # No proxy, external endpoint, redirect, hosted fallback, or automatic download.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
-    with opener.open(request, timeout=90) as response:
+    with opener.open(request, timeout=600) as response:
         value = json.loads(response.read(200000))
     return json.loads(value["message"]["content"])
 
