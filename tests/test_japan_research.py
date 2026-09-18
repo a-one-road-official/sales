@@ -1,7 +1,35 @@
 import pytest
 import json
 import outreach_master
-from japan_research import primary_url, research_company
+from japan_research import primary_url, research_company, search_public
+
+
+def test_public_search_uses_an_independent_engine_after_failure():
+    attempted = []
+    class Engine:
+        def __init__(self, **kwargs):
+            pass
+        def text(self, query, **kwargs):
+            attempted.append(kwargs['backend'])
+            if kwargs['backend'] == 'google':
+                raise RuntimeError('upstream unavailable')
+            return [{'href':'https://www.mhlw.go.jp/report', 'title':'Primary source'}]
+    hits = search_public('Japan workforce', search_factory=Engine)
+    assert attempted == ['google', 'brave']
+    assert hits[0]['search_backend'] == 'brave'
+
+
+def test_all_search_failures_remain_explicit_and_bounded():
+    attempted = []
+    class Engine:
+        def __init__(self, **kwargs):
+            pass
+        def text(self, query, **kwargs):
+            attempted.append(kwargs['backend'])
+            return []
+    with pytest.raises(RuntimeError, match='PUBLIC_SEARCH_UNAVAILABLE.*company Japan'):
+        search_public('company Japan', search_factory=Engine)
+    assert attempted == ['google', 'brave', 'bing', 'duckduckgo']
 
 
 @pytest.mark.parametrize('name,workflow', [
