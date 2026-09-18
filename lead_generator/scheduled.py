@@ -227,7 +227,8 @@ def _official_site_scan(session, website, robots_cache):
 
 
 def _source_family(source_url):
-    if source_url == VDMA_DIRECTORY:
+    host = (urlparse(source_url).hostname or '').lower()
+    if host.endswith('vdma.eu') or host.endswith('vdma.org'):
         return 'vdma_members'
     if source_url == DIRECTORY:
         return 'robotics_tomorrow'
@@ -322,10 +323,10 @@ def run(api, store, checkpoint, budget_seconds=900):
         states = ('DISCOVERED', 'FETCH_FAILED_1', 'FETCH_FAILED_2', 'OFFICIAL_SITE_RETRY_1', 'OFFICIAL_SITE_RETRY_2')
         placeholders = ','.join('?' for _ in states)
         seeds = store.db.execute(f'''SELECT * FROM seeds WHERE state IN ({placeholders})
-            ORDER BY CASE WHEN source_url=? THEN 0 ELSE 1 END,
+            ORDER BY CASE WHEN source_url LIKE '%vdma.%' OR source_url LIKE '%vdma.org%' THEN 0 ELSE 1 END,
                      CASE WHEN location LIKE '%India%' OR location LIKE '%Taiwan%' OR location LIKE '%Korea%'
                                OR location LIKE '%Poland%' OR location LIKE '%Israel%' OR location LIKE '%Austria%'
-                          THEN 0 ELSE 1 END, profile_url''', (*states, VDMA_DIRECTORY)).fetchall()
+                          THEN 0 ELSE 1 END, profile_url''', states).fetchall()
 
         attempted = 0
         for seed in seeds:
