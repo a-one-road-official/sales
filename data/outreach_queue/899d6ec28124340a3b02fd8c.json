@@ -1,0 +1,62 @@
+{
+  "company_id": "company:899d6ec28124340a3b02fd8c",
+  "company_name": "Wisepops",
+  "website": "https://wisepops.com/",
+  "generated_at": "2026-09-18T03:29:01Z",
+  "generator": "chatgpt_master_agent",
+  "research": {
+    "buyer_segment": "Japanese Shopify home-furnishing retailers",
+    "workflow": "behavior-triggered cart-recovery campaigns",
+    "japan_maturity": "UNKNOWN",
+    "maturity_searches": [
+      {
+        "query": "\"Wisepops\" Japan OR 日本 customer partner office",
+        "checked_at": "2026-09-18T03:29:01Z",
+        "finding": "Search results showed unrelated sites using Wisepops scripts and no usable official Japan customer, partner, office, exhibition, or project evidence; maturity remains UNKNOWN."
+      },
+      {
+        "query": "site:wisepops.com Japan OR Japanese",
+        "checked_at": "2026-09-18T03:29:01Z",
+        "finding": "Official-site search returned no verified Japan activity evidence. Missing evidence was not treated as absence."
+      }
+    ],
+    "official_evidence": [
+      {
+        "url": "https://wisepops.com/",
+        "finding": "Official site describes behavioral visitor segmentation, onsite campaign playbooks, cart recovery and Shopify support; the Japanese home-furnishing retail wedge is an application hypothesis."
+      },
+      {
+        "url": "https://wisepops.com/faq",
+        "finding": "Official FAQ describes AI-powered Shopify cart recovery and publishes support@wisepops.com for email support."
+      },
+      {
+        "url": "https://wisepops.com/partner-program",
+        "finding": "Official agency partner program covers ecommerce/retail and onsite campaign deployment; no Japanese partner was verified."
+      }
+    ],
+    "fact": {
+      "text": "Japan’s May 2026 labour survey found regular-staff shortages at 34% of surveyed wholesale/retail establishments.",
+      "url": "https://www.mhlw.go.jp/toukei/itiran/roudou/koyou/keizai/2605/dl/7roudoukeizaidouko.pdf",
+      "source_locator": "PDF page 7, Table 3, wholesale/retail row, May 2026 shortage column. Scope: establishments with at least 30 regular workers; weighted establishment results, excluding nonresponses. Not home-furnishing- or pet-food-specific.",
+      "source_excerpt": "卸 売 業 ， 小 売 業 34 3 31 33 3 30 34 3 31",
+      "retrieved_at": "2026-09-18T03:29:01Z"
+    }
+  },
+  "review": {
+    "fact_supported": true,
+    "workflow_fit": true,
+    "buyer_specific": true,
+    "presence_neutral": true,
+    "no_price": true,
+    "no_outcome_promises": true
+  },
+  "draft": {
+    "subject": "Wisepops — Japan rollout for home-furnishing cart recovery",
+    "body": "Hi Wisepops team,\n\nWe’re A-one Road, a Yokohama-based company supporting commerce technology companies with Japan market development. We’re contacting Wisepops about behavior-triggered cart-recovery campaigns for Japanese Shopify home-furnishing retailers managing high-consideration purchases.\n\nJapan’s May 2026 labour survey found regular-staff shortages at 34% of surveyed wholesale/retail establishments. For lean ecommerce teams, automated onsite recovery could reduce repeated manual campaign work while guiding hesitant shoppers back to relevant products.\n\nWe can lead one year of paid Japan market development: identify the entry application, evaluate Japanese buyer requirements, shape local introduction, and develop partner channels. Buyer evidence would guide targeting signals, campaign localization, and deployment priorities. Can we help plan and execute Wisepops’ Japan rollout for these retailers?\n\nhttps://calendar.app.google/adKEhXC4UWhQXfJp6\n\nBest regards,\nKazuma Tamura\nFounder & CEO, A-one Road Co., Ltd. (Yokohama, Japan)\n\n────────────────────\nすべての「隠れた価値」の語り部に。\nUnearth All \"Hidden\" Value.\nエーワンロード株式会社 / A-one road Co., Ltd.\n代表取締役　田村 一馬 / Kazuma Tamura, Founder & CEO\n〒220-0072 神奈川県横浜市西区浅間町1丁目4-3 ウィザードビル402\n古物商許可｜第306622619455号\nWebsite｜https://a-oneroad.com/\nBlog｜https://note.com/kazumat\nE-mail｜admin@a1-road.com\nMobile｜+81 80-4870-5690\n────────────────────",
+    "master_prompt_hash": "98df862427ba378948e76552152ff9fa32147f04782664933f8f9f7935006ceb"
+  },
+  "contact_pages": [
+    "https://wisepops.com/faq",
+    "https://wisepops.com/partner-program"
+  ]
+}
