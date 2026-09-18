@@ -102,7 +102,24 @@ def generate_email(candidate, site, *, model_call=None):
             {"role":"user", "content":json.dumps(payload, ensure_ascii=False)}
         ]
         try:
-            out = call(messages)
+            if previous_output is not None and previous_error.startswith("BODY_WORD_COUNT"):
+                out = dict(previous_output)
+                paragraphs = list(out["paragraphs"])
+                chosen = facts[str(out["selected_fact_id"])]
+                if out.get("paragraph2_consequence"):
+                    paragraphs[1] = chosen["text"] + " " + out["paragraph2_consequence"].strip()
+                target = 115 - len(" ".join(paragraphs[:2]).split())
+                if 30 <= target <= 85:
+                    repair = call([
+                        {"role":"system", "content": master + "\nRepair ONLY paragraph 3. Return JSON with one key paragraph. Write exactly three sentences: a concrete one-year paid Japan market development offer, buyer-evidence-led introduction/expansion work, and a direct company-specific rollout question. Do not add prices, meetings, outcome guarantees, unsupported claims or any extra question."},
+                        {"role":"user", "content":json.dumps({"company":company,"buyer_segment":out.get("buyer_segment"),"workflow":out.get("workflow"),"unchanged_paragraphs":paragraphs[:2],"previous_paragraph":paragraphs[2],"required_paragraph_words":target,"minimum_words":target-3,"maximum_words":target+3,"instruction":"Expand or shorten the paragraph to this word budget; the other paragraphs will not change."},ensure_ascii=False)}
+                    ])
+                    paragraphs[2] = repair["paragraph"]
+                    out["paragraphs"] = paragraphs
+                else:
+                    out = call(messages)
+            else:
+                out = call(messages)
             previous_output = out
             fact = facts.get(str(out.get("selected_fact_id")))
             if not fact or out.get("selected_fact_quote") != fact["text"]:

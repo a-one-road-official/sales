@@ -64,6 +64,21 @@ def test_no_paid_fallback(monkeypatch):
     with pytest.raises(RuntimeError, match="LOCAL_AI_NOT_CONFIGURED"):
         m.generate_email(FIXTURE["candidate"], FIXTURE["site"])
 
+def test_word_budget_repair_keeps_company_wedge_and_fact():
+    calls = []
+    def model(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            out = result()
+            out['paragraphs'][2] = 'We offer a year of paid Japan support. Can we help Kimonix launch?'
+            return out
+        assert 'Repair ONLY paragraph 3' in messages[0]['content']
+        return {'paragraph':FIXTURE['paragraphs'][2]}
+    draft = m.generate_email(FIXTURE['candidate'], FIXTURE['site'], model_call=model)
+    assert len(calls) == 2
+    assert FIXTURE['paragraphs'][0] in draft['body']
+    assert m.validate_email(draft) == 110
+
 def test_prompt_change_invalidates_send(tmp_path, monkeypatch):
     path=tmp_path/"prompt.txt"; path.write_text("before")
     monkeypatch.setattr(m,"PROMPT_PATH",path)
