@@ -7,7 +7,7 @@ permissions:
   contents: read
   id-token: write
 jobs:
-  verify:
+  routing:
     if: ${{ github.event.repository.private == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -39,6 +39,16 @@ jobs:
           print(json.dumps({'routing_counts':snapshot['counts'],'reasons':dict(Counter(r['reason'] for r in snapshot['companies']))}))
           print(json.dumps({'eligible':[{'company_name':r['company_name'],'website':r['website'],'company_id':r['company_id'],'lane':r['lane']} for r in snapshot['companies'] if r['route']=='AUTO_RESEARCH']},ensure_ascii=False))
           PY
+  generate:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OUTREACH_LOCAL_MODEL: qwen2.5:7b
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install requests beautifulsoup4 ddgs pypdf playwright
       - name: Install free local inference
         run: |
           curl --fail --location --max-time 120 https://ollama.com/install.sh -o /tmp/install-ollama.sh

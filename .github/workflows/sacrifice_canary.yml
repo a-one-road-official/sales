@@ -32,8 +32,8 @@ concurrency:
 jobs:
   sacrifice-bulk:
     if: >-
-      ${{ (github.event_name == 'workflow_dispatch')
-      || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'RUN_SACRIFICE_BULK')) }}
+      ${{ github.event.repository.private == false && ((github.event_name == 'workflow_dispatch')
+      || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'RUN_SACRIFICE_BULK'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -76,6 +76,7 @@ jobs:
       OUTREACH_AUTOPILOT_ENABLED: FALSE
       OUTREACH_AUTOPILOT_AUTOSTART: FALSE
       LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED: FALSE
+      OUTREACH_LOCAL_MODEL: qwen2.5:7b
       PYTHONUNBUFFERED: "1"
       OUTREACH_EVIDENCE_DIR: outreach-evidence
       OUTREACH_STABLE_BATCH_MIN_SUCCESS: "7"
@@ -129,6 +130,18 @@ jobs:
         run: |
           set -euo pipefail
           python workbook_sales.py --check --output workbook-preflight.json
+
+      - name: Install free local inference
+        if: ${{ inputs.mode == 'execute' || github.event_name == 'push' }}
+        run: |
+          curl --fail --location --max-time 120 https://ollama.com/install.sh -o /tmp/install-ollama.sh
+          sh /tmp/install-ollama.sh
+          ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 1
+          done
+          ollama pull qwen2.5:7b
 
       - name: Start isolated local sacrifice runtime
         if: ${{ inputs.mode == 'execute' || github.event_name == 'push' }}
@@ -201,7 +214,7 @@ jobs:
                   method="POST",
               )
               try:
-                  with urllib.request.urlopen(request, timeout=900) as response:
+                  with urllib.request.urlopen(request, timeout=6600) as response:
                       return json.loads(response.read().decode("utf-8"))
               except urllib.error.HTTPError as exc:
                   body = exc.read().decode("utf-8", errors="replace")
