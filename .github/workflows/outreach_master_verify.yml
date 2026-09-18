@@ -69,3 +69,21 @@ jobs:
           draft = generate_email(fixture['candidate'], fixture['site'])
           print(json.dumps({'real_inference':True,'words':validate_email(draft),'draft':draft},ensure_ascii=False))
           PY
+  research:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install requests beautifulsoup4 ddgs pypdf
+      - name: Verify live public search and primary-source fetch
+        run: |
+          python - <<'PY'
+          from japan_research import search_public, fetch_primary, primary_url
+          hits = search_public('site:mhlw.go.jp 2026 労働経済動向調査')
+          urls = [h.get('href','') for h in hits if primary_url(h.get('href',''))]
+          if not urls:
+              raise SystemExit('PRIMARY_SEARCH_UNAVAILABLE')
+          source = fetch_primary(urls[0])
+          print({'primary_search_results':len(urls),'fetched_url':source['url'],'source_characters':len(source['text'])})
+          PY
