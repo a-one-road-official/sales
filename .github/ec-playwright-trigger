@@ -1,3 +1,4 @@
-ten_company_connector_handoff_retry=2026-09-18T11:38:00Z
-companies=PushOwl|Growave|LimeSpot|PageFly|Opinew|Stamped|Firepush|Consentmo|Avada|BiteSpeed
-batch_limit=10
+request_id=zero-cost-20260918122837
+lane=EC_SACRIFICE
+requested_max=10
+prepared_ready=2
