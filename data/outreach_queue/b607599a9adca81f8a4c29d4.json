@@ -1,0 +1,56 @@
+{
+  "company_id": "company:b607599a9adca81f8a4c29d4",
+  "company_name": "Boost Commerce",
+  "website": "https://boostcommerce.net/",
+  "generated_at": "2026-09-18T01:34:31.607336+00:00",
+  "generator": "chatgpt_master_agent",
+  "research": {
+    "buyer_segment": "Japanese Shopify apparel retailers",
+    "workflow": "collection merchandising",
+    "japan_maturity": "EARLY",
+    "official_evidence": [
+      {
+        "url": "https://boostcommerce.net/",
+        "finding": "Official commerce product discovery platform; proposed apparel workflow is an application hypothesis, not a customer claim."
+      }
+    ],
+    "maturity_searches": [
+      {
+        "query": "\"Boost Commerce\" Japan customers partners office",
+        "checked_at": "2026-09-18",
+        "finding": "No conclusion of absence. Broader Japan activity remains unconfirmed."
+      },
+      {
+        "query": "\"Boost Commerce\" 日本 導入 代理店",
+        "checked_at": "2026-09-18",
+        "finding": "Japanese agency implementation guides found for Boost Commerce; no absence assumed.",
+        "evidence_urls": [
+          "https://bindec.jp/media/555686428731/"
+        ]
+      }
+    ],
+    "fact": {
+      "text": "Japan’s May 2026 labour survey found regular-staff shortages at 34% of surveyed wholesale/retail establishments.",
+      "url": "https://www.mhlw.go.jp/toukei/itiran/roudou/koyou/keizai/2605/dl/7roudoukeizaidouko.pdf",
+      "source_locator": "Page 7, Table 3, wholesale/retail row, May 2026 shortage column; regular staff, surveyed establishments, not apparel-specific.",
+      "source_excerpt": "卸 売 業 ， 小 売 業 34 3 31 33 3 30 34 3 31",
+      "retrieved_at": "2026-09-18"
+    }
+  },
+  "review": {
+    "fact_supported": true,
+    "workflow_fit": true,
+    "buyer_specific": true,
+    "presence_neutral": true,
+    "no_price": true,
+    "no_outcome_promises": true
+  },
+  "draft": {
+    "subject": "Boost Commerce — Japan rollout for Shopify apparel retailers",
+    "body": "Hi Boost Commerce team,\n\nWe’re A-one Road, a Yokohama-based company helping technology companies develop their Japan business. We’re contacting Boost Commerce about collection merchandising for Japanese Shopify apparel retailers managing frequent seasonal assortment changes.\n\nJapan’s May 2026 labour survey found regular-staff shortages at 34% of surveyed wholesale/retail establishments. For apparel teams, collection merchandising is a concrete place to test reductions in recurring manual updates.\n\nWe can lead one year of paid Japan market development around this application, including buyer interviews, application scoping, and the development of relevant partner channels. Japanese buyer evidence would guide the practical initial rollout, local requirements, and expansion priorities. Can we help develop Boost Commerce’s Japan rollout with these retailers?\n\nhttps://calendar.app.google/adKEhXC4UWhQXfJp6\n\nBest regards,\nKazuma Tamura\nFounder & CEO, A-one Road Co., Ltd. (Yokohama, Japan)\n\n────────────────────\nすべての「隠れた価値」の語り部に。\nUnearth All \"Hidden\" Value.\nエーワンロード株式会社 / A-one road Co., Ltd.\n代表取締役　田村 一馬 / Kazuma Tamura, Founder & CEO\n〒220-0072 神奈川県横浜市西区浅間町1丁目4-3 ウィザードビル402\n古物商許可｜第306622619455号\nWebsite｜https://a-oneroad.com/\nBlog｜https://note.com/kazumat\nE-mail｜admin@a1-road.com\nMobile｜+81 80-4870-5690\n────────────────────",
+    "master_prompt_hash": "98df862427ba378948e76552152ff9fa32147f04782664933f8f9f7935006ceb"
+  },
+  "contact_pages": [
+    "https://boostcommerce.net/company/affiliate-program"
+  ]
+}

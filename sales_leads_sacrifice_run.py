@@ -497,6 +497,9 @@ def _research_urls(site: dict, research: dict, form_url: str = "") -> list[str]:
 
 def _verified_site_draft(candidate: dict, site: dict) -> dict:
     """Compatibility entrypoint: every company now uses the shared AI generator."""
+    if os.getenv('OUTREACH_PREPARED_DRAFTS_ONLY', '').upper() == 'TRUE':
+        from outreach_queue import load_prepared_draft
+        return load_prepared_draft(candidate, site)
     from outreach_master import generate_email
     from japan_research import research_company
     if not site.get("japan_research"):
@@ -696,6 +699,14 @@ def run_ten_sacrifice_batch(
                 max_pages=max_pages,
                 expected_company=str(candidate.get("company_name") or "").strip(),
             )
+            if site.get('status') == 'VERIFIED' and os.getenv('OUTREACH_PREPARED_DRAFTS_ONLY','').upper() == 'TRUE':
+                from outreach_queue import prepared_contact_pages
+                for contact_page in prepared_contact_pages(candidate):
+                    extra = inspect_official_site(contact_page, max_pages=1,
+                        expected_company=str(candidate.get('company_name') or '').strip())
+                    if extra.get('status') == 'VERIFIED':
+                        for field in ('pages','emails','forms','contact_links'):
+                            site[field] = list(site.get(field) or []) + list(extra.get(field) or [])
             result["website_research"] = site
             context["verified_site"] = site
             result["audit"].update(
@@ -734,6 +745,9 @@ def run_ten_sacrifice_batch(
                         value for value in form_links if value != preferred_form
                     ]
                 if site_emails:
+                    commercial_roles = ('partners', 'partnerships', 'business', 'sales', 'hello', 'info', 'contact', 'feedback', 'support')
+                    site_emails.sort(key=lambda value: commercial_roles.index(value.split('@')[0].lower())
+                        if value.split('@')[0].lower() in commercial_roles else len(commercial_roles))
                     # A first-party address found on the verified site is enough
                     # to select the recipient; avoid a second web-search round.
                     email = site_emails[0]
@@ -804,8 +818,8 @@ def run_ten_sacrifice_batch(
                     research_confidence=research.get("confidence", ""),
                 )
                 prefer_email_over_form = (
-                    fast_sales_gtm_mode
-                    and _cfg_truthy(cfg, "OUTREACH_FAST_SALES_GTM_EMAIL_FIRST")
+                    (_cfg_truthy(cfg, "OUTREACH_VERIFIED_EMAIL_FIRST") or
+                     (fast_sales_gtm_mode and _cfg_truthy(cfg, "OUTREACH_FAST_SALES_GTM_EMAIL_FIRST")))
                     and bool(email)
                     and not _cfg_truthy(cfg, "OUTREACH_PLAYWRIGHT_FORM_ONLY")
                 )
