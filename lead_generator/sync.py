@@ -5,6 +5,7 @@ retry an ambiguous append until a fresh read identifies the unique run marker.
 """
 import json
 import re
+import time
 from urllib.parse import quote
 from .policy import domain, name_key, qualification
 from .store import now
@@ -17,13 +18,32 @@ class AmbiguousWrite(RuntimeError):
 class Sheets:
     def __init__(self, config, session):
         self.config, self.session = config, session
+        self._sheet_ids = {}
 
     def request(self, method, dest, path, **kwargs):
         sid = self.config[dest]['spreadsheet_id']
-        r = self.session.request(method, f'https://sheets.googleapis.com/v4/spreadsheets/{sid}{path}',
-                                 timeout=45, **kwargs)
-        r.raise_for_status()
-        return r.json()
+        last = None
+        for attempt in range(5):
+            r = self.session.request(method, f'https://sheets.googleapis.com/v4/spreadsheets/{sid}{path}',
+                                     timeout=45, **kwargs)
+            last = r
+            if r.status_code not in {429, 500, 502, 503, 504}:
+                r.raise_for_status()
+                return r.json()
+            time.sleep(min(16, 2 ** attempt))
+        last.raise_for_status()
+        return last.json()
+
+    def sheet_id(self, dest):
+        if dest in self._sheet_ids:
+            return self._sheet_ids[dest]
+        metadata = self.request('GET', dest, '', params={'fields': 'sheets.properties(sheetId,title)'})
+        matches = [s['properties']['sheetId'] for s in metadata.get('sheets', [])
+                   if s.get('properties', {}).get('title') == self.config[dest]['tab']]
+        if len(matches) != 1:
+            raise ValueError('destination_tab_missing_or_ambiguous')
+        self._sheet_ids[dest] = matches[0]
+        return matches[0]
 
     def control_command(self):
         control = self.config.get('control')
@@ -58,13 +78,8 @@ class Sheets:
                             params={'valueRenderOption': 'UNFORMATTED_VALUE'}).get('values', [])
 
     def append(self, dest, row):
-        metadata = self.request('GET', dest, '', params={'fields': 'sheets.properties(sheetId,title)'})
-        matches = [s['properties']['sheetId'] for s in metadata.get('sheets', [])
-                   if s.get('properties', {}).get('title') == self.config[dest]['tab']]
-        if len(matches) != 1:
-            raise ValueError('destination_tab_missing_or_ambiguous')
         return self.request('POST', dest, ':batchUpdate', json={'requests': [{'appendCells': {
-            'sheetId': matches[0],
+            'sheetId': self.sheet_id(dest),
             'rows': [{'values': [{'userEnteredValue': {'stringValue': str(value)}} for value in row]}],
             'fields': 'userEnteredValue'}}]})
 
@@ -139,10 +154,16 @@ class Mirror:
         if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', run_id):
             raise ValueError('invalid run id')
         self.store, self.api, self.run_id = store, api, run_id
+        self.snapshots = None
+
+    def _snapshots(self, refresh=False):
+        if refresh or self.snapshots is None:
+            self.snapshots = {d: self.api.rows(d) for d in ('ssot', 'sacrifice')}
+        return self.snapshots
 
     def reconcile_completed(self):
         """Re-read both destinations; a cached count cannot prove completion."""
-        snapshots = {d: self.api.rows(d) for d in ('ssot', 'sacrifice')}
+        snapshots = self._snapshots(refresh=True)
         keys = self.store.completed()
         for k in keys:
             saved = self.store.db.execute('SELECT payload FROM records WHERE company_key=?', (k,)).fetchone()
@@ -167,7 +188,7 @@ class Mirror:
         if result['decision'] != 'PASS':
             return 'NOT_QUALIFIED'
         marker = f'leadgen:{self.run_id}:{k}'
-        snapshots = {d: self.api.rows(d) for d in ('ssot', 'sacrifice')}
+        snapshots = self._snapshots()
         for d, rows in snapshots.items():
             col = layout(d)
             if not rows or cell(rows[0], col['name']) != 'company_name' or cell(rows[0], col['website']) != 'website':
@@ -181,9 +202,6 @@ class Mirror:
             marked, _ = found[d]
             if marked:
                 self.store.mark(k, d, 'VERIFIED_NEW', marked[0]); continue
-            remote_command = self.api.control_command() if hasattr(self.api, 'control_command') else None
-            if remote_command == 'STOP':
-                self.store.set('command', 'STOP')
             if self.store.get('command') != 'START':
                 return 'STOPPED'
             self.store.mark(k, d, 'PENDING')
@@ -199,7 +217,9 @@ class Mirror:
                     self.store.set('command', 'STOP')
                     self.store.set('state', 'AMBIGUOUS_WRITE_REQUIRES_RECONCILIATION')
                     raise AmbiguousWrite(d) from exc
-            marked, duplicates = find(self.api.rows(d), d, record, marker)
+            fresh_rows = self.api.rows(d)
+            self.snapshots[d] = fresh_rows
+            marked, duplicates = find(fresh_rows, d, record, marker)
             if not marked or duplicates:
                 self.store.set('command', 'STOP')
                 self.store.mark(k, d, 'RECONCILIATION_FAILED')

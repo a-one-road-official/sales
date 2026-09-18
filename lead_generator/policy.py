@@ -16,7 +16,7 @@ import tldextract
 
 _EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
 
-VERSION = "2026-09-18-recall-v2"
+VERSION = "2026-09-18-recall-v3"
 FIRST_MILESTONE = 500
 FINAL_TARGET = 2000
 
@@ -129,6 +129,16 @@ def proof_valid(proof):
                 and proof.get("checked_at") and proof.get("http_status") == 200)
 
 
+def _profile_labeled_domain(text):
+    match = re.search(r'\bwebsite\s*:\s*((?:https?://|www\.)[^\s|,;]+)', str(text or ''), re.I)
+    if not match:
+        return ''
+    value = match.group(1).rstrip(').]>')
+    if value.lower().startswith('www.'):
+        value = 'https://' + value
+    return domain(value)
+
+
 def _payment_signal(record):
     finance = record.get("payment_capacity", {}) or {}
     direct = finance.get("basis") in {"reported_revenue", "reported_profit", "funding", "confirmed_budget"} and proof_valid(finance)
@@ -160,10 +170,21 @@ def qualification(record, now=None):
 
     source_family = str(record.get("source_family") or "")
     source_score = SOURCE_QUALIFIERS.get(source_family, 0)
+    product_text = str(record.get("product_text") or "")
+    if source_family == "robotics_tomorrow":
+        labeled_domain = _profile_labeled_domain(product_text)
+        if labeled_domain and labeled_domain != domain(record.get("website")):
+            reject.append("source_identity_domain_mismatch")
+        lower_profile = product_text.casefold()
+        if any(term in lower_profile for term in (
+            "company sector: education", "education / training", "company sector: publication",
+            "company sector: association", "publication / media",
+        )):
+            reject.append("non_vendor_directory_entry")
     if source_score:
         signals.append("qualified_industrial_source")
 
-    sector = classify(record.get("product_text", ""))
+    sector = classify(product_text)
     if sector["score"]:
         signals.append("industrial_capability")
     if record.get("ip_signal"):
