@@ -135,6 +135,15 @@ def generate_email(candidate, site, *, model_call=None):
                 raise ValueError("WEDGE_REQUIRED")
             if company.lower() not in p[0].lower():
                 raise ValueError("COMPANY_WEDGE_REQUIRED")
+            # Expand a short generic CTA with the already-researched buyer and
+            # workflow. This adds concrete rollout scope, never filler or claims.
+            if len(" ".join(p).split()) < 110:
+                sentences = re.split(r"(?<=[.!?])\s+", p[2].strip())
+                if sentences and sentences[-1].endswith("?"):
+                    scoped_cta = f"Can we help plan and execute {company}’s Japan rollout for {out['buyer_segment']} around {out['workflow']}?"
+                    enriched = " ".join(sentences[:-1] + [scoped_cta])
+                    if 110 <= len(" ".join([*p[:2], enriched]).split()) <= 120:
+                        p[2] = enriched
             draft = {"subject":out["subject"], "body":"\n\n".join([out["greeting"], *p, CALENDAR_URL, SIGNATURE]),
                 "draft_source":"MASTER_AI", "master_prompt_hash":revision,
                 "research_hash":_hash(json.dumps(payload, sort_keys=True, ensure_ascii=False)),
