@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 
 from .checkpoint import SheetCheckpoint
 from .discovery import DIRECTORY, VDMA_DIRECTORY, SOURCES, fetch_source
-from .policy import domain, normalize_country, classify
+from .policy import domain, normalize_country, classify, qualification
 from .store import Store, now
 from .sync import Sheets, Mirror
 
@@ -121,24 +121,14 @@ def _fetch_html(session, url, robots_cache, max_bytes=2_000_000):
     return final_url, soup, text
 
 
-def _extract_company_website(soup, source_url):
-    source_domain = domain(source_url)
-    candidates = []
-    for a in soup.find_all('a', href=True):
-        href = urljoin(source_url, a.get('href'))
-        d = domain(href)
-        if not d or d == source_domain or d in SOCIAL_DOMAINS:
-            continue
-        p = urlparse(href)
-        if p.scheme not in {'http', 'https'}:
-            continue
-        context = re.sub(r'\s+', ' ', a.parent.get_text(' ', strip=True) if a.parent else a.get_text(' ', strip=True)).casefold()
-        anchor = a.get_text(' ', strip=True).casefold()
-        score = (4 if 'website' in context else 0) + (2 if anchor.startswith(('http://', 'https://', 'www.')) else 0)
-        if any(x in d for x in ('doubleclick.', 'googleadservices.', 'bthmanagement.')):
-            score -= 10
-        candidates.append((score, href))
-    return max(candidates, default=(None, ''))[1]
+def _extract_labeled_website(text):
+    match = re.search(r'\bWebsite\s*:\s*((?:https?://|www\.)[^\s|,;]+)', str(text or ''), re.I)
+    if not match:
+        return ''
+    value = match.group(1).rstrip(').]>')
+    if value.lower().startswith('www.'):
+        value = 'https://' + value
+    return value if domain(value) else ''
 
 
 def _robotics_profile(session, seed, robots_cache):
@@ -152,7 +142,7 @@ def _robotics_profile(session, seed, robots_cache):
     return {
         'url': final_url,
         'company_name': seed['name'],
-        'website': _extract_company_website(soup, final_url),
+        'website': _extract_labeled_website(main_text),
         'text': main_text[:12000],
         'checked_at': now(),
     }
@@ -251,7 +241,9 @@ def _build_record(seed, profile, official):
     sector = classify(product_text)
     negative = any(term in low for term in (
         'market research report', 'market research reports', 'conference on robotics', 'world conference on',
-        'marketing agency', 'seo agency', 'publication and media', 'event organizer',
+        'marketing agency', 'seo agency', 'publication and media', 'publication / media', 'event organizer',
+        'education / training', 'company sector: education', 'company sector: publication',
+        'company sector: association',
     ))
     non_vendor_only = bool(negative and family == 'robotics_tomorrow')
     ip_signal = bool(re.search(r'\b(patent(?:ed|s)?|proprietary|intellectual property|own technology|deeptech)\b', low))
@@ -292,6 +284,28 @@ def _retry_state(seed_state, prefix):
     return 1
 
 
+def _revalidate_completed_for_current_policy(store):
+    """Drop stale completion markers when a stored record no longer passes the current gate.
+
+    Physical rows are cleaned separately by exact run marker before this repair is deployed.
+    This keeps the private journal from treating an invalidated lead as qualified.
+    """
+    completed = set(store.completed())
+    invalidated = []
+    for row in store.db.execute("SELECT company_key,payload FROM records").fetchall():
+        record = json.loads(row['payload'])
+        result = store.record(record)
+        if row['company_key'] in completed and result['decision'] != 'PASS':
+            with store.db:
+                store.db.execute('DELETE FROM mirrors WHERE company_key=?', (row['company_key'],))
+            store.event('COMPLETED_INVALIDATED_BY_POLICY', {
+                'company_key': row['company_key'], 'reasons': result['reasons'],
+                'policy_version': result['policy_version'],
+            })
+            invalidated.append(row['company_key'])
+    return invalidated
+
+
 def run(api, store, checkpoint, budget_seconds=900):
     checkpoint.load(store)
     if api.control_command() != 'START':
@@ -299,6 +313,7 @@ def run(api, store, checkpoint, budget_seconds=900):
         return
     store.set('command', 'START'); store.set('run_id', CONFIG['run_id'])
     mirror = Mirror(store, api, CONFIG['run_id'])
+    _revalidate_completed_for_current_policy(store)
     if store.completed():
         mirror.reconcile_completed()
     if len(store.completed()) >= 2000:
