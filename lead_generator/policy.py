@@ -16,7 +16,7 @@ import tldextract
 
 _EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
 
-VERSION = "2026-09-18-recall-v3"
+VERSION = "2026-09-18-recall-v4"
 FIRST_MILESTONE = 500
 FINAL_TARGET = 2000
 
@@ -27,6 +27,11 @@ PRIORITY_COUNTRIES = {
     "Sweden", "Norway", "Switzerland", "Luxembourg", "Malta", "Cyprus", "Greece", "Serbia",
 }
 EXCLUDED_COUNTRIES = {"United States", "China", "Japan"}
+KNOWN_INELIGIBLE_DOMAINS = {
+    # Audited direct-Japan / fully-integrated cases removed from both live lists.
+    "alfalaval.com": "verified_direct_japan_presence",
+    "arculus.de": "verified_acquired_and_integrated",
+}
 COUNTRY_ALIASES = {
     "usa": "United States", "u.s.a.": "United States", "united states of america": "United States",
     "us": "United States", "u.s.": "United States", "deutschland": "Germany",
@@ -156,8 +161,11 @@ def qualification(record, now=None):
     now = now or datetime.now(timezone.utc)
     reasons, reject, signals = [], [], []
 
-    if not record.get("company_name") or not domain(record.get("website")):
+    record_domain = domain(record.get("website"))
+    if not record.get("company_name") or not record_domain:
         reasons.append("identity_unverified")
+    if record_domain in KNOWN_INELIGIBLE_DOMAINS:
+        reject.append(KNOWN_INELIGIBLE_DOMAINS[record_domain])
     if not proof_valid(record.get("identity_proof")):
         reasons.append("official_company_identity_unverified")
 
