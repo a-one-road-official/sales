@@ -498,6 +498,9 @@ def _research_urls(site: dict, research: dict, form_url: str = "") -> list[str]:
 def _verified_site_draft(candidate: dict, site: dict) -> dict:
     """Compatibility entrypoint: every company now uses the shared AI generator."""
     from outreach_master import generate_email
+    from japan_research import research_company
+    if not site.get("japan_research"):
+        site["japan_research"] = research_company(candidate, site)
     return generate_email(candidate, site)
 
 
@@ -644,11 +647,13 @@ def run_ten_sacrifice_batch(
             "audit": _audit_base(candidate),
         }
         context = make_research_context(candidate)
+        authorization = None
         try:
             if execute_external:
-                authorization = claim_candidate(sheets, candidate, normalized_lane, run_id)
-                _mark_runtime_consumed(normalized_lane, [candidate])
-                executor.workbook_authorization = authorization
+                from contact_policy import block_reason
+                blocked = block_reason(candidate.get("company_id", ""), candidate["company_name"], candidate["candidate_website"], normalized_lane)
+                if blocked:
+                    raise ValueError(blocked)
             evidence = candidate.get("candidate_website_evidence", {})
             source_site_url = str(candidate.get("candidate_website") or "").strip()
             canonical_site_url = "" if candidate.get("company_id") else CANONICAL_WEBSITE_HINTS.get(str(candidate.get("company_name") or "").strip(), "")
@@ -893,6 +898,12 @@ def run_ten_sacrifice_batch(
                                 result["draft"] = draft
                                 result["message_hash"] = _hash(SENDER_EMAIL, draft_subject, draft_body)
                                 result["audit"].update(body=draft_body, form_url=preview["form_url"], message_hash=result["message_hash"])
+                                from outreach_master import validate_email, verify_prompt_revision
+                                validate_email(draft)
+                                verify_prompt_revision(draft)
+                                authorization = claim_candidate(sheets, candidate, normalized_lane, run_id)
+                                _mark_runtime_consumed(normalized_lane, [candidate])
+                                form_executor.authorization = authorization
                                 _persist_draft(sheets, run_id, candidate, result)
                                 form_result = form_executor.execute(
                                     form_url=preview["form_url"], website=site_url,
@@ -997,6 +1008,11 @@ def run_ten_sacrifice_batch(
                     elif execute_external:
                         if executor is None:
                             raise RuntimeError("sacrifice_executor_not_configured")
+                        from outreach_master import validate_email
+                        validate_email(draft)
+                        authorization = claim_candidate(sheets, candidate, normalized_lane, run_id)
+                        _mark_runtime_consumed(normalized_lane, [candidate])
+                        executor.workbook_authorization = authorization
                         _persist_draft(sheets, run_id, candidate, result)
                         from outreach_master import verify_prompt_revision
                         verify_prompt_revision(draft)
@@ -1044,6 +1060,7 @@ def run_ten_sacrifice_batch(
                 error_message=f"{type(exc).__name__}:{exc}",
             )
 
+        result["send_reserved"] = authorization is not None
         result["finished_at"] = datetime.now(timezone.utc).isoformat()
         result["semantic_success"] = result.get("status") in {"SENT", "FORM_SENT"}
         critical_errors = set(str(value).strip().upper() for value in result.get("critical_errors", []) if str(value).strip())
@@ -1056,7 +1073,7 @@ def run_ten_sacrifice_batch(
         results.append(result)
         from outreach_evidence import save_local_evidence
         save_local_evidence(run_id, result)
-        if execute_external:
+        if execute_external and authorization is not None:
             _record_attempt(sheets, run_id=run_id, candidate=candidate, result=result)
             save_local_evidence(run_id, result)
             if not result.get("audit_log_verified"):
@@ -1070,7 +1087,7 @@ def run_ten_sacrifice_batch(
         normalized_lane == "EC_SACRIFICE"
         and _cfg_truthy(cfg, "OUTREACH_SACRIFICE_CONSUME_FAILED")
     ):
-        processed = {item.get("source_row") for item in results}
+        processed = {item.get("source_row") for item in results if item.get("send_reserved")}
         for item in candidates:
             if item.get("source_row") not in processed:
                 continue
