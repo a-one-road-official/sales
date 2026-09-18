@@ -51,7 +51,7 @@ def website_host(value: str) -> str:
 def source_url(value: str) -> str:
     p = urlparse(value)
     if (p.scheme != 'https' or p.hostname != SOURCE_HOST or p.port not in {None,443}
-            or p.username or p.password or not (p.path == SOURCE_PATH or p.path.startswith(SOURCE_PATH + '/'))):
+            or p.username or p.password or not (p.path == SOURCE_PATH or p.path.startswith((SOURCE_PATH + '/', '/en/brand/')))):
         raise ValueError('source_outside_approved_adapter')
     if p.query and not re.fullmatch(r'page=[1-9][0-9]{0,3}', p.query):
         raise ValueError('unsupported_source_query')
@@ -82,7 +82,7 @@ def parse_listing(html: str, page_url: str) -> tuple[list[dict], int]:
             source_url(url)
         except ValueError:
             continue
-        if not urlparse(url).path.startswith(SOURCE_PATH + '/'):
+        if not urlparse(url).path.startswith((SOURCE_PATH + '/', '/en/brand/')):
             continue
         prefix = re.split(r'\s*Review in Detail',text,flags=re.I)[0].strip()
         prefix = re.split(r'\s+(?:Brands|Representatives)\s+',prefix,flags=re.I)[0]
