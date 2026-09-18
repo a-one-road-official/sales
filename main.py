@@ -5,7 +5,7 @@ import os
 import threading
 import uuid
 
-from cost_guard import assert_zero_ai_budget, budget_snapshot, paid_cloud_allowed, require_paid_ai
+from cost_guard import assert_zero_ai_budget, budget_snapshot, paid_cloud_allowed, require_paid_ai, is_cloud_run
 assert_zero_ai_budget()
 
 import google.auth
@@ -164,7 +164,17 @@ async def internal_runtime_guard(request: Request, call_next):
     # ACKs even stale tasks/schedulers created by older revisions that may not carry
     # today's internal header, preventing 401 retry storms while the paid-cloud gate
     # is closed. No factory, Sheets, network, browser or model object is touched.
-    if not paid_cloud_allowed():
+    free_sacrifice = (
+        not is_cloud_run()
+        and os.getenv("GITHUB_ACTIONS") == "true"
+        and os.getenv("GITHUB_REPOSITORY") == "a-one-road-official/sales"
+        and os.getenv("GITHUB_WORKFLOW") == "生贄 bulk outbound (Playwright/email; Vertex forbidden)"
+        and os.getenv("LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME", "").upper() == "TRUE"
+        and request.client is not None and request.client.host in {"127.0.0.1", "::1"}
+        and request.method == "POST"
+        and request.url.path == "/outreach/sales-leads-sacrifice-run"
+    )
+    if not paid_cloud_allowed() and not free_sacrifice:
         return JSONResponse(
             status_code=200,
             content={

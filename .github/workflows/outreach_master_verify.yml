@@ -1,7 +1,7 @@
 name: Outreach master verification
 on:
   push:
-    branches: [codex/outreach-review-no-prices-20260918]
+    branches: [codex/outreach-semantic-runtime]
     paths: [".github/master-verify-trigger"]
 permissions:
   contents: read

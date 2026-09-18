@@ -73,7 +73,7 @@ def research_company(candidate, site, *, model_call=None, search=None, fetch=Non
         raise ValueError('COMPANY_NAME_REQUIRED')
     # Send only public company identity and website excerpts into research.
     company = {'company_name':name, 'official_website':site['official_website'], 'pages':site['pages']}
-    fit = _ask(call, 'Identify the actual technology, one narrow Japanese buyer segment, one workflow and operational consequence supported by this official website. Return keys product, buyer_segment, workflow, operational_consequence, japan_trigger_query. japan_trigger_query must be a public search query about an applicable change in Japan in 2026 with site:go.jp. Do not assume Japan absence.',company)
+    fit = _ask(call, 'Identify the actual technology, one narrow Japanese buyer segment (at least four words, including a specific buyer subtype or platform; retail or manufacturers alone is unacceptable), one concrete workflow (at least two words) and operational consequence supported by this official website. Return keys product, buyer_segment, workflow, operational_consequence, japan_trigger_query. japan_trigger_query must be a public search query about an applicable change in Japan in 2026 with site:go.jp. Do not assume Japan absence.',company)
     if any(not isinstance(fit.get(k),str) or not fit[k].strip() for k in ('product','buyer_segment','workflow','operational_consequence','japan_trigger_query')):
         raise ValueError('COMPANY_FIT_INCOMPLETE')
     now = datetime.now(timezone.utc).isoformat()
