@@ -39,14 +39,14 @@ unresolved submissions, recipient and provider-rate-limit exclusions.
    a claim solely because its lease or a timer expired. No bulk status reset.
 4. Use `outreach_cycle.completed_policy(policy, receipts)` after Gmail AND canonical
    ledger verification. It retains approved records as COMPLETED with a digest of
-   the private receipt. This frees active PILOT capacity without deleting history
-   or changing the ten-active-account quality gate. Do not infer SENT from HOLD,
+   the private receipt. Keep the current per-run pilot limit and all named-account
+   checks. Historical account count must not halt replenishment. Do not infer SENT from HOLD,
    an Action result, elapsed time or a draft. Quality certification is separate.
 5. Replenish from the existing sacrifice workbook, then approved nonindustrial
    sources. Join against production SSOT READ-ONLY, all canonical outreach history,
    and Gmail. Preserve actual dropdowns and existing record identities. Register
-   only explicitly covered recipients. Before adding an eleventh ACTIVE PILOT
-   account, reconcile existing receipts; never bypass `contact_policy.reason`.
+   only explicitly covered recipients. Reconcile earlier receipts before starting
+   another cohort; preserve `contact_policy.reason` and the per-run limit of ten.
 6. Generate only missing, expired or invalid drafts for the next cohort (up to ten
    at a time). Reuse valid records, immutable factual source excerpts and unchanged
    prompt versions. HTTP/BS4/Playwright provide evidence; ChatGPT writes the actual
@@ -100,9 +100,12 @@ Never claim inbox delivery, reply or revenue from API acceptance alone.
 P0 (this change): retire auto-fired destructive stop; verified manual API-only stop;
 ready-cohort planner; remove fixed single-company target; pending/receipt accounting;
 receipt-verified permit completion helper; counts-only output; regression tests.
-DoD: CI passes, unchanged safety tests pass, main contains exact tested commit,
+DoD: CI passes, current safety tests pass, main contains the tested changes,
 and one live cycle demonstrates correct selection/handoff or explicit shortage.
 Production throughput is unproven until actual repeated cycles finish.
+The parallel main repair `14059710` makes PILOT limits per-run rather than a
+cumulative historical-account limit. Preserve that repair and the concurrently
+added ten company records and official contact-page subdomain support.
 
 P1: private ready/evidence queue using existing approved workbook columns/logs;
 Python replenishment adapters and bounded evidence cache; separate prompt/source

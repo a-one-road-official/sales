@@ -110,6 +110,106 @@
       "approved_by": "Kazuma Tamura",
       "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
       "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:889b4b18c2feb6ae795bfc7b": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "PushOwl",
+      "website": "https://pushowl.com/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:a0df4ac7006ce882ebfa3705": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "Growave",
+      "website": "https://www.growave.io/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:844feac57bfb1d8f52148051": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "LimeSpot",
+      "website": "https://www.limespot.com/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:6b80b1ccfb2fa2443f6d1097": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "PageFly",
+      "website": "https://pagefly.io/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:f151545bf90eda3e47980a86": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "Opinew",
+      "website": "https://www.opinew.com/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:d93fb02279f8bd0091ab8f14": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "Stamped",
+      "website": "https://stamped.io/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:9c29646501c1964549d570de": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "Firepush",
+      "website": "https://firepush.io/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:51942d8ca797bac1493b7012": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "Consentmo",
+      "website": "https://www.consentmo.com/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:bfc559396a83f11cea881063": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "Avada",
+      "website": "https://avada.io/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:f43cb3716997fad7463a9640": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "BiteSpeed",
+      "website": "https://www.bitespeed.co/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
     }
   },
   "campaigns": {

@@ -73,8 +73,13 @@ def prepared_contact_pages(candidate):
         return []
     record = json.loads((QUEUE_DIR / (key.split(':')[1]+'.json')).read_text())
     root = candidate.get('candidate_website') or candidate.get('website') or ''
+    root_host = host(root)
     return [url for url in record.get('contact_pages',[])[:2]
-            if urlparse(url).scheme == 'https' and host(url) == host(root)]
+            if root_host and host(url) and urlparse(url).scheme == 'https' and (
+                host(url) == root_host
+                or host(url).endswith('.' + root_host)
+                or root_host.endswith('.' + host(url))
+            )]
 
 
 def load_prepared_draft(candidate, site):

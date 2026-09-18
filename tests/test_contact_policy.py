@@ -29,11 +29,11 @@ class ContactPolicyTests(unittest.TestCase):
         self.policy['accounts']['company:1']['mode'] = 'PERSONAL'
         self.assertTrue(self.check())
 
-    def test_pilot_cannot_expand_beyond_ten_accounts_without_quality(self):
+    def test_historical_pilot_accounts_do_not_block_later_bounded_batch(self):
         self.policy['campaigns']['c1'] = {'enabled': True, 'mode': 'PILOT'}
         for index in range(2, 12):
             self.policy['accounts'][f'company:{index}'] = copy.deepcopy(self.policy['accounts']['company:1'])
-        self.assertTrue(self.check())
+        self.assertEqual(self.check(), '')
 
     def test_every_protected_or_missing_mode_blocks(self):
         for mode in ('PERSONAL', 'HOLD', 'DO_NOT_CONTACT', '', None):

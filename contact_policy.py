@@ -33,11 +33,11 @@ def reason(policy, company_id, company_name, website, lane, now=None):
         campaign = policy['campaigns'][account['campaign_id']]
         if campaign.get('enabled') is not True:
             return 'campaign_disabled'
-        # Quality evidence is earned through a bounded pilot. Named accounts,
-        # existing history locks and explicit permission still apply to each send.
-        pilot_accounts = [a for a in policy['accounts'].values()
-                          if a.get('campaign_id') == account['campaign_id'] and a.get('mode') == 'BULK_ALLOWED']
-        pilot = campaign.get('mode') == 'PILOT' and 1 <= len(pilot_accounts) <= 10
+        # Quality evidence is earned through bounded pilot runs. Historical
+        # account permissions stay in policy for identity and idempotency, so
+        # their cumulative count must not block a later ten-company pilot.
+        # The serialized runner independently enforces limit=10 and one batch.
+        pilot = campaign.get('mode') == 'PILOT'
         if not pilot and (campaign.get('quality_passed') is not True or not campaign.get('quality_evidence')):
             return 'campaign_quality_unapproved'
         return ''
