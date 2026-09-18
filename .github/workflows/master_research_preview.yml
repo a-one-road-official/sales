@@ -1,0 +1,56 @@
+name: Live master-driven research preview (no sends)
+on:
+  push:
+    branches: [codex/master-driven-research-preview]
+    paths: [".github/workflows/master_research_preview.yml"]
+permissions:
+  contents: read
+concurrency:
+  group: master-research-preview
+  cancel-in-progress: true
+jobs:
+  preview:
+    if: ${{ github.event.repository.private == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      OUTREACH_LOCAL_MODEL: qwen2.5:7b
+      OUTREACH_SITE_FETCH_MODE: PLAYWRIGHT
+      LEAD_FACTORY_VERTEX_ALLOWED: "FALSE"
+      LEAD_FACTORY_PAID_AI_ALLOWED: "FALSE"
+      LEAD_FACTORY_PAID_CLOUD_ALLOWED: "FALSE"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python cost_guard.py
+      - run: pip install -r requirements.txt ddgs pypdf
+      - run: python -m playwright install --with-deps chromium
+      - name: Start free local inference
+        run: |
+          curl --fail --location --max-time 120 https://ollama.com/install.sh -o /tmp/install-ollama.sh
+          sh /tmp/install-ollama.sh
+          ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 1
+          done
+          ollama pull qwen2.5:7b
+      - name: Research each company and generate review-only messages
+        run: python research_preview.py --candidates data/research_preview_candidates.json --output research-preview.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-research-email-previews
+          path: research-preview.json
+          if-no-files-found: warn
+
+# Rerun live preview after independent-engine search recovery.
+
+# Verify source-scoped queries and LLM query refinement.
+
+# Include per-query failures in the refinement evidence.
+
+# Verify bounded research inputs against live primary sources.
