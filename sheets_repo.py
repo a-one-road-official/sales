@@ -216,6 +216,11 @@ class SheetsRepo:
         # invariants and are therefore rejected at the repository boundary.
         if sheet == "営業リスト＿Factory/BPO":
             raise RuntimeError("direct_human_ssot_append_blocked:use_promote_to_sales_if_new")
+        if sheet == "outreach_engine_log":
+            from outreach_evidence import HEADERS, WORKBOOK_ID, append_verified
+            if self.spreadsheet_id == WORKBOOK_ID:
+                append_verified(self, dict(zip(HEADERS, values)))
+                return
         append_range = self._bounded_append_range(sheet, len(values))
         self._execute_write(lambda: self.svc.spreadsheets().values().append(
             spreadsheetId=self.spreadsheet_id,
@@ -234,6 +239,12 @@ class SheetsRepo:
             return
         if sheet == "営業リスト＿Factory/BPO":
             raise RuntimeError("direct_human_ssot_append_blocked:use_batch_promotion")
+        if sheet == "outreach_engine_log":
+            from outreach_evidence import WORKBOOK_ID
+            if self.spreadsheet_id == WORKBOOK_ID:
+                for row in values_rows:
+                    self.append(sheet, row)
+                return
         width = max((len(row) for row in values_rows), default=1)
         append_range = self._bounded_append_range(sheet, width)
         self._execute_write(lambda: self.svc.spreadsheets().values().append(

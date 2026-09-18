@@ -239,11 +239,11 @@ def test_existing_thank_you_text_does_not_prove_new_receipt(monkeypatch):
 def test_write_requires_exact_readback():
     api = Mock()
     record = {'idempotency_key': 'event-1', 'subject': 'Original', 'body': 'Actual message'}
-    api.get.return_value.execute.side_effect = [{'values': [HEADERS]}, {'values': []}, {'values': [['silently dropped']]}]
+    api.get.return_value.execute.side_effect = [{'values': [HEADERS]}, {'values': []}, {'values': [['event-1']]}, {'values': [['silently dropped']]}]
     api.append.return_value.execute.return_value = {'updates': {'updatedRows': 1, 'updatedRange': 'outreach_engine_log!A2:U2'}}
     svc = Mock()
     svc.spreadsheets.return_value.values.return_value = api
-    svc.spreadsheets.return_value.get.return_value.execute.return_value = {'sheets': [{'properties': {'title': 'outreach_engine_log', 'gridProperties': {'rowCount': 1000}}}]}
+    svc.spreadsheets.return_value.get.return_value.execute.return_value = {'sheets': [{'properties': {'title': 'outreach_engine_log', 'sheetId': 7, 'gridProperties': {'rowCount': 1000}}}]}
     with pytest.raises(RuntimeError, match='readback_mismatch'):
         append_verified(SimpleNamespace(svc=svc, spreadsheet_id=WORKBOOK_ID), record)
 
