@@ -62,19 +62,29 @@
       "expires_at": "2026-10-31T23:59:59Z"
     },
     "company:cc2b44726b9f080779dee59c": {
-      "mode": "BULK_ALLOWED",
+      "mode": "HOLD",
       "company_name": "Richpanel",
       "website": "https://www.richpanel.com/",
       "lane": "EC_SACRIFICE",
       "campaign_id": "annual-japan-20260918",
       "approved_by": "Kazuma Tamura",
-      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "approval_evidence": "Protected after full-history reconciliation on 2026-09-18 found Richpanel in the production SSOT as Factory/manual. Production SSOT and manual records are excluded from sacrifice sending.",
       "expires_at": "2026-10-31T23:59:59Z"
     },
     "company:d0d471d9db71cecaafe9a27d": {
       "mode": "BULK_ALLOWED",
       "company_name": "Prehook",
       "website": "https://prehook.com/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:c3968d73fddc6b14c5daf268": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "Visually",
+      "website": "https://www.visually.io/",
       "lane": "EC_SACRIFICE",
       "campaign_id": "annual-japan-20260918",
       "approved_by": "Kazuma Tamura",
@@ -92,4 +102,3 @@
     }
   }
 }
-
