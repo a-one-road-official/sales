@@ -53,9 +53,28 @@ def fetch_primary(url):
             'source_sha256':hashlib.sha256(raw).hexdigest()}
 
 
-def search_public(query):
-    from ddgs import DDGS
-    return list(DDGS(timeout=15).text(query, max_results=5, backend='bing,duckduckgo'))
+def search_public(query, *, search_factory=None):
+    """Try independent free engines; never turn an outage into absence evidence."""
+    if search_factory is None:
+        from ddgs import DDGS
+        search_factory = DDGS
+    failures = []
+    for backend in ('google', 'brave', 'bing', 'duckduckgo'):
+        try:
+            hits = list(search_factory(timeout=15).text(
+                query, max_results=5, backend=backend, region='jp-jp'))
+            if not hits:
+                failures.append(backend + ':EMPTY')
+                continue
+            print(json.dumps({'event':'research_search', 'query':query,
+                              'backend':backend, 'results':len(hits)}, ensure_ascii=False), flush=True)
+            return [{**hit, 'search_backend':backend} for hit in hits]
+        except Exception as exc:
+            failures.append(backend + ':' + type(exc).__name__)
+    # DDGS reports both backend failures and empty results as exceptions.
+    # Preserve that uncertainty, including which query exhausted its retries.
+    raise RuntimeError('PUBLIC_SEARCH_UNAVAILABLE: ' + json.dumps(
+        {'query':query, 'attempts':failures}, ensure_ascii=False))
 
 
 def _ask(call, instruction, evidence, master):
