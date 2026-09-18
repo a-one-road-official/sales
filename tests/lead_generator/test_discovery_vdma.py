@@ -1,4 +1,4 @@
-from lead_generator.discovery import parse_vdma
+from lead_generator.discovery import parse_vdma, parse_vdma_resource
 
 
 def test_parse_vdma_member_block():
@@ -40,3 +40,29 @@ def test_parse_vdma_ignores_navigation_external_link():
     rows = list(parse_vdma(html))
     assert len(rows) == 1
     assert rows[0]["name"] == "Fixture Automation GmbH"
+
+
+def test_parse_vdma_resource_page():
+    payload = {
+        "currentPage": 0,
+        "totalPages": 39,
+        "totalRecords": 382,
+        "content": [{
+            "companyName": "Aformic Polska Sp. z o.o.",
+            "address": "Ul. Wyczólkowskiego 113",
+            "plz": "44-109",
+            "city": "Gliwice",
+            "country": "Polen",
+            "email": "office@aformic.com",
+            "webAddr": "aformic.com",
+        }]
+    }
+    rows = list(parse_vdma_resource(payload, "https://www.vdma.eu/example"))
+    assert rows == [{
+        "profile_url": "https://aformic.com",
+        "name": "Aformic Polska Sp. z o.o.",
+        "location": "Ul. Wyczólkowskiego 113 44-109 Gliwice Polen",
+        "description": "VDMA machinery/equipment industry member | country=Polen | city=Gliwice | email=office@aformic.com",
+        "source_url": "https://www.vdma.eu/example",
+        "collected_at": rows[0]["collected_at"],
+    }]
