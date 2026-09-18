@@ -14,14 +14,14 @@ The runner reserves a company only after draft validation and, for forms, a succ
 
 ## Verification and operational status (2026-09-18)
 
-- Nine focused local tests pass; repository CI runs on each implementation commit.
+- Ten focused local tests pass; repository CI runs on each implementation commit.
 - Real public search and primary-source fetch passed in run 35292357685 (research job): five primary search results, MHLW source fetched.
 - Real local-model generation is being checked by the generate job of that run; this is a release check, not proof of completed outreach.
-- Current live routing (run 35292076467): 571 MANUAL, 136 HOLD, 3 REVIEW, zero AUTO_RESEARCH.
+- Before replenishment, live routing (run 35292076467): 571 MANUAL, 136 HOLD, 3 REVIEW, zero AUTO_RESEARCH.
 - Legacy run 35181679400 kept only aggregate results and dropped company-level outreach log appends. Its 190 aggregate failures do not establish that specific companies were never submitted.
-- No company permissions have been fabricated, prior-contact locks remain intact, and no recipient sends have been made by this implementation session.
-- The source packet and model have not yet been validated together end-to-end for an eligible live company because no eligible company is currently available.
+- Following the user's prior replenishment instruction, Searchanise and Boost Commerce were added to sacrifice Vendor rows 712–713 after official-site and existing-identity/history checks. Gmail domain search also returned no messages. A named two-account PILOT permission implements the current explicit start instruction; fresh full history checks and draft validation remain mandatory. No recipient sends have been made yet.
+- The source packet and model have not yet been validated together end-to-end for an eligible live company for the replenished companies.
 
 Kimonix is a review fixture only. Its previous submission remains unresolved; the fixture must never authorize a resend.
 
-An execute request with no permitted accounts now exits as OUTBOUND_NOT_STARTED instead of showing a successful activation. Resolve company identity/history and configure named campaign permissions before starting an outbound batch.
+An execute request with no permitted accounts now exits as OUTBOUND_NOT_STARTED instead of showing a successful activation. The two-account pilot targets EC_SACRIFICE; it does not establish the 7/10 confirmed-submission quality threshold.
