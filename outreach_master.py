@@ -144,6 +144,27 @@ def generate_email(candidate, site, *, model_call=None):
                     enriched = " ".join(sentences[:-1] + [scoped_cta])
                     if 110 <= len(" ".join([*p[:2], enriched]).split()) <= 120:
                         p[2] = enriched
+            # The commercial offer is our own fixed service, not a researched
+            # claim about the recipient. After one model repair, assemble that
+            # offer within budget while preserving the AI's company-specific
+            # wedge, verified fact and operational consequence verbatim.
+            if attempt >= 1 and len(" ".join(p).split()) < 110:
+                offers = (
+                    "We can support one year of paid Japan market development.",
+                    "We can support one year of paid Japan market development, from buyer validation through rollout planning.",
+                    "We can support one year of paid Japan market development, defining the initial application and building a practical rollout plan.",
+                )
+                evidence_steps = (
+                    "Japanese buyer feedback would guide the rollout.",
+                    "Japanese buyer feedback would guide application priorities and the route to market.",
+                    "We would use Japanese buyer feedback to refine the initial application, route to market, and expansion priorities.",
+                    "We would turn Japanese buyer feedback into clear application priorities, a practical route to market, and evidence for deciding where to expand next.",
+                )
+                cta = f"Can we help plan and execute {company}’s Japan rollout for {out['buyer_segment']} around {out['workflow']}?"
+                options = [" ".join((offer, step, cta)) for offer in offers for step in evidence_steps]
+                options = [option for option in options if 110 <= len(" ".join([*p[:2], option]).split()) <= 120]
+                if options:
+                    p[2] = min(options, key=lambda option:abs(115-len(" ".join([*p[:2], option]).split())))
             draft = {"subject":out["subject"], "body":"\n\n".join([out["greeting"], *p, CALENDAR_URL, SIGNATURE]),
                 "draft_source":"MASTER_AI", "master_prompt_hash":revision,
                 "research_hash":_hash(json.dumps(payload, sort_keys=True, ensure_ascii=False)),
