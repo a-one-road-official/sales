@@ -87,6 +87,7 @@ SOURCE_QUALIFIERS = {
     "vdma_members": 72,
     "vdma_robotics": 88,
     "robotics_tomorrow": 58,
+    "tairos_exhibitor": 90,
 }
 
 
