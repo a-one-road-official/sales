@@ -50,6 +50,15 @@ def test_missing_research_does_not_generate():
     with pytest.raises(ValueError, match="JAPAN_RESEARCH_REQUIRED"):
         m.generate_email({"company_name":"Missing"}, {}, model_call=lambda _:pytest.fail("must not generate"))
 
+def test_verified_fact_is_assembled_without_model_paraphrase():
+    out = result()
+    out['paragraphs'][1] = 'The model altered the statistic to 99%.'
+    out['paragraph2_consequence'] = 'Automating repetitive collection sorting gives fashion teams a concrete way to reduce manual merchandising workloads.'
+    draft = m.generate_email(FIXTURE['candidate'], FIXTURE['site'], model_call=lambda _:out)
+    assert '99%' not in draft['body']
+    assert out['selected_fact_quote'] in draft['body']
+    assert m.validate_email(draft) == 110
+
 def test_no_paid_fallback(monkeypatch):
     monkeypatch.delenv("OUTREACH_LOCAL_MODEL", raising=False)
     with pytest.raises(RuntimeError, match="LOCAL_AI_NOT_CONFIGURED"):
