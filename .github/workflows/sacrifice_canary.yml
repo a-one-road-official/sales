@@ -1,41 +1,36 @@
 name: 生贄 bulk outbound (Playwright/email; Vertex forbidden)
 
+# One owner: the existing hourly ChatGPT task. No second cron can race its handoff.
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "preflight checks the isolated workbook; execute runs the approved sacrifice lanes"
+        description: 'preflight reads readiness; execute prepares the approved cohort'
         required: true
         type: choice
-        options:
-          - preflight
-          - execute
+        options: [preflight, execute]
         default: preflight
       lane:
-        description: "One lane, ten companies per quality inspection"
+        description: 'AUTO rotates across ready, explicitly permitted lanes'
         type: choice
-        options: [BPO, EC_SACRIFICE, SALES_GTM]
-        default: BPO
+        options: [AUTO, BPO, EC_SACRIFICE, SALES_GTM]
+        default: AUTO
   push:
     branches: [main]
-    paths:
-      - ".github/ec-playwright-trigger"
-
+    paths: ['.github/ec-playwright-trigger']
 permissions:
   contents: read
   id-token: write
-
 concurrency:
   group: sacrifice-bulk-outbound
   cancel-in-progress: false
-
 jobs:
   sacrifice-bulk:
     if: >-
       ${{ github.event.repository.private == false && ((github.event_name == 'workflow_dispatch')
       || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'RUN_SACRIFICE_BULK'))) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 45
     env:
       GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
@@ -54,18 +49,18 @@ jobs:
       LEAD_FACTORY_GMAIL_IMPERSONATE: admin@a1-road.com
       LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       OUTREACH_EXECUTION_LOG_SHEET: outreach_engine_log
-      OUTREACH_EXECUTION_LOG_MAX_ROW: "5000"
-      OUTREACH_ALLOWED_LANES: "EC_SACRIFICE,BPO,SALES_GTM"
-      OUTREACH_SACRIFICE_LANES: "EC_SACRIFICE,BPO,SALES_GTM"
-      OUTREACH_SACRIFICE_TARGET_COMPANIES: "Plobal Apps"
+      OUTREACH_EXECUTION_LOG_MAX_ROW: '5000'
+      OUTREACH_ALLOWED_LANES: 'EC_SACRIFICE,BPO,SALES_GTM'
+      OUTREACH_SACRIFICE_LANES: 'EC_SACRIFICE,BPO,SALES_GTM'
+      OUTREACH_SACRIFICE_TARGET_COMPANIES: ALL
       OUTREACH_SACRIFICE_SEND_ENABLED: TRUE
       OUTREACH_BPO_SEND_ENABLED: TRUE
       OUTREACH_SALES_GTM_SEND_ENABLED: TRUE
       OUTREACH_FACTORY_SEND_ENABLED: FALSE
       OUTREACH_SSOT_SEND_ENABLED: FALSE
       OUTREACH_SITE_FETCH_MODE: PLAYWRIGHT
-      OUTREACH_SITE_RPS: "0.5"
-      OUTREACH_SITE_MAX_PAGES: "3"
+      OUTREACH_SITE_RPS: '0.5'
+      OUTREACH_SITE_MAX_PAGES: '3'
       OUTREACH_PLAYWRIGHT_FORM_ONLY: FALSE
       OUTREACH_VERIFIED_EMAIL_FIRST: TRUE
       OUTREACH_PREPARED_DRAFTS_ONLY: TRUE
@@ -79,246 +74,70 @@ jobs:
       OUTREACH_AUTOPILOT_ENABLED: FALSE
       OUTREACH_AUTOPILOT_AUTOSTART: FALSE
       LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED: FALSE
-      OUTREACH_LOCAL_MODEL: qwen2.5:7b
-      PYTHONUNBUFFERED: "1"
+      PYTHONUNBUFFERED: '1'
       OUTREACH_EVIDENCE_DIR: outreach-evidence
-      OUTREACH_STABLE_BATCH_MIN_SUCCESS: "7"
-      OUTREACH_STABLE_BATCHES_REQUIRED: "1"
-      INSPECTION_LANE: ${{ inputs.lane || 'EC_SACRIFICE' }}
-
+      OUTREACH_STABLE_BATCH_MIN_SUCCESS: '7'
+      OUTREACH_STABLE_BATCHES_REQUIRED: '1'
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
+      - uses: actions/checkout@v4
       - name: Mandatory zero paid AI budget gate
         run: python cost_guard.py
-
+      - name: Install Python runtime
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - name: Install isolated runtime and Chromium
+      - name: Plan fresh permitted prepared cohort without writes
+        id: plan
+        env:
+          REQUESTED_LANE: ${{ inputs.lane || 'AUTO' }}
+        run: python outreach_cycle.py plan --lane="$REQUESTED_LANE"
+      - name: Install Chromium only for ready work
+        if: ${{ steps.plan.outputs.active == 'true' && (inputs.mode == 'execute' || github.event_name == 'push') }}
+        run: python -m playwright install --with-deps chromium
+      - name: Verify Vertex boundary
+        if: ${{ steps.plan.outputs.active == 'true' }}
         run: |
-          set -euo pipefail
-          python -m pip install --disable-pip-version-check -r requirements.txt
-          python -m playwright install --with-deps chromium
-
-      - name: Verify Vertex boundary and compile Playwright runtime
-        run: |
-          set -euo pipefail
           python - <<'PY'
-          import os
           import re
           from pathlib import Path
           from llm import VERTEX_FORBIDDEN
-          if os.environ.get("LEAD_FACTORY_VERTEX_ALLOWED", "").strip().upper() != "FALSE":
-              raise SystemExit("vertex_policy_env_not_false")
           if not VERTEX_FORBIDDEN:
-              raise SystemExit("vertex_boundary_not_forbidden")
-          forbidden = re.compile(r"google\.genai|google\.generativeai|vertexai|aiplatform")
-          for name in ("sacrifice_web_research.py", "browser_fetch.py", "form_execution.py", "sales_leads_sacrifice_run.py", "outreach_execution.py"):
-              hits = [f"{name}:{n}" for n, line in enumerate(Path(name).read_text(encoding="utf-8").splitlines(), 1) if forbidden.search(line)]
-              if hits:
-                  raise SystemExit("paid_ai_reference_in_send_path:" + ",".join(hits))
-          print("vertex_allowed=false")
-          print("vertex_boundary=hard_forbidden")
-          print("paid_ai_send_path_scan=clean")
+              raise SystemExit('vertex_boundary_not_forbidden')
+          forbidden = re.compile(r'google\.genai|google\.generativeai|vertexai|aiplatform')
+          for name in ('sacrifice_web_research.py', 'browser_fetch.py', 'form_execution.py', 'sales_leads_sacrifice_run.py', 'outreach_execution.py'):
+              if forbidden.search(Path(name).read_text()):
+                  raise SystemExit('paid_ai_reference_in_send_path:' + name)
+          print('paid_ai_send_path_scan=clean')
           PY
-          python -m py_compile main.py sheets_repo.py outreach_execution.py form_execution.py sales_leads_sacrifice.py sales_leads_sacrifice_run.py sacrifice_web_research.py browser_fetch.py
-
-      - name: Preflight exact sacrifice workbook
-        run: |
-          set -euo pipefail
-          python workbook_sales.py --check --output workbook-preflight.json
-
-      - name: Check outbound activation before touching company records
-        id: outbound
-        env:
-          OUTREACH_REQUEST_EXECUTE: ${{ inputs.mode == 'execute' || github.event_name == 'push' }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-          policy = json.loads(Path("data/contact_policy.json").read_text())
-          active = policy.get("enabled") is True and bool(policy.get("accounts"))
-          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-              output.write("active=" + str(active).lower() + "\n")
-          if not active:
-              report = {"status": "STARTED_OUTBOUND_BLOCKED", "reason": "policy_paused_or_no_permitted_accounts", "attempted": 0, "success_count": 0}
-              Path("bulk-summary.json").write_text(json.dumps(report, indent=2))
-              print(json.dumps(report))
-              if os.environ.get("OUTREACH_REQUEST_EXECUTE") == "true":
-                  raise SystemExit("OUTBOUND_NOT_STARTED: no permitted accounts")
-          PY
-
-      - name: Start isolated local sacrifice runtime
-        if: ${{ inputs.mode == 'execute' || github.event_name == 'push' }}
+      - name: Start isolated local runtime
+        if: ${{ steps.plan.outputs.active == 'true' && (inputs.mode == 'execute' || github.event_name == 'push') }}
         run: |
           set -euo pipefail
           token="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-          export LEAD_FACTORY_INTERNAL_TOKEN="${token}"
-          echo "LEAD_FACTORY_INTERNAL_TOKEN=${token}" >> "${GITHUB_ENV}"
+          echo "::add-mask::$token"
+          export LEAD_FACTORY_INTERNAL_TOKEN="$token"
+          echo "LEAD_FACTORY_INTERNAL_TOKEN=$token" >> "$GITHUB_ENV"
           nohup python -m uvicorn main:app --host 127.0.0.1 --port 8080 > runtime.log 2>&1 &
           echo $! > runtime.pid
           for _ in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:8080/healthz > /tmp/healthz.json; then
-              cat /tmp/healthz.json
-              exit 0
-            fi
+            if curl --fail --silent http://127.0.0.1:8080/healthz > /dev/null; then exit 0; fi
             sleep 2
           done
-          cat runtime.log
+          echo 'LOCAL_RUNTIME_STARTUP_FAILED: no outbound retry was launched.'
           exit 1
-
-      - name: Execute all eligible sacrifice lanes in bounded sequential batches
-        if: ${{ (inputs.mode == 'execute' || github.event_name == 'push') && steps.outbound.outputs.active == 'true' }}
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import json
-          import os
-          import time
-          import urllib.error
-          import urllib.request
-
-          token = os.environ["LEAD_FACTORY_INTERNAL_TOKEN"]
-          base = "http://127.0.0.1:8080"
-          lanes = [os.environ["INSPECTION_LANE"]]
-          max_batches = 1
-          summaries = []
-          from pathlib import Path
-          Path("outreach-evidence").mkdir(exist_ok=True)
-
-          def call(lane, sequence):
-              payload = json.dumps({
-                  "lane": lane,
-                  "limit": 10,
-                  "batch_id": f"quality-{os.environ['GITHUB_RUN_ID']}-{os.environ['GITHUB_RUN_ATTEMPT']}-{lane.lower()}-{sequence:03d}",
-              }).encode("utf-8")
-              request = urllib.request.Request(
-                  base + "/outreach/sales-leads-sacrifice-run",
-                  data=payload,
-                  headers={
-                      "Content-Type": "application/json",
-                      "X-Aone-Internal-Token": token,
-                  },
-                  method="POST",
-              )
-              try:
-                  with urllib.request.urlopen(request, timeout=6600) as response:
-                      return json.loads(response.read().decode("utf-8"))
-              except urllib.error.HTTPError as exc:
-                  body = exc.read().decode("utf-8", errors="replace")
-                  raise RuntimeError(f"{lane} batch {sequence} HTTP {exc.code}: {body[:4000]}") from exc
-
-          for lane in lanes:
-              consecutive_errors = 0
-              for sequence in range(1, max_batches + 1):
-                  try:
-                      result = call(lane, sequence)
-                  except Exception as exc:
-                      compact = {
-                          "lane": lane,
-                          "sequence": sequence,
-                          "run_id": None,
-                          "attempted": 0,
-                          "success_count": 0,
-                          "email_success_count": 0,
-                          "form_success_count": 0,
-                          "failure_count": 0,
-                          "source_remaining_count": None,
-                          "external_action": "BATCH_ERROR",
-                          "vertex_allowed": False,
-                          "production_ssot_touched": False,
-                          "batch_error": f"{type(exc).__name__}: {exc}"[:4000],
-                      }
-                      summaries.append(compact)
-                      print(json.dumps(compact, ensure_ascii=False), flush=True)
-                      consecutive_errors += 1
-                      if consecutive_errors >= 3:
-                          print(
-                              json.dumps(
-                                  {
-                                      "lane": lane,
-                                      "status": "LANE_STOPPED_AFTER_THREE_BATCH_ERRORS",
-                                  },
-                                  ensure_ascii=False,
-                              ),
-                              flush=True,
-                          )
-                          break
-                      time.sleep(min(30, 5 * consecutive_errors))
-                      continue
-
-                  consecutive_errors = 0
-                  Path(f"outreach-evidence/{lane}-{sequence:03d}-batch.json").write_text(
-                      json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-                  compact = {
-                      "lane": lane,
-                      "sequence": sequence,
-                      "run_id": result.get("run_id"),
-                      "attempted": result.get("attempted", 0),
-                      "success_count": result.get("success_count", 0),
-                      "email_success_count": result.get("email_success_count", 0),
-                      "form_success_count": result.get("form_success_count", 0),
-                      "failure_count": result.get("failure_count", 0),
-                      "source_remaining_count": result.get("source_remaining_count"),
-                      "external_action": result.get("external_action"),
-                      "vertex_allowed": result.get("vertex_allowed"),
-                      "production_ssot_touched": result.get("production_ssot_touched"),
-                      "history_error": result.get("history_error", ""),
-                      "routing": result.get("routing", {}),
-                      "quality": result.get("quality", {}),
-                      "status": result.get("status"),
-                      "results_summary": [{"company": x.get("company_name"), "status": x.get("status"), "stage": x.get("stage"), "error": x.get("error_message"), "send_reserved": x.get("send_reserved"), "external_action": x.get("external_action")} for x in result.get("results", [])],
-                  }
-                  summaries.append(compact)
-                  print(json.dumps(compact, ensure_ascii=False), flush=True)
-                  if int(result.get("attempted", 0) or 0) == 0:
-                      break
-                  if int(result.get("source_remaining_count", 0) or 0) <= 0:
-                      break
-                  time.sleep(1)
-
-          Path = __import__("pathlib").Path
-          Path("bulk-summary.json").write_text(
-              json.dumps(summaries, ensure_ascii=False, indent=2),
-              encoding="utf-8",
-          )
-          totals = {
-              "lanes": lanes,
-              "batches": len(summaries),
-              "attempted": sum(int(x.get("attempted", 0) or 0) for x in summaries),
-              "success_count": sum(int(x.get("success_count", 0) or 0) for x in summaries),
-              "email_success_count": sum(int(x.get("email_success_count", 0) or 0) for x in summaries),
-              "form_success_count": sum(int(x.get("form_success_count", 0) or 0) for x in summaries),
-              "failure_count": sum(int(x.get("failure_count", 0) or 0) for x in summaries),
-              "vertex_allowed": any(x.get("vertex_allowed") for x in summaries),
-              "production_ssot_touched": any(x.get("production_ssot_touched") for x in summaries),
-          }
-          print(json.dumps({"totals": totals}, ensure_ascii=False), flush=True)
-          if not summaries or not all(x.get("quality", {}).get("passed") for x in summaries):
-              raise SystemExit("QUALITY_NOT_PASSED: requires 7 confirmed message submissions in 10 evaluated companies")
-          PY
-
+      - name: Execute cohort and classify actual receipts or pending handoff
+        if: ${{ steps.plan.outputs.active == 'true' && (inputs.mode == 'execute' || github.event_name == 'push') }}
+        run: python outreach_cycle.py run
       - name: Stop isolated runtime
         if: ${{ always() }}
         run: |
-          set +e
-          if [ -f runtime.pid ]; then kill "$(cat runtime.pid)" 2>/dev/null || true; fi
-
-      - name: Upload bulk audit
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: sacrifice-bulk-${{ github.run_id }}
-          path: |
-            bulk-summary.json
-            workbook-preflight.json
-            runtime.log
-            outreach-evidence/
-          if-no-files-found: ignore
+          if [ -f runtime.pid ]; then
+            kill "$(cat runtime.pid)" 2>/dev/null || true
+          fi
+      # Public runner output contains counts only. Full drafts, recipients, claims
+      # and receipts are already written/read back in the private canonical Sheet.
+      # No public raw-email artifact, browser trace or runtime.log upload.
