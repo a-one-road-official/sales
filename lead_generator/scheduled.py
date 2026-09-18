@@ -173,16 +173,28 @@ def _official_site_scan(session, website, robots_cache):
     final_url, soup, root_text = _fetch_html(session, website, robots_cache)
     base_domain = domain(final_url)
     pages = [(final_url, root_text)]
-    link_tokens = ('contact', 'location', 'office', 'global', 'company', 'about', 'where-we-are', 'worldwide')
     seen = {final_url}
+    candidates = []
     for a in soup.find_all('a', href=True):
-        if len(pages) >= 3:
-            break
         href = urljoin(final_url, a.get('href'))
         if href in seen or domain(href) != base_domain:
             continue
         signal = (a.get_text(' ', strip=True) + ' ' + urlparse(href).path).casefold()
-        if not any(token in signal for token in link_tokens):
+        score = 0
+        if any(token in signal for token in ('japan', 'tokyo', 'osaka', 'yokohama', 'nagoya', '日本', '東京', '大阪')):
+            score += 20
+        if any(token in signal for token in ('location', 'locations', 'office', 'offices', 'worldwide', 'global-presence')):
+            score += 10
+        if 'contact' in signal:
+            score += 7
+        if any(token in signal for token in ('company', 'about', 'where-we-are', 'global')):
+            score += 3
+        if score:
+            candidates.append((score, href))
+    for _, href in sorted(candidates, key=lambda x: (-x[0], x[1])):
+        if len(pages) >= 5:
+            break
+        if href in seen:
             continue
         seen.add(href)
         try:
@@ -191,7 +203,18 @@ def _official_site_scan(session, website, robots_cache):
         except (requests.RequestException, ValueError, PublicAccessBlocked):
             continue
 
-    combined = ' '.join(text for _, text in pages)[:28000]
+    brand = base_domain.split('.')[0] if base_domain else ''
+    external_japan_hint = False
+    for tag in soup.find_all(['a', 'link'], href=True):
+        href = urljoin(final_url, tag.get('href'))
+        host = (urlparse(href).hostname or '').lower()
+        hreflang = str(tag.get('hreflang') or '').casefold()
+        label = tag.get_text(' ', strip=True).casefold() if getattr(tag, 'get_text', None) else ''
+        if host.endswith('.jp') and brand and brand in host and ('ja' in hreflang or 'japan' in label or '日本' in label):
+            external_japan_hint = True
+            break
+
+    combined = ' '.join(text for _, text in pages)[:40000]
     low = combined.casefold()
     japan_terms = ('japan', 'tokyo', 'osaka', 'yokohama', 'nagoya', '日本', '東京', '大阪', '横浜', '名古屋')
     mentions = []
@@ -214,7 +237,7 @@ def _official_site_scan(session, website, robots_cache):
         '株式会社', '日本法人', '東京支社', '大阪支社',
     )
     distributor_terms = ('distributor', 'dealer', 'reseller', 'sales partner', 'channel partner', 'representative')
-    direct = any(any(term in window for term in direct_terms) for window in mentions)
+    direct = external_japan_hint or any(any(term in window for term in direct_terms) for window in mentions)
     distributor_only = bool(mentions) and not direct and any(any(term in window for term in distributor_terms) for window in mentions)
     if direct:
         outcome = 'direct_presence_found'
@@ -226,7 +249,8 @@ def _official_site_scan(session, website, robots_cache):
         outcome = 'no_direct_presence_found'
     checked_urls = [url for url, _ in pages]
     bounded = _proof(final_url, f'First-party bounded scan across {len(pages)} page(s): {outcome}',
-                     outcome=outcome, checked_urls=checked_urls)
+                     outcome=outcome, checked_urls=checked_urls,
+                     external_japan_locale_hint=external_japan_hint)
     return {
         'website': final_url,
         'text': combined,
