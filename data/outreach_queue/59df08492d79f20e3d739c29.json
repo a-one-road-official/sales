@@ -2,11 +2,11 @@
   "company_id": "company:59df08492d79f20e3d739c29",
   "company_name": "Plobal Apps",
   "website": "https://www.plobalapps.com/",
-  "generated_at": "2026-09-18T09:26:42Z",
+  "generated_at": "2026-09-18T09:38:33Z",
   "generator": "chatgpt_master_agent",
   "research": {
     "buyer_segment": "Japanese Shopify specialty tea retailers serving online and store customers",
-    "workflow": "mobile ordering, replenishment campaigns, and in-app pickup",
+    "workflow": "mobile ordering and replenishment campaigns",
     "japan_maturity": "UNKNOWN",
     "maturity_searches": [
       {
