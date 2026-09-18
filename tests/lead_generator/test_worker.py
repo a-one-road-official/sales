@@ -62,6 +62,14 @@ class Tests(unittest.TestCase):
         r=record();r.pop('exhibition_proof');r.pop('commercial_proof');r['payment_capacity']={}
         r['source_family']='vdma_members'
         self.assertEqual(qualification(r)['decision'],'PASS')
+    def test_robotics_directory_identity_mismatch_and_education_are_rejected(self):
+        r=record();r['source_family']='robotics_tomorrow'
+        r['website']='https://www.robobusiness.com/'
+        r['product_text']='Symbiosis School of Design Website: http://sid.edu.in/ Company Sector: Education / Training'
+        result=qualification(r)
+        self.assertEqual(result['decision'],'REJECT')
+        self.assertIn('source_identity_domain_mismatch',result['reasons'])
+        self.assertIn('non_vendor_directory_entry',result['reasons'])
     def test_retry_after_committed_timeout_does_not_duplicate(self):
         r=record();self.api.fail='sacrifice';self.api.commit_on_fail=True
         self.assertEqual(self.m.sync_one(company_key(r),r),'BOTH_VERIFIED')
