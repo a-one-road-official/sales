@@ -4,6 +4,17 @@ import outreach_master
 from japan_research import primary_url, research_company, search_public
 
 
+def test_source_input_is_bounded_but_original_evidence_preserved():
+    from japan_research import _bounded_source
+    original = 'irrelevant ' * 700 + 'inspection capacity 2026: a relevant primary passage. ' * 100
+    source = {'url':'https://www.mhlw.go.jp/report','text':original}
+    bounded = _bounded_source(source, {'workflow':'inspection capacity'})
+    assert len(bounded['text']) <= 1600
+    assert 'inspection capacity' in bounded['text']
+    assert source['text'] == original
+    assert all(part in original for part in bounded['text'].split('\n...\n'))
+
+
 def test_public_search_uses_an_independent_engine_after_failure():
     attempted = []
     class Engine:
