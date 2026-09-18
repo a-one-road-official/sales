@@ -110,7 +110,12 @@ def research_company(candidate, site, *, model_call=None, search=None, fetch=Non
     sources, seen, trigger_searches = [], set(), []
     for raw_query in queries:
         query = raw_query if 'site:' in raw_query else 'site:go.jp ' + raw_query
-        hits = search(query)
+        try:
+            hits = search(query)
+        except Exception as exc:
+            trigger_searches.append({'query':query,'results':[],'checked_at':now,
+                                     'status':'SEARCH_UNAVAILABLE','error':str(exc)})
+            continue
         trigger_searches.append({'query':query, 'results':hits, 'checked_at':now})
         for hit in hits:
             url = hit.get('href') or hit.get('url') or ''
@@ -137,7 +142,12 @@ def research_company(candidate, site, *, model_call=None, search=None, fetch=Non
                 if not isinstance(raw_query, str) or not raw_query.strip():
                     continue
                 query = 'site:go.jp ' + re.sub(r'site:\S+', '', raw_query).strip()[:230]
-                hits = search(query)
+                try:
+                    hits = search(query)
+                except Exception as exc:
+                    trigger_searches.append({'query':query,'results':[],'checked_at':now,
+                                             'refined':True,'status':'SEARCH_UNAVAILABLE','error':str(exc)})
+                    continue
                 trigger_searches.append({'query':query,'results':hits,'checked_at':datetime.now(timezone.utc).isoformat(),'refined':True})
                 for hit in hits:
                     url = hit.get('href') or hit.get('url') or ''
