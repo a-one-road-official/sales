@@ -20,6 +20,26 @@
       "approved_by": "Kazuma Tamura",
       "approval_evidence": "2026-09-18 explicit instruction to implement approved stable copy and start sacrifice outreach; 2026-09-08/16 instruction to replenish the sacrifice list. Existing identity, status, history and message-quality checks remain required.",
       "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:56b2d194e5cb78ebda9df067": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "RevenueHunt",
+      "website": "https://revenuehunt.com/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
+    },
+    "company:5e4a4a0c605875dcbbc7007c": {
+      "mode": "BULK_ALLOWED",
+      "company_name": "Sparq",
+      "website": "https://www.sparq.ai/",
+      "lane": "EC_SACRIFICE",
+      "campaign_id": "annual-japan-20260918",
+      "approved_by": "Kazuma Tamura",
+      "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
+      "expires_at": "2026-10-31T23:59:59Z"
     }
   },
   "campaigns": {
