@@ -50,3 +50,5 @@ jobs:
 # Rerun live preview after independent-engine search recovery.
 
 # Verify source-scoped queries and LLM query refinement.
+
+# Include per-query failures in the refinement evidence.
