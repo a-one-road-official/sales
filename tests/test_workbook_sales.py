@@ -124,14 +124,13 @@ def test_claim_is_only_written_to_new_workbook_and_requires_ack(monkeypatch, per
     monkeypatch.setenv("GITHUB_WORKFLOW", "生贄 bulk outbound (Playwright/email; Vertex forbidden)")
     repo = MagicMock(spreadsheet_id=WORKBOOK_ID)
     candidate = permitted_candidate
-    with patch("workbook_sales.live_candidates", return_value=[candidate]):
-        repo.svc.spreadsheets().values().append().execute.return_value = {"updates": {"updatedRows": 1}}
+    with patch("workbook_sales.live_candidates", return_value=[candidate]), patch("outreach_evidence.append_verified") as append:
         claim_candidate(repo, candidate, "BPO", "run1")
-        kwargs = repo.svc.spreadsheets().values().append.call_args.kwargs
-        assert kwargs["spreadsheetId"] == WORKBOOK_ID
-        assert kwargs["body"]["values"][0][5] == "CLAIMED"
-        repo.svc.spreadsheets().values().append().execute.return_value = {}
-        with pytest.raises(RuntimeError, match="reservation_not_confirmed"):
+        assert append.call_args.args[0] is repo
+        assert append.call_args.args[1]["status"] == "CLAIMED"
+        assert append.call_args.args[1]["idempotency_key"] == "claim:" + candidate["company_id"]
+        append.side_effect = RuntimeError("evidence_readback_mismatch")
+        with pytest.raises(RuntimeError, match="evidence_readback_mismatch"):
             claim_candidate(repo, candidate, "BPO", "run1")
 
 
