@@ -13,6 +13,30 @@ AI_API_BUDGET_LIMIT_JPY = 10000
 AI_API_REMAINING_BUDGET_JPY = 0
 PAID_AI_FORBIDDEN = True
 
+# Step 1 of cost retirement: freeze only future executions of these old deploy
+# workflows. Their existing gate runs before Google auth/build/push/mutations.
+# This does not stop a running service, crawler, sender, or shared authentication.
+RETIRED_CLOUD_DEPLOY_WORKFLOWS = {
+    "deploy.yml": "Deploy Lead Factory",
+    "deploy_paused_repair.yml": "Deploy paused SSOT history repair",
+}
+
+
+def assert_no_legacy_cloud_deployment(env: Mapping[str, object] | None = None) -> None:
+    """Block the two retired deploy entrypoints; preserve ordinary free jobs.
+
+    Scope: current code invoking this CLI gate. This is not an IAM deny and does
+    not revoke older commits, other repositories, or already-running jobs.
+    Re-enabling a retired entrypoint requires a reviewed code change, not a flag.
+    """
+    source = os.environ if env is None else env
+    workflow = str(source.get("GITHUB_WORKFLOW", ""))
+    workflow_ref = str(source.get("GITHUB_WORKFLOW_REF", "")).split("@", 1)[0]
+    prefix = "a-one-road-official/sales/.github/workflows/"
+    for filename, name in RETIRED_CLOUD_DEPLOY_WORKFLOWS.items():
+        if workflow == name or workflow_ref == prefix + filename:
+            raise RuntimeError("legacy_cloud_deployment_retired:" + filename)
+
 
 def assert_zero_ai_budget(config: Mapping[str, object] | None = None) -> None:
     """Reject a deployment/startup attempting to reopen paid inference."""
@@ -120,5 +144,6 @@ def budget_snapshot() -> dict[str, object]:
 
 if __name__ == "__main__":
     import json
+    assert_no_legacy_cloud_deployment()
     assert_zero_ai_budget()
     print(json.dumps(budget_snapshot(), sort_keys=True))
