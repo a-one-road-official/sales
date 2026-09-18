@@ -495,6 +495,42 @@ def _research_urls(site: dict, research: dict, form_url: str = "") -> list[str]:
     )
 
 
+def _with_prepared_contact_evidence(candidate: dict, site: dict) -> dict:
+    """Use a current same-domain contact page when the marketing root is opaque.
+
+    The prepared queue already pins at most two HTTPS pages to the candidate's
+    official domain (or one of its subdomains).  A verified page can therefore
+    establish the same company identity without weakening the domain boundary.
+    Keep the canonical root as ``official_website`` so the prepared-record
+    identity check still compares the approved company domain, while retaining
+    the exact page URL in the evidence collection.
+    """
+    if os.getenv("OUTREACH_PREPARED_DRAFTS_ONLY", "").upper() != "TRUE":
+        return site
+    from outreach_queue import prepared_contact_pages
+
+    root = str(candidate.get("candidate_website") or candidate.get("website") or "").strip()
+    root_host = _host(root)
+    supplemented = dict(site or {})
+    for contact_page in prepared_contact_pages(candidate):
+        extra = inspect_official_site(
+            contact_page,
+            max_pages=1,
+            expected_company=str(candidate.get("company_name") or "").strip(),
+        )
+        if extra.get("status") != "VERIFIED":
+            continue
+        if supplemented.get("status") != "VERIFIED":
+            supplemented = dict(extra)
+            supplemented["official_website"] = root
+            supplemented["site_host"] = root_host
+            supplemented["prepared_contact_fallback"] = contact_page
+            continue
+        for field in ("pages", "emails", "forms", "contact_links"):
+            supplemented[field] = list(supplemented.get(field) or []) + list(extra.get(field) or [])
+    return supplemented
+
+
 def _verified_site_draft(candidate: dict, site: dict) -> dict:
     """Compatibility entrypoint: every company now uses the shared AI generator."""
     if os.getenv('OUTREACH_PREPARED_DRAFTS_ONLY', '').upper() == 'TRUE':
@@ -699,14 +735,7 @@ def run_ten_sacrifice_batch(
                 max_pages=max_pages,
                 expected_company=str(candidate.get("company_name") or "").strip(),
             )
-            if site.get('status') == 'VERIFIED' and os.getenv('OUTREACH_PREPARED_DRAFTS_ONLY','').upper() == 'TRUE':
-                from outreach_queue import prepared_contact_pages
-                for contact_page in prepared_contact_pages(candidate):
-                    extra = inspect_official_site(contact_page, max_pages=1,
-                        expected_company=str(candidate.get('company_name') or '').strip())
-                    if extra.get('status') == 'VERIFIED':
-                        for field in ('pages','emails','forms','contact_links'):
-                            site[field] = list(site.get(field) or []) + list(extra.get(field) or [])
+            site = _with_prepared_contact_evidence(candidate, site)
             result["website_research"] = site
             context["verified_site"] = site
             result["audit"].update(

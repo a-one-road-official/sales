@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from sales_leads_sacrifice_run import run_ten_sacrifice_batch
+from sales_leads_sacrifice_run import _with_prepared_contact_evidence, run_ten_sacrifice_batch
 from workbook_sales import WORKBOOK_ID
 
 
@@ -20,3 +20,34 @@ def test_research_failure_is_not_a_send_attempt_or_booking(monkeypatch):
     assert result["unconfirmed_count"] == 0
     assert result["confirmed_booking_count"] is None
     executor.execute.assert_not_called()
+
+
+def test_prepared_same_domain_contact_page_can_verify_opaque_root(monkeypatch):
+    monkeypatch.setenv("OUTREACH_PREPARED_DRAFTS_ONLY", "TRUE")
+    candidate = {
+        "company_name": "Stamped",
+        "company_id": "company:d93fb02279f8bd0091ab8f14",
+        "candidate_website": "https://stamped.io/",
+    }
+    contact_page = "https://stampedsupport.stamped.io/hc/en-us/article"
+    monkeypatch.setattr("outreach_queue.prepared_contact_pages", lambda value: [contact_page])
+    monkeypatch.setattr(
+        "sales_leads_sacrifice_run.inspect_official_site",
+        lambda *args, **kwargs: {
+            "status": "VERIFIED",
+            "official_website": contact_page,
+            "site_host": "stampedsupport.stamped.io",
+            "pages": [{"url": contact_page}],
+            "emails": ["support@stamped.io"],
+            "forms": [],
+            "contact_links": [],
+        },
+    )
+
+    result = _with_prepared_contact_evidence(candidate, {"status": "UNAVAILABLE"})
+
+    assert result["status"] == "VERIFIED"
+    assert result["official_website"] == "https://stamped.io/"
+    assert result["site_host"] == "stamped.io"
+    assert result["prepared_contact_fallback"] == contact_page
+    assert result["emails"] == ["support@stamped.io"]
