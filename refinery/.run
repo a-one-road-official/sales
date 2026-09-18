@@ -1,0 +1,5 @@
+request_id=raw-material-initial-20260918T1446Z
+scope=private_raw_material_only
+customer_sends=forbidden
+paid_ai=forbidden
+existing_sales_status_writes=forbidden
