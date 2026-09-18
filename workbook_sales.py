@@ -262,12 +262,8 @@ def claim_candidate(sheets, candidate: dict, lane: str, run_id: str) -> SendAuth
     values = [now, "RESERVATION", candidate["company_name"], candidate["candidate_website"], "",
               "CLAIMED", "", "", "", "PRE_SEND", "claim:" + key, run_id,
               key, lane, False, "", "", "", "", "", now]
-    result = sheets.svc.spreadsheets().values().append(
-        spreadsheetId=WORKBOOK_ID, range="'outreach_engine_log'!A:U",
-        valueInputOption="RAW", insertDataOption="INSERT_ROWS", body={"values": [values]},
-    ).execute()
-    if result.get("updates", {}).get("updatedRows") != 1:
-        raise RuntimeError("reservation_not_confirmed")
+    from outreach_evidence import HEADERS, append_verified
+    append_verified(sheets, dict(zip(HEADERS, values)))
     return SendAuthorization(key, candidate["company_name"], candidate["candidate_website"], lane, run_id)
 
 

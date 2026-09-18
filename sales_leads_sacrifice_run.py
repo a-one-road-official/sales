@@ -1030,7 +1030,15 @@ def run_ten_sacrifice_batch(
                         _persist_draft(sheets, run_id, candidate, result)
                         from outreach_master import verify_prompt_revision
                         verify_prompt_revision(draft)
-                        execution = executor.execute(row, cfg)
+                        if os.getenv("OUTREACH_EMAIL_TRANSPORT") == "CHATGPT_CONNECTOR":
+                            execution = {
+                                "status": "READY_FOR_CONNECTOR_SEND",
+                                "recipient": email,
+                                "idempotency_key": "first-contact:" + candidate["company_id"],
+                                "reason": "Validated and reserved; complete this claim using authenticated Gmail connector",
+                            }
+                        else:
+                            execution = executor.execute(row, cfg)
                         if execution.get("status") == "STALE_PROMPT":
                             if deterministic_draft:
                                 _, prompt_meta = drive.read_live_prompt_by_title(prompt_title)

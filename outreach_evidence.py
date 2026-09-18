@@ -56,12 +56,26 @@ def append_verified(sheets, record: dict) -> str:
     else:
         # No automatic retry of an uncertain append; the caller retains local
         # evidence and stops the batch. A later reconciliation resolves the key.
-        response = values_api.append(spreadsheetId=WORKBOOK_ID, range=f"'{TAB}'!A:U",
-            valueInputOption="RAW", insertDataOption="INSERT_ROWS", body={"values": [values]}).execute()
-        updates = response.get("updates", {})
-        if updates.get("updatedRows") != 1 or not updates.get("updatedRange"):
+        def cell(value):
+            if isinstance(value, bool):
+                return {"userEnteredValue": {"boolValue": value}}
+            if isinstance(value, (int, float)):
+                return {"userEnteredValue": {"numberValue": value}}
+            return {"userEnteredValue": {"stringValue": str(value or "")}}
+        # appendCells always starts at column A; values.append can infer a
+        # different table origin from sparsely populated event rows.
+        sheets.svc.spreadsheets().batchUpdate(spreadsheetId=WORKBOOK_ID, body={
+            "requests": [{"appendCells": {"sheetId": props["sheetId"],
+                "rows": [{"values": [cell(value) for value in values]}],
+                "fields": "userEnteredValue"}}]
+        }).execute()
+        keys = values_api.get(spreadsheetId=WORKBOOK_ID,
+            range=f"'{TAB}'!K2:K{end + 1}").execute().get("values", [])
+        matches = [i + 2 for i, row in enumerate(keys) if row and row[0] == key]
+        if len(matches) != 1:
             raise RuntimeError("evidence_write_unconfirmed")
-        target = updates["updatedRange"]
+        target = f"'{TAB}'!A{matches[0]}:U{matches[0]}"
+
     got = values_api.get(spreadsheetId=WORKBOOK_ID, range=target, valueRenderOption="UNFORMATTED_VALUE").execute().get("values", [])
     def padded(row):
         return (list(row) + [""] * len(HEADERS))[:len(HEADERS)]
