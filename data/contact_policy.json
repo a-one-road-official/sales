@@ -172,14 +172,16 @@
       "completion_receipt_sha256": "06beff2333bf7b8c1998723b0d65645c1228d4393c8f1d6971357e9443d6f1d2"
     },
     "company:d93fb02279f8bd0091ab8f14": {
-      "mode": "BULK_ALLOWED",
+      "mode": "COMPLETED",
       "company_name": "Stamped",
       "website": "https://stamped.io/",
       "lane": "EC_SACRIFICE",
       "campaign_id": "annual-japan-20260918",
       "approved_by": "Kazuma Tamura",
       "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
-      "expires_at": "2026-10-31T23:59:59Z"
+      "expires_at": "2026-10-31T23:59:59Z",
+      "completed_at": "2026-09-18T13:01:09.763Z",
+      "completion_receipt_sha256": "b8aa616afd4c15315f98fa417abc8b9086dcf316499771c18e7723fdb35bb05e"
     },
     "company:9c29646501c1964549d570de": {
       "mode": "COMPLETED",
