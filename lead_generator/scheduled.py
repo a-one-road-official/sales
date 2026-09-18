@@ -412,11 +412,11 @@ def run(api, store, checkpoint, budget_seconds=900):
                     checkpoint.save(store)
             if len(store.completed()) >= 500 and not store.get('milestone_verified'):
                 mirror.reconcile_completed(); store.set('milestone_verified', now()); checkpoint.save(store)
-            if promoted_this_cycle:
-            checkpoint.save(store); api.publish_status(store)
-
-        if len(store.completed()) >= 2000:
+            if len(store.completed()) >= 2000:
                 break
+
+        if promoted_this_cycle:
+            checkpoint.save(store); api.publish_status(store)
 
         if len(store.completed()) >= 2000:
             mirror.reconcile_completed(); store.set('target_verified', now())
