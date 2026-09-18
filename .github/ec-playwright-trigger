@@ -1,1 +1,3 @@
-2026-09-18T07:24:47Z: one reconciled batch for Visually only. All prior SENT companies remain locked; Richpanel remains HOLD. Prepared ChatGPT master-agent draft only; CHATGPT_CONNECTOR handoff; no paid AI/cloud or local generation fallback.
+shopney_connector_handoff=2026-09-18T08:32:00Z
+company_id=company:0728e6b22b43a5cd29f0fcf7
+batch_limit=1
