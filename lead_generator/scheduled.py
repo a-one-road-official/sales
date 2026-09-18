@@ -347,8 +347,6 @@ def run(api, store, checkpoint, budget_seconds=900):
         for seed in seeds:
             if attempted >= 80 or time.monotonic() - start >= budget_seconds * 0.68:
                 break
-            if api.control_command() != 'START':
-                store.set('command', 'STOP'); break
             attempted += 1
             family = _source_family(seed['source_url'])
             try:
@@ -390,12 +388,17 @@ def run(api, store, checkpoint, budget_seconds=900):
                 store.event('PUBLIC_PROFILE_ERROR', {'source': seed['source_url'], 'type': type(exc).__name__})
 
             if attempted % 20 == 0:
+                if api.control_command() != 'START':
+                    store.set('command', 'STOP')
+                    break
                 store.set('heartbeat', now()); checkpoint.save(store); api.publish_status(store)
             time.sleep(0.35)
 
         promoted_this_cycle = 0
+        if api.control_command() != 'START':
+            store.set('command', 'STOP')
         for row in store.db.execute("SELECT company_key,payload FROM records WHERE decision='PASS' ORDER BY updated_at").fetchall():
-            if promoted_this_cycle >= 30 or time.monotonic() - start >= budget_seconds - 45 or api.control_command() != 'START':
+            if promoted_this_cycle >= 30 or time.monotonic() - start >= budget_seconds - 45 or store.get('command') != 'START':
                 break
             if row['company_key'] in store.completed():
                 continue
@@ -405,10 +408,14 @@ def run(api, store, checkpoint, budget_seconds=900):
             outcome = mirror.sync_one(row['company_key'], json.loads(row['payload']))
             if outcome == 'BOTH_VERIFIED':
                 promoted_this_cycle += 1
-                checkpoint.save(store)
+                if promoted_this_cycle % 5 == 0:
+                    checkpoint.save(store)
             if len(store.completed()) >= 500 and not store.get('milestone_verified'):
                 mirror.reconcile_completed(); store.set('milestone_verified', now()); checkpoint.save(store)
-            if len(store.completed()) >= 2000:
+            if promoted_this_cycle:
+            checkpoint.save(store); api.publish_status(store)
+
+        if len(store.completed()) >= 2000:
                 break
 
         if len(store.completed()) >= 2000:
