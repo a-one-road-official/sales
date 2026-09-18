@@ -20,6 +20,17 @@ def test_checked_in_queue_records_use_workbook_company_id():
         assert path.stem == expected.removeprefix("company:")
         assert expected in policy["accounts"]
 
+
+def test_checked_in_queue_records_embed_exact_research_wedge():
+    """Every checked-in buyer/workflow wedge must survive the handoff validator."""
+    root = Path(__file__).parents[1]
+    for path in (root / "data/outreach_queue").glob("*.json"):
+        record = json.loads(path.read_text())
+        paragraphs = record["draft"]["body"].split("\n\n")[1:4]
+        body = " ".join(paragraphs).lower()
+        assert record["research"]["buyer_segment"].lower() in body, path.name
+        assert record["research"]["workflow"].lower() in body, path.name
+
 def packet(tmp_path, monkeypatch):
     record=json.loads((Path(__file__).parents[1]/'data/outreach_queue/3b8a55e94b65b27516cc8f6b.json').read_text())
     record['generated_at']=datetime.now(timezone.utc).isoformat()
