@@ -108,7 +108,8 @@ def research_company(candidate, site, *, model_call=None, search=None, fetch=Non
         [fit['japan_trigger_query'], *planned]
         if isinstance(q, str) and q.strip()))[:3]
     sources, seen, trigger_searches = [], set(), []
-    for query in queries:
+    for raw_query in queries:
+        query = raw_query if 'site:' in raw_query else 'site:go.jp ' + raw_query
         hits = search(query)
         trigger_searches.append({'query':query, 'results':hits, 'checked_at':now})
         for hit in hits:
@@ -125,7 +126,35 @@ def research_company(candidate, site, *, model_call=None, search=None, fetch=Non
         if len(sources) >= 4:
             break
     if not sources:
-        raise ValueError('JAPAN_PRIMARY_RESEARCH_UNAVAILABLE')
+        # Feed unsuccessful discovery back to the same local model. Research
+        # the buyer's external operating conditions, not the vendor's launch.
+        revised = _ask(call,
+            'The initial searches yielded no usable primary source. Return queries: a list of two BROADER Japanese-language search queries about the BUYER external conditions: government investment, workforce constraints, regulation or a documented technical problem. Remove vendor and platform names. Do not search for product launches, Japan entry or the vendor. Example of query form only: site:go.jp industry buyer issue survey. Use actual buyer/workflow evidence to choose the industry and issue.',
+            {'company':company,'fit':fit,'failed_searches':trigger_searches}, master)
+        retry_queries = revised.get('queries', [])
+        if isinstance(retry_queries, list):
+            for raw_query in retry_queries[:2]:
+                if not isinstance(raw_query, str) or not raw_query.strip():
+                    continue
+                query = 'site:go.jp ' + re.sub(r'site:\S+', '', raw_query).strip()[:230]
+                hits = search(query)
+                trigger_searches.append({'query':query,'results':hits,'checked_at':datetime.now(timezone.utc).isoformat(),'refined':True})
+                for hit in hits:
+                    url = hit.get('href') or hit.get('url') or ''
+                    if url in seen or not primary_url(url):
+                        continue
+                    seen.add(url)
+                    try:
+                        sources.append(fetch(url))
+                    except Exception:
+                        continue
+                    if len(sources) >= 4:
+                        break
+                if len(sources) >= 4:
+                    break
+    if not sources:
+        raise ValueError('JAPAN_PRIMARY_RESEARCH_UNAVAILABLE: ' + json.dumps(
+            {'queries':[row['query'] for row in trigger_searches]}, ensure_ascii=False))
     evidence = {'company':company,'fit':fit,'primary_sources':sources,'maturity_searches':maturity}
     fact = _ask(call, 'Choose exactly one Japan-side fact with a number, deadline or named requirement relevant in 2026 and causally relevant to this buyer/workflow. Return supported (boolean), url, source_quote (EXACT contiguous quote from source text, 30-800 characters), text (one concise English sentence for the email), relevance. Preserve units, dates, population and scope precisely. Distinguish the sourced fact from our proposed Japan opportunity. If no strong source exists return supported:false.',evidence,master)
     source = next((s for s in sources if s['url']==fact.get('url')),None)
