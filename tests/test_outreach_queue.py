@@ -1,9 +1,24 @@
 import json
+import hashlib
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 import pytest
 import outreach_queue as q
 from outreach_master import read_prompt
+
+
+def test_checked_in_queue_records_use_workbook_company_id():
+    """Prepared drafts and policy must use the workbook's host-derived identity."""
+    root = Path(__file__).parents[1]
+    policy = json.loads((root / "data/contact_policy.json").read_text())
+    for path in (root / "data/outreach_queue").glob("*.json"):
+        record = json.loads(path.read_text())
+        host = urlparse(record["website"]).hostname.lower().removeprefix("www.").rstrip(".")
+        expected = "company:" + hashlib.sha256(host.encode()).hexdigest()[:24]
+        assert record["company_id"] == expected
+        assert path.stem == expected.removeprefix("company:")
+        assert expected in policy["accounts"]
 
 def packet(tmp_path, monkeypatch):
     record=json.loads((Path(__file__).parents[1]/'data/outreach_queue/3b8a55e94b65b27516cc8f6b.json').read_text())
