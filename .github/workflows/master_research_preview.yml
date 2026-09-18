@@ -52,3 +52,5 @@ jobs:
 # Verify source-scoped queries and LLM query refinement.
 
 # Include per-query failures in the refinement evidence.
+
+# Verify bounded research inputs against live primary sources.
