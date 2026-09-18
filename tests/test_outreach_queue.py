@@ -46,6 +46,18 @@ def test_prepared_handoff_preserves_full_master_generated_email(tmp_path,monkeyp
     s['official_website']='https://other-company.example/'
     with pytest.raises(ValueError,match='SITE_MISMATCH'): q.load_prepared_draft(c,s)
 
+
+def test_prepared_contact_pages_accepts_official_help_subdomain(tmp_path, monkeypatch):
+    r,p,c,s=packet(tmp_path,monkeypatch)
+    r['contact_pages'] = [
+        'https://help.searchanise.io/en/articles/contact-support',
+        'https://unrelated.example/contact',
+    ]
+    p.write_text(json.dumps(r))
+    assert q.prepared_contact_pages(c) == [
+        'https://help.searchanise.io/en/articles/contact-support'
+    ]
+
 @pytest.mark.parametrize('change,error',[
     ('stale','EXPIRED'),('revision','PROMPT_CHANGED'),('fact','FACT_OR_COMPANY_MISMATCH'),('review','REVIEW_REQUIRED')])
 def test_prepared_queue_rejects_stale_or_unreviewed_input(tmp_path,monkeypatch,change,error):
