@@ -16,7 +16,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from .checkpoint import SheetCheckpoint
-from .discovery import DIRECTORY, VDMA_DIRECTORY, SOURCES, fetch_source
+from .discovery import DIRECTORY, VDMA_DIRECTORY, TAIROS_DIRECTORY, SOURCES, fetch_source
 from .policy import domain, normalize_country, classify, qualification
 from .store import Store, now
 from .sync import Sheets, Mirror
@@ -148,6 +148,26 @@ def _robotics_profile(session, seed, robots_cache):
     }
 
 
+def _tairos_profile(session, seed, robots_cache):
+    url = seed['profile_url']
+    parsed = urlparse(url)
+    if 'tairos.tw' not in (parsed.hostname or '').lower() or 'visitorExhibitorDetail.asp' not in parsed.path:
+        raise ValueError('profile_not_on_tairos_catalog')
+    final_url, soup, text = _fetch_html(session, url, robots_cache)
+    website = _extract_labeled_website(text)
+    heading = soup.find(['h1', 'h2'])
+    displayed_name = re.sub(r'\s+', ' ', heading.get_text(' ', strip=True)).strip() if heading else ''
+    if displayed_name and seed['name'].casefold() not in displayed_name.casefold() and displayed_name.casefold() not in seed['name'].casefold():
+        raise ValueError('tairos_profile_identity_mismatch')
+    return {
+        'url': final_url,
+        'company_name': seed['name'],
+        'website': website,
+        'text': text[:16000],
+        'checked_at': now(),
+    }
+
+
 def _official_site_scan(session, website, robots_cache):
     """Bounded first-party scan for identity/product text and obvious Japan GTM presence."""
     final_url, soup, root_text = _fetch_html(session, website, robots_cache)
@@ -222,6 +242,8 @@ def _source_family(source_url):
         return 'vdma_members'
     if source_url == DIRECTORY:
         return 'robotics_tomorrow'
+    if source_url == TAIROS_DIRECTORY:
+        return 'tairos_exhibitor'
     return 'public_industrial_directory'
 
 
@@ -352,6 +374,8 @@ def run(api, store, checkpoint, budget_seconds=900):
             try:
                 if family == 'robotics_tomorrow':
                     profile = _robotics_profile(session, seed, robots_cache)
+                elif family == 'tairos_exhibitor':
+                    profile = _tairos_profile(session, seed, robots_cache)
                 else:
                     profile = {'url': seed['source_url'], 'company_name': seed['name'],
                                'website': seed['profile_url'], 'text': seed['description'],
