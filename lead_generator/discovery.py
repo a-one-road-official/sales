@@ -9,6 +9,7 @@ from .store import now
 DIRECTORY = 'https://www.roboticstomorrow.com/company_directory_search.php?Search=active'
 VDMA_DIRECTORY = 'https://www.vdma.eu/en/members'
 VDMA_ROBOTICS = 'https://www.vdma.eu/en-GB/members-robotics-automation'
+TAIROS_DIRECTORY = 'https://www.tairos.tw/en/visitorExhibitor.asp?Area=&sort=name&view=list'
 
 _RESOURCE_QUERY = (
     'p_p_cacheability=cacheLevelPage&'
@@ -30,7 +31,7 @@ VDMA_RESOURCE_SOURCES = (
     'https://www.vdma.org/mitglieder-foerdertechnik-intralogistik?'
     'p_p_id=org_vdma_publicusers_portlet_PublicUsersPortlet_INSTANCE_kFQ0SZSZDPTt&' + _RESOURCE_QUERY,
 )
-SOURCES = VDMA_RESOURCE_SOURCES + (DIRECTORY,)
+SOURCES = VDMA_RESOURCE_SOURCES + (TAIROS_DIRECTORY, DIRECTORY,)
 
 
 def parse_directory(html, source_url=DIRECTORY):
@@ -294,9 +295,60 @@ def fetch_vdma(session, store, source_url=VDMA_DIRECTORY):
     return len(rows)
 
 
+def parse_tairos_list(html, source_url=TAIROS_DIRECTORY):
+    """Extract unique exhibitor detail links from the official Taiwan automation show directory."""
+    soup = BeautifulSoup(html, 'html.parser')
+    seen = set()
+    for a in soup.find_all('a', href=True):
+        href = urljoin(source_url, a.get('href'))
+        parsed = urlparse(href)
+        if 'tairos.tw' not in (parsed.hostname or '').lower() or 'visitorExhibitorDetail.asp' not in parsed.path:
+            continue
+        name = re.sub(r'\s+', ' ', a.get_text(' ', strip=True)).strip()
+        if not name or name.casefold() in {'more', 'detail', 'website'}:
+            continue
+        if href in seen:
+            continue
+        seen.add(href)
+        yield dict(profile_url=href, name=name[:300], location='Taiwan',
+                   description='Taiwan Automation Intelligence and Robot Show 2026 official exhibitor',
+                   source_url=source_url, collected_at=now())
+
+
+def fetch_tairos(session, store, source_url=TAIROS_DIRECTORY):
+    rows, seen = [], set()
+    empty_streak = 0
+    for page in range(1, 61):
+        sep = '&' if '?' in source_url else '?'
+        page_url = source_url + sep + 'page=' + str(page)
+        html = _read_html(session, page_url, 6_000_000)
+        current = list(parse_tairos_list(html, source_url))
+        new = [row for row in current if row['profile_url'] not in seen]
+        if not new:
+            empty_streak += 1
+            if empty_streak >= 2:
+                break
+            continue
+        empty_streak = 0
+        for row in new:
+            seen.add(row['profile_url'])
+            rows.append(row)
+        time.sleep(0.05)
+    if len(rows) < 50:
+        raise ValueError('tairos_layout_changed_or_incomplete')
+    for row in rows:
+        store.seed(**row)
+    store.event('DIRECTORY_COLLECTED', {
+        'source': source_url, 'profile_links': len(rows), 'country': 'Taiwan',
+    })
+    return len(rows)
+
+
 def fetch_source(session, store, source_url):
     if source_url == DIRECTORY:
         return fetch_directory(session, store)
+    if source_url == TAIROS_DIRECTORY:
+        return fetch_tairos(session, store, source_url)
     if source_url in VDMA_RESOURCE_SOURCES:
         return fetch_vdma_resource(session, store, source_url)
     if source_url in {VDMA_DIRECTORY, VDMA_ROBOTICS}:
