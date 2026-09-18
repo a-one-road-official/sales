@@ -495,6 +495,11 @@ def _research_urls(site: dict, research: dict, form_url: str = "") -> list[str]:
     )
 
 
+def _verified_form_links(site: dict) -> list[str]:
+    """Return only pages where the live inspector observed an HTML form."""
+    return _unique(site.get("forms") or [])
+
+
 def _with_prepared_contact_evidence(candidate: dict, site: dict) -> dict:
     """Use a current same-domain contact page when the marketing root is opaque.
 
@@ -763,7 +768,7 @@ def run_ten_sacrifice_batch(
                 # Only pages where the inspector found an actual HTML form are
                 # eligible for form submission. A marketing/persona/contact link
                 # without a form must fall through to email research.
-                form_links = _unique(list(site.get("forms") or []) + list(site.get("contact_links") or []))
+                form_links = _verified_form_links(site)
                 preferred_form = _preferred_form_url(
                     str(candidate.get("company_name") or "").strip(),
                     str(site.get("official_website") or site_url),
