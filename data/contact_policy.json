@@ -182,14 +182,16 @@
       "expires_at": "2026-10-31T23:59:59Z"
     },
     "company:9c29646501c1964549d570de": {
-      "mode": "BULK_ALLOWED",
+      "mode": "COMPLETED",
       "company_name": "Firepush",
       "website": "https://firepush.io/",
       "lane": "EC_SACRIFICE",
       "campaign_id": "annual-japan-20260918",
       "approved_by": "Kazuma Tamura",
       "approval_evidence": "2026-09-18 explicit instruction to replenish with officially verified nonmanufacturing companies, reconcile full sacrifice and production histories plus Gmail, register company IDs in PILOT policy, and send using the approved annual paid Japan master. Identity/history and all safety gates retained.",
-      "expires_at": "2026-10-31T23:59:59Z"
+      "expires_at": "2026-10-31T23:59:59Z",
+      "completed_at": "2026-09-18T12:44:06.656Z",
+      "completion_receipt_sha256": "d7125a30754dff1feb0845500043ef6a70f5fbb56ff01d06077146fabf8ca9bc"
     },
     "company:51942d8ca797bac1493b7012": {
       "mode": "COMPLETED",
