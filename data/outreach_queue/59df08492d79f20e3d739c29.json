@@ -1,0 +1,58 @@
+{
+  "company_id": "company:59df08492d79f20e3d739c29",
+  "company_name": "Plobal Apps",
+  "website": "https://www.plobalapps.com/",
+  "generated_at": "2026-09-18T09:26:42Z",
+  "generator": "chatgpt_master_agent",
+  "research": {
+    "buyer_segment": "Japanese Shopify specialty tea retailers serving online and store customers",
+    "workflow": "mobile ordering, replenishment campaigns, and in-app pickup",
+    "japan_maturity": "UNKNOWN",
+    "maturity_searches": [
+      {
+        "query": "site:plobalapps.com (Japan OR Japanese OR 日本) Plobal Apps",
+        "checked_at": "2026-09-18T09:26:42Z",
+        "finding": "Official-site search returned no verified Japan customer, partner, office, exhibition, or project evidence; maturity remains UNKNOWN. Missing evidence was not treated as absence."
+      },
+      {
+        "query": "\"Plobal Apps\" Japan customer partner office exhibition",
+        "checked_at": "2026-09-18T09:26:42Z",
+        "finding": "Search returned no usable official Japan activity evidence. Missing evidence was not treated as absence."
+      }
+    ],
+    "official_evidence": [
+      {
+        "url": "https://www.plobalapps.com/",
+        "finding": "Official site describes a no-code Shopify mobile app builder with targeted push campaigns, in-app ordering, store pickup, analytics, and food-and-grocery use cases; the Japanese specialty-tea retailer wedge is an application hypothesis."
+      },
+      {
+        "url": "https://www.plobalapps.com/privacy-policy",
+        "finding": "Official privacy page publishes support@plobalapps.com as a contact address."
+      }
+    ],
+    "fact": {
+      "text": "Japan’s May 2026 labour survey found regular-staff shortages at 34% of surveyed wholesale/retail establishments.",
+      "url": "https://www.mhlw.go.jp/toukei/itiran/roudou/koyou/keizai/2605/dl/7roudoukeizaidouko.pdf",
+      "source_locator": "PDF page 7, Table 3, wholesale/retail row, May 2026 shortage column. Scope: establishments with at least 30 regular workers; weighted establishment results, excluding nonresponses. Not specialty-tea-retailer-specific.",
+      "source_excerpt": "卸 売 業 ， 小 売 業 34 3 31",
+      "retrieved_at": "2026-09-18T09:26:42Z"
+    }
+  },
+  "review": {
+    "fact_supported": true,
+    "workflow_fit": true,
+    "buyer_specific": true,
+    "presence_neutral": true,
+    "no_price": true,
+    "no_outcome_promises": true
+  },
+  "draft": {
+    "subject": "Plobal Apps — Japan rollout for tea retail mobile ordering",
+    "body": "Hi Plobal Apps team,\n\nWe’re A-one Road, a Yokohama company supporting commerce technology firms in Japan. We’re contacting Plobal Apps about mobile ordering and replenishment campaigns for Japanese Shopify specialty tea retailers serving online and store customers.\n\nJapan’s May 2026 labour survey found regular-staff shortages at 34% of surveyed wholesale/retail establishments. For lean retail teams, targeted push alerts and in-app pickup flows could keep seasonal releases and repeat orders moving without separate campaign operations.\n\nWe can lead one year of paid Japan market development: identify the entry application, evaluate Japanese buyer requirements, shape local introduction, and develop partner channels. Buyer evidence would guide Japanese app navigation, notification cadence, and pickup workflow. Can we help plan and execute Plobal Apps’ rollout with this retailer segment?\n\nhttps://calendar.app.google/adKEhXC4UWhQXfJp6\n\nBest regards,\nKazuma Tamura\nFounder & CEO, A-one Road Co., Ltd. (Yokohama, Japan)\n\n────────────────────\nすべての「隠れた価値」の語り部に。\nUnearth All \"Hidden\" Value.\nエーワンロード株式会社 / A-one road Co., Ltd.\n代表取締役　田村 一馬 / Kazuma Tamura, Founder & CEO\n〒220-0072 神奈川県横浜市西区浅間町1丁目4-3 ウィザードビル402\n古物商許可｜第306622619455号\nWebsite｜https://a-oneroad.com/\nBlog｜https://note.com/kazumat\nE-mail｜admin@a1-road.com\nMobile｜+81 80-4870-5690\n────────────────────",
+    "master_prompt_hash": "98df862427ba378948e76552152ff9fa32147f04782664933f8f9f7935006ceb"
+  },
+  "contact_pages": [
+    "https://www.plobalapps.com/",
+    "https://www.plobalapps.com/privacy-policy"
+  ]
+}
