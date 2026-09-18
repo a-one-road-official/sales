@@ -77,6 +77,34 @@ def test_changed_research_prompt_cannot_be_used_for_drafting(monkeypatch):
             model_call=lambda _:pytest.fail('stale evidence must be researched again'))
 
 
+def test_failed_primary_discovery_replans_queries_with_real_results(monkeypatch):
+    monkeypatch.setattr(outreach_master, 'read_prompt', lambda: ('MASTER', 'v1'))
+    url = 'https://www.mhlw.go.jp/report'
+    quote = 'A sufficiently long verbatim quotation from a verified source.'
+    calls, queries = [], []
+    def model(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return dict(product='software', buyer_segment='Japanese specialty online retailers',
+                        workflow='collection sorting', operational_consequence='less manual work',
+                        japan_trigger_query='vendor launch Japan')
+        if len(calls) == 2:
+            assert json.loads(messages[1]['content'])['failed_searches'][0]['results'][0]['href'] == 'https://example.com'
+            return {'queries':['小売業 人手不足 調査']}
+        if len(calls) == 3:
+            return dict(supported=True,url=url,source_quote=quote,text='Verified fact.',relevance='retail labour')
+        return dict(supported=True,scope_correct=True,relevant_to_workflow=True,current_for_2026=True)
+    def search(query):
+        queries.append(query)
+        return [{'href':url if '小売業' in query else 'https://example.com'}]
+    packet = research_company({'company_name':'Example'},
+        {'status':'VERIFIED','official_website':'https://example.com','pages':[{}]},
+        model_call=model,search=search,
+        fetch=lambda _:dict(url=url,text=quote,retrieved_at='2026-09-18',source_sha256='abc'))
+    assert queries[2:] == ['site:go.jp vendor launch Japan', 'site:go.jp 小売業 人手不足 調査']
+    assert packet['trigger_searches'][-1]['refined'] is True
+
+
 def test_discovery_requires_primary_source_and_exact_support():
     assert primary_url('https://www.mhlw.go.jp/report.pdf')
     assert not primary_url('http://www.mhlw.go.jp/report.pdf')
