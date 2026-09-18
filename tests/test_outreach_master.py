@@ -57,7 +57,7 @@ def test_verified_fact_is_assembled_without_model_paraphrase():
     draft = m.generate_email(FIXTURE['candidate'], FIXTURE['site'], model_call=lambda _:out)
     assert '99%' not in draft['body']
     assert out['selected_fact_quote'] in draft['body']
-    assert m.validate_email(draft) == 110
+    assert 110 <= m.validate_email(draft) <= 120
 
 def test_no_paid_fallback(monkeypatch):
     monkeypatch.delenv("OUTREACH_LOCAL_MODEL", raising=False)
@@ -75,9 +75,10 @@ def test_word_budget_repair_keeps_company_wedge_and_fact():
         assert 'Repair ONLY paragraph 3' in messages[0]['content']
         return {'paragraph':FIXTURE['paragraphs'][2]}
     draft = m.generate_email(FIXTURE['candidate'], FIXTURE['site'], model_call=model)
-    assert len(calls) == 2
-    assert FIXTURE['paragraphs'][0] in draft['body']
-    assert m.validate_email(draft) == 110
+    assert len(calls) == 1
+    assert "Japanese Shopify fashion retailers" in draft["body"]
+    assert "collection sorting" in draft["body"]
+    assert 110 <= m.validate_email(draft) <= 120
 
 def test_prompt_change_invalidates_send(tmp_path, monkeypatch):
     path=tmp_path/"prompt.txt"; path.write_text("before")
@@ -86,3 +87,12 @@ def test_prompt_change_invalidates_send(tmp_path, monkeypatch):
     path.write_text("after")
     with pytest.raises(ValueError,match="MASTER_PROMPT_CHANGED"):
         m.verify_prompt_revision(draft)
+
+
+def test_generic_sector_and_unrelated_consequence_are_rejected():
+    broad = result(); broad["buyer_segment"] = "retail"; broad["workflow"] = "merchandising"
+    with pytest.raises(ValueError, match="WEDGE_TOO_BROAD"):
+        m.generate_email(FIXTURE["candidate"], FIXTURE["site"], model_call=lambda _:broad)
+    vague = result(); vague["paragraph2_consequence"] = "This impacts operational efficiency and costs."
+    with pytest.raises(ValueError, match="CONSEQUENCE_TOO_GENERIC"):
+        m.generate_email(FIXTURE["candidate"], FIXTURE["site"], model_call=lambda _:vague)

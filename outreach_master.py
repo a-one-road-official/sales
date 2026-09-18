@@ -133,8 +133,22 @@ def generate_email(candidate, site, *, model_call=None):
                 raise ValueError("JAPAN_MATURITY")
             if any(not out.get(k) for k in ("buyer_segment","workflow","operational_consequence","subject")):
                 raise ValueError("WEDGE_REQUIRED")
+            fit = packet.get("company_fit") or {}
+            for field in ("buyer_segment", "workflow", "operational_consequence"):
+                if fit.get(field):
+                    out[field] = fit[field]
+            if len(out["buyer_segment"].split()) < 4 or len(out["workflow"].split()) < 2:
+                raise ValueError("WEDGE_TOO_BROAD: name a specific Japanese buyer segment and concrete workflow")
+            consequence = out.get("paragraph2_consequence") or p[1][len(fact["text"]):].strip()
+            workflow_words = set(re.findall(r"[a-z]{5,}", out["workflow"].lower()))
+            if workflow_words and not workflow_words.intersection(re.findall(r"[a-z]{5,}", consequence.lower())):
+                raise ValueError("CONSEQUENCE_TOO_GENERIC: connect the verified fact to the named workflow")
             if company.lower() not in p[0].lower():
                 raise ValueError("COMPANY_WEDGE_REQUIRED")
+            # Our introduction is invariant; the researched buyer/workflow is
+            # generated for this company. This prevents domain mislabelling.
+            p[0] = ("We’re A-one Road, a Yokohama-based company working with technology companies on Japan market development. "
+                    f"We’re reaching out about {company}’s Japan rollout around {out['workflow']} for {out['buyer_segment']}.")
             # Expand a short generic CTA with the already-researched buyer and
             # workflow. This adds concrete rollout scope, never filler or claims.
             if len(" ".join(p).split()) < 110:
@@ -148,7 +162,7 @@ def generate_email(candidate, site, *, model_call=None):
             # claim about the recipient. After one model repair, assemble that
             # offer within budget while preserving the AI's company-specific
             # wedge, verified fact and operational consequence verbatim.
-            if attempt >= 1 and len(" ".join(p).split()) < 110:
+            if not 110 <= len(" ".join(p).split()) <= 120:
                 offers = (
                     "We can support one year of paid Japan market development.",
                     "We can support one year of paid Japan market development, from buyer validation through rollout planning.",
