@@ -445,15 +445,10 @@ def _record_attempt(sheets, *, run_id: str, candidate: dict, result: dict) -> No
         result["audit_log_error"] = f"{type(exc).__name__}:{exc}"
 
 
-def _assert_no_monetary_content(draft: dict) -> None:
-    """Keep initial outreach free of prices, budgets, and monetary comparisons."""
-    text = "\n".join(str(draft.get(key) or "") for key in ("subject", "body", "compact_body"))
-    if re.search(r"[$€£¥￥]|\b(?:USD|EUR|GBP|JPY)\b|\b\d[\d,.]*\s*(?:dollars?|euros?|yen)\b|\b(?:budget|pricing|price|fee|fees|trade show|exhibition cost)\b|金額|万円|億円|料金|予算", text, re.I):
-        raise ValueError("initial_outreach_monetary_content")
-
-
 def _persist_draft(sheets, run_id, candidate, result):
-    _assert_no_monetary_content(result['draft'])
+    from outreach_master import validate_email, verify_prompt_revision
+    validate_email(result['draft'])
+    verify_prompt_revision(result['draft'])
     review = result['draft'].get('message_review')
     if review is not None and review.get('decision') != 'APPROVED':
         raise ValueError('message_awaiting_user_review')
@@ -501,74 +496,9 @@ def _research_urls(site: dict, research: dict, form_url: str = "") -> list[str]:
 
 
 def _verified_site_draft(candidate: dict, site: dict) -> dict:
-    """Create a bounded test message from verified site evidence without an LLM wait."""
-    from pathlib import Path
-    campaign_path = Path(__file__).with_name("data") / "sacrifice_oss_campaign.json"
-    if campaign_path.exists():
-        for prepared in json.loads(campaign_path.read_text(encoding="utf-8")):
-            if (prepared.get("company_name") == candidate.get("company_name")
-                    and _host(prepared.get("website")) == _host(site.get("official_website"))
-                    and _host(prepared.get("website"))):
-                draft = {key: prepared.get(key, "") for key in ("subject", "body")}
-                draft["draft_source"] = "prepared_campaign_review"
-                draft["message_review"] = prepared.get("message_review", {})
-                _assert_no_monetary_content(draft)
-                return draft
-    company = str(candidate.get("company_name") or "").strip()
-    lane = str(candidate.get("sacrifice_lane") or "").strip().upper()
-    titles = [
-        str(page.get("title") or "").strip()
-        for page in site.get("pages", [])
-        if isinstance(page, dict) and str(page.get("title") or "").strip()
-    ]
-    reference = titles[0] if titles else str(candidate.get("company_description") or "").strip()
-    reference = re.sub(r"\s+", " ", reference).strip(" -|:")
-    if not reference:
-        reference = "your product and go-to-market work"
-    reference = reference[:120]
-    if lane == "SALES_GTM":
-        proposition = (
-            "A-one road helps international technology and business-services companies build Japan GTM through "
-            "customer discovery, partner development, and qualified first conversations "
-            "with Japanese buyers."
-        )
-    elif lane == "BPO":
-        proposition = (
-            "A-one road helps international BPO and business-services providers develop "
-            "Japan opportunities through customer discovery, partner development, and "
-            "qualified first conversations."
-        )
-    else:
-        proposition = (
-            "A-one road helps international software companies validate Japan through "
-            "identifying prospective customers, approaching local partners, and arranging first conversations with "
-            "Japanese retailers and e-commerce operators."
-        )
-    subject = f"Japan market opportunity for {company}"
-    body = (
-        f"Hi {company} team,\n\n"
-        "I’m Kazuma Tamura, Founder & CEO of A-one road in Japan. "
-        f"I’ve been reviewing the product information published on your official website, including “{reference}”.\n\n"
-        f"{proposition}\n\n"
-        "Would Japan customer discovery and local partner outreach fit "
-        "your current expansion priorities?\n\n"
-        "Would you be open to a 20–30 minute conversation? "
-        f"If so, you can choose a time here: {CALENDAR_URL}\n\n"
-        "If this is not relevant, please let us know and we will not follow up.\n\n"
-        "Best,\n"
-        "Kazuma Tamura\n"
-        "A-one road Co., Ltd.\n"
-        "Yokohama, Japan"
-    )
-    compact = (
-        f"Hi {company} team,\n\n"
-        "I'm Kazuma Tamura, Founder & CEO of A-one road in Japan. "
-        "We help international businesses explore Japan through customer discovery and partner development.\n\n"
-        "Could your partnerships team discuss whether this fits your Japan priorities? "
-        f"A 20-minute call: {CALENDAR_URL}\n\n"
-        "If irrelevant, let us know and we won't follow up.\nKazuma Tamura"
-    )
-    return {"subject": subject, "body": body, "compact_body": compact, "draft_source": "verified_site_template"}
+    """Compatibility entrypoint: every company now uses the shared AI generator."""
+    from outreach_master import generate_email
+    return generate_email(candidate, site)
 
 
 def _cfg_truthy(cfg: dict[str, str], key: str) -> bool:
@@ -905,12 +835,14 @@ def run_ten_sacrifice_batch(
                     ):
                         draft = _verified_site_draft(candidate, site)
                         prompt_meta = dict(prompt_meta or {})
-                        prompt_meta["draft_strategy"] = "verified_site_form_audit_template"
+                        prompt_meta["draft_strategy"] = "MASTER_AI"
                     else:
                         draft, prompt_meta = _draft_with_auto_repair(
                             llm, drive, cfg, context, form_contact, candidate, site, prompt_meta
                         )
                     form_url = form_links[0]
+                    from outreach_master import validate_email
+                    validate_email(draft)
                     draft_subject = str(draft.get("subject") or "")
                     draft_body = str(draft.get("body") or "")
                     result["prompt"] = {
@@ -1006,7 +938,7 @@ def run_ten_sacrifice_batch(
                         draft = _verified_site_draft(candidate, site)
                         prompt_meta = dict(prompt_meta or {})
                         if deterministic_draft:
-                            prompt_meta["generation_mode"] = "DETERMINISTIC_TEMPLATE"
+                            prompt_meta["generation_mode"] = "MASTER_AI"
                     else:
                         draft, prompt_meta = _draft_with_auto_repair(
                             llm, drive, cfg, context, contact, candidate, site, prompt_meta
@@ -1066,12 +998,14 @@ def run_ten_sacrifice_batch(
                         if executor is None:
                             raise RuntimeError("sacrifice_executor_not_configured")
                         _persist_draft(sheets, run_id, candidate, result)
+                        from outreach_master import verify_prompt_revision
+                        verify_prompt_revision(draft)
                         execution = executor.execute(row, cfg)
                         if execution.get("status") == "STALE_PROMPT":
                             if deterministic_draft:
                                 _, prompt_meta = drive.read_live_prompt_by_title(prompt_title)
                                 draft = _verified_site_draft(candidate, site)
-                                prompt_meta["generation_mode"] = "DETERMINISTIC_TEMPLATE"
+                                prompt_meta["generation_mode"] = "MASTER_AI"
                             else:
                                 draft, prompt_meta = _draft_from_live_prompt(
                                     llm, drive, cfg, context, contact
@@ -1088,6 +1022,9 @@ def run_ten_sacrifice_batch(
                                 "prompt_modified_time": prompt_meta.get("prompt_modified_time", ""),
                                 "prompt_hash": prompt_meta.get("prompt_hash", ""),
                             }
+                            from outreach_master import validate_email, verify_prompt_revision
+                            validate_email(draft)
+                            verify_prompt_revision(draft)
                             execution = executor.execute(row, cfg)
                         result["execution"] = execution
                         result["external_action"] = execution.get("status", "UNKNOWN")

@@ -1,0 +1,46 @@
+{
+  "candidate": {
+    "company_name": "Kimonix",
+    "website": "https://www.kimonix.com/",
+    "japan_research": {
+      "maturity_searches": [
+        {
+          "query": "\"Kimonix\" \"Japan\" customer partner",
+          "result": "No verified Japan-specific presence evidence retrieved; maturity remains UNKNOWN.",
+          "checked_at": "2026-09-18"
+        },
+        {
+          "query": "\"Kimonix\" \"日本\" 導入",
+          "result": "No verified Japan-specific customer evidence retrieved; absence is not inferred.",
+          "checked_at": "2026-09-18"
+        }
+      ],
+      "facts": [
+        {
+          "id": "mhlw-2026-05-wholesale-retail",
+          "text": "Japan’s May 2026 labour survey recorded staffing shortages at 34% of wholesale/retail establishments.",
+          "url": "https://www.mhlw.go.jp/toukei/itiran/roudou/koyou/keizai/2605/dl/7roudoukeizaidouko.pdf",
+          "retrieved_at": "2026-09-18",
+          "source_excerpt": "Table 3, May 2026: wholesale/retail regular-employee shortage 34%, excess 3%, shortage DI 31 points.",
+          "scope": "wholesale/retail, not apparel-specific"
+        }
+      ]
+    }
+  },
+  "site": {
+    "official_website": "https://www.kimonix.com/",
+    "pages": [
+      {
+        "url": "https://www.kimonix.com/",
+        "title": "AI Ecommerce Merchandising for Shopify",
+        "text": "Kimonix serves Shopify and Shopify Plus brands. Collection sorting can use business data instead of manual merchandising."
+      }
+    ]
+  },
+  "paragraphs": [
+    "We’re A-one Road, a Yokohama-based company supporting technology businesses in Japan. We see a specific opportunity for Kimonix in automating collection sorting for Japanese Shopify fashion retailers, which is why we’re reaching out.",
+    "Japan’s May 2026 labour survey recorded staffing shortages at 34% of wholesale/retail establishments. Automating repetitive collection sorting gives fashion teams a concrete way to reduce manual merchandising workloads.",
+    "We can lead a year of paid Japan market development: assess retailer requirements, shape a localized adoption plan, and develop partner channels around this workflow. Direct evidence from Japanese buyers will guide the practical introduction strategy and subsequent expansion. Can we help build Kimonix’s Japan rollout around this segment?"
+  ],
+  "note": "Human review example, not a runtime message lookup. Kimonix previous submission remains unresolved; no resend authorized."
+}
