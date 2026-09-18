@@ -63,12 +63,12 @@ def parse_listing(html: str, page_url: str) -> tuple[list[dict], int]:
     soup = BeautifulSoup(html, 'html.parser')
     if any(x in soup.get_text(' ', strip=True).lower() for x in ('verify you are human','just a moment...')):
         raise ValueError('source_challenge')
-    # Country tokens are extracted from this source's own filter, not inferred from names.
-    countries = ['United Kingdom','South Korea','Czech Republic','United States','Germany','France',
+    # Country suffixes printed by the source; unknown values stay unconfirmed.
+    countries = ['Republic Of Korea','Russia','United Kingdom','South Korea','Czech Republic','United States','Germany','France',
         'Italy','Austria','Belgium','Switzerland','Türkiye','Türki̇ye','Tayvan','China','Japan',
         'Hi̇ndi̇stan','İngi̇ltere','Netherlands','Poland','Portugal','Spain','Sweden','Finland',
         'Canada','Malaysia','Hungary','Bulgari̇stan','Bi̇rleşi̇k Arap Emi̇rli̇kleri̇']
-    mapping = {'tayvan':'Taiwan', 'türki̇ye':'Türkiye','hi̇ndi̇stan':'India','i̇ngi̇ltere':'United Kingdom'}
+    mapping = {'republic of korea':'South Korea','tayvan':'Taiwan', 'türki̇ye':'Türkiye','hi̇ndi̇stan':'India','i̇ngi̇ltere':'United Kingdom'}
     rows, pages = [], [1]
     for a in soup.find_all('a', href=True):
         url = urljoin(page_url, a['href'])
