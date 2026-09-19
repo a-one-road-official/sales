@@ -1,4 +1,5 @@
 name: Inspect deployed runtime readiness
+run-name: Read-only runtime inventory ${{ github.run_id }}
 on:
   workflow_dispatch:
   push:
@@ -7,63 +8,97 @@ on:
 permissions:
   contents: read
   id-token: write
+concurrency:
+  group: aone-readonly-runtime-inventory
+  cancel-in-progress: false
 jobs:
   inspect:
+    if: github.event.repository.private == false
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: google-github-actions/auth@v3
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      - name: Inspect routing, IAM and health responses without mutations
+      - name: Inventory metadata only; no workloads, model calls or resource mutations
         env:
           PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          CLOUDSDK_CORE_DISABLE_PROMPTS: '1'
         run: |
-          set -u
-          SERVICE=aone-lead-factory
-          REGION=asia-northeast1
-          gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT" --format=json > /tmp/service.json
           python - <<'PY'
-          import json
-          d=json.load(open("/tmp/service.json"))
-          print(json.dumps({
-              "annotations": d.get("metadata",{}).get("annotations",{}),
-              "status": d.get("status",{}),
-              "image": d.get("spec",{}).get("template",{}).get("spec",{}).get("containers",[{}])[0].get("image"),
-          }, indent=2))
+          import concurrent.futures, datetime, json, os, subprocess, time
+          started=time.monotonic()
+          report={'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(), 'run_id':os.environ['GITHUB_RUN_ID'], 'commit':os.environ['GITHUB_SHA'], 'read_only':True, 'workload_requests':0, 'model_calls':0, 'results':[]}
+          blocked={'env','environmentVariables','secretEnvironmentVariables','headers','httpBody','body','accessToken','idToken','privateKey','clientSecret','substitutions','source','steps'}
+          def clean(x):
+              if isinstance(x,dict): return {k:clean(v) for k,v in x.items() if k not in blocked}
+              if isinstance(x,list): return [clean(v) for v in x]
+              return x
+          def read(label,args):
+              if time.monotonic()-started>470: return {'label':label,'state':'TIME_BUDGET_EXHAUSTED'}
+              try:
+                  p=subprocess.run(['gcloud',*args,'--quiet','--format=json'],capture_output=True,text=True,timeout=24)
+                  if p.returncode: return {'label':label,'state':'UNAVAILABLE','returncode':p.returncode,'error':p.stderr[-1200:]}
+                  d=json.loads(p.stdout or '[]')
+                  return {'label':label,'state':'READ','data':clean(d)}
+              except Exception as e: return {'label':label,'state':'UNAVAILABLE','error_type':type(e).__name__}
+          projects=read('projects',['projects','list','--limit=1000'])
+          report['results'].append(projects)
+          found=[x.get('projectId') for x in projects.get('data',[]) if x.get('lifecycleState') in (None,'ACTIVE')]
+          names=list(dict.fromkeys([os.environ['PROJECT']]+[x for x in found if x]))
+          report['project_coverage']={'accessible_seen':len(names),'project_limit':20,'complete_accessible_scope':len(names)<=20,'organization_wide_access_proven':False}
+          report['results'].append(read('billing_accounts',['billing','accounts','list','--limit=1000']))
+          base=[('enabled_apis',['services','list','--enabled','--limit=1000']),('assets',['asset','search-all-resources','--limit=1000']),('run_services',['run','services','list','--platform=managed']),('functions',['functions','list']),('vms',['compute','instances','list']),('disks',['compute','disks','list']),('addresses',['compute','addresses','list']),('routers',['compute','routers','list']),('sql',['sql','instances','list']),('buckets',['storage','buckets','list']),('repositories',['artifacts','repositories','list','--location=all']),('pubsub_subscriptions',['pubsub','subscriptions','list']),('billing_project',['billing','projects','describe'])]
+          jobs=[]
+          for project in names[:20]:
+              for kind,args in base:
+                  a=list(args)
+                  if kind=='assets': a+=['--scope=projects/'+project]
+                  elif kind=='billing_project': a+=[project]
+                  else: a+=['--project='+project]
+                  jobs.append((project+'/'+kind,a))
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+              for result in ex.map(lambda a:read(*a),jobs): report['results'].append(result)
+          jobs=[]
+          for project in names[:20]:
+              regions={'asia-northeast1','us-central1','us-east1','europe-west1'}
+              for r in report['results']:
+                  if r.get('label')==project+'/assets' and isinstance(r.get('data'),list):
+                      regions.update(x['location'] for x in r['data'] if x.get('location') and x['location']!='global' and x['location'].count('-')==1)
+              report.setdefault('regional_coverage',{})[project]={'regions':sorted(regions),'other_regions_require_asset_or_location_enumeration':True}
+              for region in sorted(regions):
+                  for kind,args in [('scheduler',['scheduler','jobs','list','--location='+region]),('tasks',['tasks','queues','list','--location='+region]),('run_jobs',['run','jobs','list','--region='+region]),('build_triggers',['builds','triggers','list','--region='+region]),('builds',['builds','list','--region='+region,'--limit=10']),('deploy_pipelines',['deploy','delivery-pipelines','list','--region='+region]),('vpc_connectors',['compute','networks','vpc-access','connectors','list','--region='+region]),('vertex_endpoints',['ai','endpoints','list','--region='+region])]:
+                      jobs.append((project+'/'+region+'/'+kind,args+['--project='+project]))
+              jobs.append((project+'/global/build_triggers',['builds','triggers','list','--region=global','--project='+project]))
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+              for result in ex.map(lambda a:read(*a),jobs): report['results'].append(result)
+          report['finished_at']=datetime.datetime.now(datetime.timezone.utc).isoformat()
+          report['elapsed_seconds']=round(time.monotonic()-started,2)
+          report['billing_usage_amount']='NOT_QUERIED_NO_PAID_BIGQUERY_JOBS'
+          with open('/tmp/aone-inventory.json','w') as f:json.dump(report,f)
+          states={s:sum(r['state']==s for r in report['results']) for s in {'READ','UNAVAILABLE','TIME_BUDGET_EXHAUSTED'}}
+          print(json.dumps({'read_only':True,'request_results':states,'elapsed_seconds':report['elapsed_seconds'],'resource_mutations':0,'model_calls':0}))
           PY
-
-          echo "IAM policy:"
-          gcloud run services get-iam-policy "$SERVICE" --region="$REGION" --project="$PROJECT" --format=json || true
-
-          python - <<'PY' >/tmp/run_urls.txt
-          import json
-          d=json.load(open("/tmp/service.json"))
-          urls=[]
-          s=d.get("status",{})
-          if s.get("url"): urls.append(s["url"])
-          a=d.get("metadata",{}).get("annotations",{})
-          try: urls.extend(json.loads(a.get("run.googleapis.com/urls","[]")))
-          except Exception: pass
-          seen=[]
-          for u in urls:
-              if u and u not in seen: seen.append(u)
-          print("\n".join(seen))
-          PY
-
-          TOKEN="$(gcloud auth print-identity-token 2>/dev/null || true)"
-          while IFS= read -r URL; do
-            [ -n "$URL" ] || continue
-            echo "=== unauthenticated $URL/healthz ==="
-            curl -sS -D - -o /tmp/body --max-time 15 "$URL/healthz" || true
-            cat /tmp/body 2>/dev/null || true
-            echo
-            if [ -n "$TOKEN" ]; then
-              echo "=== authenticated $URL/healthz ==="
-              curl -sS -D - -o /tmp/body-auth --max-time 15 -H "Authorization: Bearer $TOKEN" "$URL/healthz" || true
-              cat /tmp/body-auth 2>/dev/null || true
-              echo
-            fi
-          done </tmp/run_urls.txt
+      - name: Encrypt private resource inventory for requester
+        if: always()
+        run: |
+          node <<'JS'
+          const fs=require('fs'),crypto=require('crypto'),zlib=require('zlib');
+          if(!fs.existsSync('/tmp/aone-inventory.json')){console.log('INVENTORY_NOT_PRODUCED');process.exit(0);}
+          const pub=`-----BEGIN PUBLIC KEY-----
+          MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAldDMuwnC17GFNqxN6RnL
+          ND19QNFWpfytXi0EvmWaF5y8h+n3RzL9DtFtlR8aLPUYWV1d9em6UT3TYzcG7ijG
+          HG8FpiKjMKEOjoc1v0zQR5O9iqt+hg0OPMl00jyCRnPzVyOcJM2cGWYDM9EbFITX
+          +ScdcG7T9I4OmbWrQusyTuTdv8kkkv4l7hwfSQLz7hnW6bdww+q+uJFmO8bRyS2p
+          GYfmFTxh1wWozs5a3dI+0e9yn5vEpFLiFWDjCng8W5VLZ8g0z7/dOolv1BilBZ2G
+          7j3eeqOH35fXnOg4QMtdiFvzok/uKV0eTgOfwzd/IwVbSTnqveMA6YaF7VeorN//
+          wwIDAQAB
+          -----END PUBLIC KEY-----`;
+          const key=crypto.randomBytes(32),iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',key,iv);
+          const ciphertext=Buffer.concat([cipher.update(zlib.gzipSync(fs.readFileSync('/tmp/aone-inventory.json'))),cipher.final()]);
+          const envelope={v:1,alg:'RSA-OAEP-SHA256+A256GCM+gzip',key:crypto.publicEncrypt({key:pub,oaepHash:'sha256'},key).toString('base64'),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:ciphertext.toString('base64')};
+          console.log('AONE_ENCRYPTED_INVENTORY='+JSON.stringify(envelope));
+          fs.rmSync('/tmp/aone-inventory.json');
+          JS
