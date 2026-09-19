@@ -1,7 +1,6 @@
-name: Inspect deployed runtime readiness
-run-name: Legacy standby verification ${{ github.run_id }}
+name: Reduce verified legacy standby minimum
+run-name: Legacy standby reduction ${{ github.run_id }}
 on:
-  workflow_dispatch:
   push:
     branches: [main]
     paths: [".github/workflows/inspect_runtime_readiness.yml"]
@@ -12,61 +11,68 @@ concurrency:
   group: aone-readonly-runtime-inventory
   cancel-in-progress: false
 jobs:
-  inspect:
-    if: github.event.repository.private == false && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'AUDIT_IDLE_20260920:'))
+  reduce-standby:
+    if: github.event.repository.private == false && startsWith(github.event.head_commit.message, 'REDUCE_LEGACY_STANDBY_20260920:')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
       - uses: google-github-actions/auth@v3
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      - name: Read revision flags, recent request metadata and code references
+      - name: Verify unchanged legacy targets and remove service-level warm minimum
         env:
           PROJECT: ${{ secrets.GCP_PROJECT_ID }}
           CLOUDSDK_CORE_DISABLE_PROMPTS: '1'
         run: |
           python - <<'PY'
-          import concurrent.futures,datetime,json,os,pathlib,subprocess
-          services=['aone-bpo-autopilot','aone-lead-factory','aone-lead-factory-approved-sacrifice','aone-lead-factory-sacrifice']
-          flags={'LEAD_FACTORY_ENABLED','LEAD_FACTORY_LIST_ONLY_LOCK','LEAD_FACTORY_ALLOW_EXTERNAL_WRITE','LEAD_FACTORY_SEND_MODE','LEAD_FACTORY_VERTEX_ALLOWED','AONE_PAID_CLOUD_ALLOWED','AONE_PAID_AI_ALLOWED','OUTREACH_AUTOPILOT_ENABLED','OUTREACH_AUTOPILOT_AUTOSTART','LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED','OUTREACH_SACRIFICE_SEND_ENABLED','OUTREACH_BPO_SEND_ENABLED','OUTREACH_SALES_GTM_SEND_ENABLED','OUTREACH_EMAIL_TRANSPORT','LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME'}
-          since=(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=48)).isoformat()
-          def run(args):
-              try:
-                  p=subprocess.run(['gcloud',*args,'--project='+os.environ['PROJECT'],'--quiet','--format=json'],capture_output=True,text=True,timeout=25)
-                  return {'state':'READ','data':json.loads(p.stdout or '[]')} if p.returncode==0 else {'state':'UNAVAILABLE','error':p.stderr[-650:]}
-              except Exception as e:return {'state':'UNAVAILABLE','error_type':type(e).__name__}
-          def inspect(name):
-              r=run(['run','services','describe',name,'--region=asia-northeast1'])
-              if r['state']=='READ':
-                  d=r.pop('data');t=d.get('spec',{}).get('template',{});s=d.get('status',{})
-                  r['metadata']={k:d.get('metadata',{}).get(k) for k in ['name','generation','creationTimestamp']}
-                  r['annotations']={k:v for k,v in d.get('metadata',{}).get('annotations',{}).items() if 'Scale' in k or 'ingress' in k or 'scaling' in k}
-                  r['template_annotations']={k:v for k,v in t.get('metadata',{}).get('annotations',{}).items() if 'Scale' in k or 'cpu-throttling' in k}
-                  r['containers']=[{'image':c.get('image'),'flags':{v['name']:v.get('value') for v in c.get('env',[]) if v['name'] in flags},'resources':c.get('resources')} for c in t.get('spec',{}).get('containers',[])]
-                  r['serviceAccount']=t.get('spec',{}).get('serviceAccountName')
-                  r['latestReadyRevisionName']=s.get('latestReadyRevisionName');r['traffic']=s.get('traffic')
-              q='resource.type="cloud_run_revision" AND resource.labels.service_name="'+name+'" AND logName:"run.googleapis.com%2Frequests" AND timestamp>="'+since+'"'
-              logs=run(['logging','read',q,'--limit=20','--order=desc'])
-              if logs['state']=='READ':logs['data']=[{'timestamp':x.get('timestamp'),'status':x.get('httpRequest',{}).get('status'),'method':x.get('httpRequest',{}).get('requestMethod')} for x in logs['data']]
-              return {'service':name,'configuration':r,'recent_requests':logs}
-          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool: results=list(pool.map(inspect,services))
-          refs={n:[] for n in services}
-          for p in subprocess.check_output(['git','ls-files'],text=True).splitlines():
-              f=pathlib.Path(p)
-              if not f.is_file() or f.stat().st_size>2000000 or p=='.github/workflows/inspect_runtime_readiness.yml':continue
-              t=f.read_text(errors='replace')
-              for n in services:
-                  if n in t:refs[n].append(p)
-          report={'run_id':os.environ['GITHUB_RUN_ID'],'results':results,'code_references':refs,'since':since,'resource_mutations':0,'model_calls':0}
+          import datetime,hashlib,json,os,pathlib,subprocess
+          targets={'aone-lead-factory-approved-sacrifice':'aone-lead-factory-approved-sacrifice-00010-7dx','aone-lead-factory-sacrifice':'aone-lead-factory-sacrifice-00016-nm2'}
+          report={'run_id':os.environ['GITHUB_RUN_ID'],'started_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),'scope':'service-level minScale 1 to 0 only','results':[],'customer_sends':0,'model_calls':0}
+          def command(args,timeout=30):
+              return subprocess.run(['gcloud','run','services',*args,'--region=asia-northeast1','--project='+os.environ['PROJECT'],'--quiet','--format=json'],capture_output=True,text=True,timeout=timeout)
+          def get(name):
+              p=command(['describe',name])
+              if p.returncode: raise RuntimeError('describe_failed:'+name+':'+p.stderr[-400:])
+              return json.loads(p.stdout)
+          def digest(d):return hashlib.sha256(json.dumps(d.get('spec'),sort_keys=True).encode()).hexdigest()
+          before={}
+          try:
+              for name,revision in targets.items():
+                  d=get(name);a=d['metadata'].get('annotations',{});t=d['spec']['template'];env={x['name']:x.get('value','') for c in t['spec']['containers'] for x in c.get('env',[])}
+                  assert d['metadata']['name']==name and d['status']['latestReadyRevisionName']==revision,'revision_changed'
+                  assert a.get('run.googleapis.com/minScale')=='1','standby_min_changed'
+                  assert t.get('metadata',{}).get('annotations',{}).get('autoscaling.knative.dev/minScale','0')=='0','revision_min_requires_separate_review'
+                  assert env.get('LEAD_FACTORY_ALLOW_EXTERNAL_WRITE')=='FALSE','external_writes_not_disabled'
+                  assert env.get('LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED')=='FALSE','supervisor_not_disabled'
+                  assert env.get('OUTREACH_AUTOPILOT_ENABLED','FALSE')=='FALSE','autopilot_not_disabled'
+                  before[name]=d
+              for name,revision in targets.items():
+                  d=get(name)
+                  assert digest(d)==digest(before[name]) and d['metadata']['generation']==before[name]['metadata']['generation'],'concurrent_change_detected'
+                  item={'service':name,'before_min':1,'revision':revision,'before_spec_hash':digest(d)}
+                  try:
+                      p=command(['update',name,'--min=0'],timeout=100)
+                      item['command_returncode']=p.returncode
+                      if p.returncode:item['error']=p.stderr[-500:]
+                  except Exception as e:item['error']=str(e)[:500]
+                  after=get(name)
+                  item['after_min']=int(after['metadata'].get('annotations',{}).get('run.googleapis.com/minScale','0'))
+                  item['spec_unchanged']=digest(after)==digest(d)
+                  item['revision_unchanged']=after['status']['latestReadyRevisionName']==revision
+                  item['verified']=item['after_min']==0 and item['spec_unchanged'] and item['revision_unchanged']
+                  item['verified_at']=datetime.datetime.now(datetime.timezone.utc).isoformat()
+                  report['results'].append(item)
+                  if not item['verified']:raise RuntimeError('readback_not_verified:'+name)
+          except Exception as e:report['error']=str(e)[:700]
+          report['finished_at']=datetime.datetime.now(datetime.timezone.utc).isoformat()
           pathlib.Path('/tmp/aone-inventory.json').write_text(json.dumps(report,separators=(',',':')))
-          print('READ_ONLY_COMPLETE services='+str(len(results))+' resource_mutations=0 model_calls=0')
+          verified=sum(x.get('verified') is True for x in report['results'])
+          print('STANDBY_REDUCTION='+json.dumps({'targets':2,'verified_min_zero':verified,'customer_sends':0,'model_calls':0,'has_error':'error' in report}))
+          if verified!=2:raise SystemExit(1)
           PY
-      - name: Return encrypted private inventory
+      - name: Return encrypted change evidence
         if: always()
         run: |
           node <<'JS'
