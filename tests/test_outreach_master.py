@@ -42,7 +42,7 @@ def test_runtime_validation_rejects_forbidden_copy():
     draft = valid_draft()
     draft["body"] = draft["body"].replace(
         "Can we help build Kimonix’s Japan rollout around this segment?",
-        "Can we book a call about Kimonix’s Japan rollout?",
+        "Can we book a call and build Kimonix’s Japan rollout around this segment?",
     )
     with pytest.raises(ValueError, match="FORBIDDEN_COPY"):
         m.validate_email(draft)
