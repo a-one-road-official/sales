@@ -129,18 +129,6 @@ def _hash(*values: object) -> str:
     return hashlib.sha256("\n".join(str(v or "") for v in values).encode("utf-8")).hexdigest()
 
 
-def _draft_from_live_prompt(llm, drive, cfg: dict[str, str], company: dict, contact: dict) -> tuple[dict, dict]:
-    """Read, generate, and re-read until the Prompt revision is stable."""
-    title = str(cfg.get("OUTREACH_PROMPT_DOC_TITLE") or PROMPT_DOC_TITLE).strip()
-    for _ in range(3):
-        prompt, metadata = drive.read_live_prompt_by_title(title)
-        draft = llm.draft_outreach_email(prompt, company, contact)
-        _, latest = drive.read_live_prompt_by_title(title)
-        if latest.get("prompt_hash") == metadata.get("prompt_hash"):
-            return draft, latest
-    raise RuntimeError("PROMPT_CHANGED_DURING_DRAFT")
-
-
 def _bounded_limit(limit: int) -> int:
     value = int(limit)
     if value < 1 or value > 10:
@@ -537,48 +525,17 @@ def _with_prepared_contact_evidence(candidate: dict, site: dict) -> dict:
 
 
 def _verified_site_draft(candidate: dict, site: dict) -> dict:
-    """Compatibility entrypoint: every company now uses the shared AI generator."""
-    if os.getenv('OUTREACH_PREPARED_DRAFTS_ONLY', '').upper() == 'TRUE':
-        from outreach_queue import load_prepared_draft
-        return load_prepared_draft(candidate, site)
-    from outreach_master import generate_email
-    from japan_research import research_company
-    if not site.get("japan_research"):
-        site["japan_research"] = research_company(candidate, site)
-    return generate_email(candidate, site)
+    """Load the single ChatGPT-generated draft; runtime never generates copy."""
+    if os.getenv("OUTREACH_PREPARED_DRAFTS_ONLY", "").upper() != "TRUE":
+        raise RuntimeError("prepared_chatgpt_draft_required")
+    from outreach_queue import load_prepared_draft
+    return load_prepared_draft(candidate, site)
 
 
 def _cfg_truthy(cfg: dict[str, str], key: str) -> bool:
     return str(cfg.get(key, os.getenv(key, "FALSE")) or "").strip().upper() in {
         "TRUE", "1", "YES", "ON"
     }
-
-
-def _draft_with_auto_repair(
-    llm,
-    drive,
-    cfg: dict[str, str],
-    context: dict,
-    contact: dict,
-    candidate: dict,
-    site: dict,
-    fallback_meta: dict,
-) -> tuple[dict, dict]:
-    """Retry generation through a verified-site fallback selected by the loop."""
-    # Vertex/Gemini is forbidden for the EC lane. Keep this function safe even
-    # if a caller accidentally reaches it with the global budget flag closed.
-    if not _cfg_truthy(cfg, "LEAD_FACTORY_VERTEX_ALLOWED"):
-        fallback = _verified_site_draft(candidate, site)
-        fallback["autofix_reason"] = "vertex_forbidden_by_policy"
-        return fallback, dict(fallback_meta or {})
-    try:
-        return _draft_from_live_prompt(llm, drive, cfg, context, contact)
-    except Exception as exc:
-        if not _cfg_truthy(cfg, "OUTREACH_AUTOFIX_GENERATION"):
-            raise
-        fallback = _verified_site_draft(candidate, site)
-        fallback["autofix_reason"] = f"{type(exc).__name__}:{exc}"[:1000]
-        return fallback, dict(fallback_meta or {})
 
 
 def run_ten_sacrifice_batch(
@@ -888,11 +845,11 @@ def run_ten_sacrifice_batch(
                     ):
                         draft = _verified_site_draft(candidate, site)
                         prompt_meta = dict(prompt_meta or {})
-                        prompt_meta["draft_strategy"] = "MASTER_AI"
+                        prompt_meta["draft_strategy"] = "CHATGPT_PREPARED_ONLY"
                     else:
-                        draft, prompt_meta = _draft_with_auto_repair(
-                            llm, drive, cfg, context, form_contact, candidate, site, prompt_meta
-                        )
+                        draft = _verified_site_draft(candidate, site)
+                        prompt_meta = dict(prompt_meta or {})
+                        prompt_meta["generation_mode"] = "CHATGPT_PREPARED_ONLY"
                     form_url = form_links[0]
                     from outreach_master import validate_email
                     validate_email(draft)
@@ -997,11 +954,11 @@ def run_ten_sacrifice_batch(
                         draft = _verified_site_draft(candidate, site)
                         prompt_meta = dict(prompt_meta or {})
                         if deterministic_draft:
-                            prompt_meta["generation_mode"] = "MASTER_AI"
+                            prompt_meta["generation_mode"] = "CHATGPT_PREPARED_ONLY"
                     else:
-                        draft, prompt_meta = _draft_with_auto_repair(
-                            llm, drive, cfg, context, contact, candidate, site, prompt_meta
-                        )
+                        draft = _verified_site_draft(candidate, site)
+                        prompt_meta = dict(prompt_meta or {})
+                        prompt_meta["generation_mode"] = "CHATGPT_PREPARED_ONLY"
                     draft_subject = str(draft.get("subject") or "")
                     draft_body = str(draft.get("body") or "")
                     row = {
@@ -1074,14 +1031,9 @@ def run_ten_sacrifice_batch(
                         else:
                             execution = executor.execute(row, cfg)
                         if execution.get("status") == "STALE_PROMPT":
-                            if deterministic_draft:
-                                _, prompt_meta = drive.read_live_prompt_by_title(prompt_title)
+                            _, prompt_meta = drive.read_live_prompt_by_title(prompt_title)
                                 draft = _verified_site_draft(candidate, site)
-                                prompt_meta["generation_mode"] = "MASTER_AI"
-                            else:
-                                draft, prompt_meta = _draft_from_live_prompt(
-                                    llm, drive, cfg, context, contact
-                                )
+                                prompt_meta["generation_mode"] = "CHATGPT_PREPARED_ONLY"
                             row.update(
                                 subject=draft["subject"],
                                 body=draft["body"],
