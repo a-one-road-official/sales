@@ -549,6 +549,7 @@ def run_ten_sacrifice_batch(
     batch_id: str | None = None,
     batch_slot: int | None = None,
     lane: str = "EC_SACRIFICE",
+    candidate_rows: list[dict] | None = None,
 ):
     limit = _bounded_limit(limit)
     normalized_lane = str(lane or "EC_SACRIFICE").strip().upper()
@@ -569,7 +570,11 @@ def run_ten_sacrifice_batch(
         normalized_lane == "SALES_GTM"
         and _cfg_truthy(cfg, "OUTREACH_FAST_SALES_GTM_MODE")
     )
-    rows = load_rows_for_lane(normalized_lane, sheets=sheets)
+    rows = (
+        [dict(row) for row in candidate_rows]
+        if candidate_rows is not None
+        else load_rows_for_lane(normalized_lane, sheets=sheets)
+    )
     eligible_company_ids = {
         str(row.get("company_id") or "").strip()
         for row in rows
