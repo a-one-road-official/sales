@@ -90,6 +90,10 @@ def select_prepared(snapshot, *, permit, check_record, lane="AUTO", batch_size=1
         # Internal fields are never printed or uploaded. They do not grant permission.
         "_company_ids": [key for key, _ in selected],
         "_targets": [target for _, target in selected],
+        "_selected_rows": [
+            row for row in snapshot["companies"]
+            if row.get("company_id") in {key for key, _ in selected}
+        ],
     }
 
 
@@ -235,7 +239,7 @@ def main():
     if args.mode == "plan":
         from google.auth import default
         from googleapiclient.discovery import build
-        from workbook_sales import WorkbookReader
+        from workbook_sales import WorkbookReader, outbound_candidate
         from contact_policy import block_reason
         from outreach_queue import read_prepared_record
         creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"])
@@ -245,6 +249,14 @@ def main():
             permit=lambda r: block_reason(r["company_id"], r["company_name"], r["website"], r["lane"]),
             check_record=read_prepared_record)
         _print_summary(public_plan(plan), "cycle-summary.json")
+        private_plan = {
+            "lane": plan["lane"],
+            "companies": [outbound_candidate(row) for row in plan["_selected_rows"]],
+        }
+        Path("cycle-plan-private.json").write_text(
+            json.dumps(private_plan, ensure_ascii=False),
+            encoding="utf-8",
+        )
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
             handle.write("active=" + str(bool(plan["selected_count"])).lower() + "\n")
         if plan["selected_count"]:
@@ -253,6 +265,10 @@ def main():
                 handle.write("OUTREACH_SACRIFICE_TARGET_COMPANIES=" + "|".join(plan["_targets"]) + "\n")
         return 0
     lane = os.environ["INSPECTION_LANE"]
+    private_plan = json.loads(Path("cycle-plan-private.json").read_text(encoding="utf-8"))
+    if private_plan.get("lane") != lane:
+        raise RuntimeError("cycle_plan_lane_mismatch")
+    planned_companies = list(private_plan.get("companies") or [])
     payload = {
         "lane": lane,
         "limit": bounded_batch(args.batch_size),
@@ -294,6 +310,7 @@ def main():
             limit=payload["limit"],
             batch_id=payload["batch_id"],
             lane=lane,
+            candidate_rows=planned_companies,
         )
         summary = classify_batch(batch)
     except Exception as exc:
