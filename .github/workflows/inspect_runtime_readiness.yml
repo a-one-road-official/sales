@@ -1,5 +1,5 @@
 name: Inspect deployed runtime readiness
-run-name: KISS retirement inventory ${{ github.run_id }}
+run-name: Legacy standby verification ${{ github.run_id }}
 on:
   workflow_dispatch:
   push:
@@ -13,97 +13,58 @@ concurrency:
   cancel-in-progress: false
 jobs:
   inspect:
-    if: github.event.repository.private == false && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'AUDIT_KISS_20260920:'))
+    if: github.event.repository.private == false && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'AUDIT_IDLE_20260920:'))
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Static repository inventory without importing application code
-        run: |
-          python - <<'PY'
-          import ast, collections, json, pathlib, re, subprocess
-          paths=subprocess.check_output(['git','ls-files'],text=True).splitlines()
-          files={p:pathlib.Path(p).read_text(errors='replace') for p in paths if pathlib.Path(p).is_file() and pathlib.Path(p).stat().st_size<2000000}
-          py={p:t for p,t in files.items() if p.endswith('.py')}
-          mods={p[:-3].replace('/','.'):p for p in py}
-          deps={}
-          for p,t in py.items():
-              found=set()
-              for n in ast.walk(ast.parse(t)):
-                  names=[]
-                  if isinstance(n,ast.Import): names=[a.name for a in n.names]
-                  if isinstance(n,ast.ImportFrom):
-                      base=(p.split('/')[:-n.level] if n.level else [])
-                      m='.'.join(base+([n.module] if n.module else [])) if n.level else (n.module or '')
-                      names=[m]+[m+'.'+a.name for a in n.names]
-                  found.update(mods[x] for x in names if x in mods)
-              deps[p]=sorted(found)
-          def closure(root):
-              seen=set(); todo=[root]
-              while todo:
-                  p=todo.pop()
-                  if p in seen: continue
-                  seen.add(p); todo.extend(deps.get(p,[]))
-              return sorted(seen)
-          workflows=[]
-          for p,t in files.items():
-              if not p.startswith('.github/workflows/') or not p.endswith(('.yml','.yaml')): continue
-              name=p.rsplit('/',1)[-1]
-              refs=[q for q,u in files.items() if q!=p and name in u]
-              workflows.append({'path':p,'lines':len(t.splitlines()),'cron':re.findall(r"cron:\s*([^\n]+)",t),'has_push':bool(re.search(r'^  push:',t,re.M)),'false_job_markers':len(re.findall(r'if:\s*(?:\$\{\{\s*)?false',t)),'referenced_by':refs,'small_definition':t if len(t)<650 else None})
-          result={'commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),'files':len(paths),'python_files':len(py),'python_lines':sum(len(t.splitlines()) for t in py.values()),'workflows':workflows,'dependencies':{r:closure(r) for r in ['main.py','outreach_cycle.py','refinery/worker.py','lead_generator/scheduled.py']},'runtime_imported':False}
-          print('STATIC_INVENTORY='+json.dumps(result,separators=(',',':')))
-          PY
       - uses: google-github-actions/auth@v3
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      - name: Read Cloud metadata only
+      - name: Read revision flags, recent request metadata and code references
         env:
           PROJECT: ${{ secrets.GCP_PROJECT_ID }}
           CLOUDSDK_CORE_DISABLE_PROMPTS: '1'
         run: |
           python - <<'PY'
-          import concurrent.futures, datetime, json, os, subprocess, time
-          start=time.monotonic()
-          report={'run_id':os.environ['GITHUB_RUN_ID'],'read_only':True,'results':[],'organization_wide_access_proven':False}
-          allowed={'name','projectId','lifecycleState','state','displayName','location','region','zone','sizeGb','status','schedule','timeZone','paused','billingEnabled','billingAccountName','open','createTime','updateTime','uri','target','serviceAccount','repositoryId','format','mode','diskSizeGb','minInstances','maxInstances','minInstanceCount','maxInstanceCount','cpuIdle','cpu','memory','annotations','labels','metadata','template','containers','resources','limits','spec','scaling','latestReadyRevisionName','latestCreatedRevisionName','traffic','revisionName','percent','lastAttemptTime','lastExecution','deployedModels','machineSpec','machineType','minReplicaCount','maxReplicaCount','httpTarget','appEngineHttpTarget','pubsubTarget','topicName','pushConfig','pushEndpoint','rateLimits','retryConfig','run.googleapis.com/ingress','run.googleapis.com/cpu-throttling','run.googleapis.com/minScale','autoscaling.knative.dev/minScale','autoscaling.knative.dev/maxScale','cloud.googleapis.com/location'}
-          def trim(v):
-              if isinstance(v,dict): return {k:trim(w) for k,w in v.items() if k in allowed}
-              if isinstance(v,list): return [trim(w) for w in v]
-              return v
-          def read(label,args):
-              if time.monotonic()-start>330: return {'label':label,'state':'TIME_LIMIT'}
+          import concurrent.futures,datetime,json,os,pathlib,subprocess
+          services=['aone-bpo-autopilot','aone-lead-factory','aone-lead-factory-approved-sacrifice','aone-lead-factory-sacrifice']
+          flags={'LEAD_FACTORY_ENABLED','LEAD_FACTORY_LIST_ONLY_LOCK','LEAD_FACTORY_ALLOW_EXTERNAL_WRITE','LEAD_FACTORY_SEND_MODE','LEAD_FACTORY_VERTEX_ALLOWED','AONE_PAID_CLOUD_ALLOWED','AONE_PAID_AI_ALLOWED','OUTREACH_AUTOPILOT_ENABLED','OUTREACH_AUTOPILOT_AUTOSTART','LEAD_FACTORY_AUTONOMY_SUPERVISOR_ENABLED','OUTREACH_SACRIFICE_SEND_ENABLED','OUTREACH_BPO_SEND_ENABLED','OUTREACH_SALES_GTM_SEND_ENABLED','OUTREACH_EMAIL_TRANSPORT','LEAD_FACTORY_ISOLATED_SACRIFICE_RUNTIME'}
+          since=(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(hours=48)).isoformat()
+          def run(args):
               try:
-                  p=subprocess.run(['gcloud',*args,'--quiet','--format=json'],capture_output=True,text=True,timeout=20)
-                  if p.returncode: return {'label':label,'state':'UNAVAILABLE','error':p.stderr[-550:]}
-                  data=json.loads(p.stdout or '[]')
-                  return {'label':label,'state':'READ','count':len(data) if isinstance(data,list) else 1,'data':trim(data)}
-              except Exception as e: return {'label':label,'state':'UNAVAILABLE','error_type':type(e).__name__}
-          projects=read('projects',['projects','list','--limit=100'])
-          report['results'].append(projects)
-          names=list(dict.fromkeys([os.environ['PROJECT']]+[x.get('projectId') for x in projects.get('data',[]) if x.get('projectId') and x.get('lifecycleState') in (None,'ACTIVE')]))
-          report['accessible_projects']=len(names);report['project_cap']=5
-          base=[('services',['services','list','--enabled','--limit=500']),('assets',['asset','search-all-resources','--limit=1000']),('run_services',['run','services','list','--platform=managed']),('vms',['compute','instances','list']),('disks',['compute','disks','list']),('addresses',['compute','addresses','list']),('sql',['sql','instances','list']),('buckets',['storage','buckets','list']),('artifacts',['artifacts','repositories','list','--location=all']),('subscriptions',['pubsub','subscriptions','list'])]
-          jobs=[]
-          for project in names[:5]:
-              for kind,args in base:
-                  extra=['--scope=projects/'+project] if kind=='assets' else ['--project='+project]
-                  jobs.append((project+'/'+kind,args+extra))
-              jobs.append((project+'/billing',['billing','projects','describe',project]))
-              for region in ['asia-northeast1','us-central1','us-east1','europe-west1']:
-                  for kind,args in [('scheduler',['scheduler','jobs','list','--location='+region]),('tasks',['tasks','queues','list','--location='+region]),('run_jobs',['run','jobs','list','--region='+region]),('build_triggers',['builds','triggers','list','--region='+region]),('pipelines',['deploy','delivery-pipelines','list','--region='+region]),('vertex_endpoints',['ai','endpoints','list','--region='+region]),('vpc',['compute','networks','vpc-access','connectors','list','--region='+region])]:
-                      jobs.append((project+'/'+region+'/'+kind,args+['--project='+project]))
-              jobs.append((project+'/global/build_triggers',['builds','triggers','list','--region=global','--project='+project]))
-          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex: report['results'].extend(ex.map(lambda a:read(*a),jobs))
-          report['finished_at']=datetime.datetime.now(datetime.timezone.utc).isoformat()
-          report['scope']='Accessible projects, at most 5; four named regions; truncated or unavailable results remain unverified.'
-          report['billing_amount']='NOT_QUERIED';report['resource_mutations']=0;report['model_calls']=0
-          with open('/tmp/aone-inventory.json','w') as f: json.dump(report,f,separators=(',',':'))
-          print('CLOUD_READ_SUMMARY='+json.dumps({'read':sum(x['state']=='READ' for x in report['results']),'unavailable':sum(x['state']=='UNAVAILABLE' for x in report['results']),'seconds':round(time.monotonic()-start,2),'resource_mutations':0,'model_calls':0}))
+                  p=subprocess.run(['gcloud',*args,'--project='+os.environ['PROJECT'],'--quiet','--format=json'],capture_output=True,text=True,timeout=25)
+                  return {'state':'READ','data':json.loads(p.stdout or '[]')} if p.returncode==0 else {'state':'UNAVAILABLE','error':p.stderr[-650:]}
+              except Exception as e:return {'state':'UNAVAILABLE','error_type':type(e).__name__}
+          def inspect(name):
+              r=run(['run','services','describe',name,'--region=asia-northeast1'])
+              if r['state']=='READ':
+                  d=r.pop('data');t=d.get('spec',{}).get('template',{});s=d.get('status',{})
+                  r['metadata']={k:d.get('metadata',{}).get(k) for k in ['name','generation','creationTimestamp']}
+                  r['annotations']={k:v for k,v in d.get('metadata',{}).get('annotations',{}).items() if 'Scale' in k or 'ingress' in k or 'scaling' in k}
+                  r['template_annotations']={k:v for k,v in t.get('metadata',{}).get('annotations',{}).items() if 'Scale' in k or 'cpu-throttling' in k}
+                  r['containers']=[{'image':c.get('image'),'flags':{v['name']:v.get('value') for v in c.get('env',[]) if v['name'] in flags},'resources':c.get('resources')} for c in t.get('spec',{}).get('containers',[])]
+                  r['serviceAccount']=t.get('spec',{}).get('serviceAccountName')
+                  r['latestReadyRevisionName']=s.get('latestReadyRevisionName');r['traffic']=s.get('traffic')
+              q='resource.type="cloud_run_revision" AND resource.labels.service_name="'+name+'" AND logName:"run.googleapis.com%2Frequests" AND timestamp>="'+since+'"'
+              logs=run(['logging','read',q,'--limit=20','--order=desc'])
+              if logs['state']=='READ':logs['data']=[{'timestamp':x.get('timestamp'),'status':x.get('httpRequest',{}).get('status'),'method':x.get('httpRequest',{}).get('requestMethod')} for x in logs['data']]
+              return {'service':name,'configuration':r,'recent_requests':logs}
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool: results=list(pool.map(inspect,services))
+          refs={n:[] for n in services}
+          for p in subprocess.check_output(['git','ls-files'],text=True).splitlines():
+              f=pathlib.Path(p)
+              if not f.is_file() or f.stat().st_size>2000000 or p=='.github/workflows/inspect_runtime_readiness.yml':continue
+              t=f.read_text(errors='replace')
+              for n in services:
+                  if n in t:refs[n].append(p)
+          report={'run_id':os.environ['GITHUB_RUN_ID'],'results':results,'code_references':refs,'since':since,'resource_mutations':0,'model_calls':0}
+          pathlib.Path('/tmp/aone-inventory.json').write_text(json.dumps(report,separators=(',',':')))
+          print('READ_ONLY_COMPLETE services='+str(len(results))+' resource_mutations=0 model_calls=0')
           PY
       - name: Return encrypted private inventory
         if: always()
