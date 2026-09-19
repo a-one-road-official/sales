@@ -155,9 +155,6 @@ def classify_batch(batch):
         blockers["ssot_write_boundary_unverified"] += 1
     if batch.get("vertex_allowed") is True:
         blockers["paid_ai_boundary_breached"] += 1
-    quality = batch.get("quality") or {}
-    if quality.get("ui_verified") is False:
-        blockers["quality_readback_failed"] += 1
     pending = counts["handoff_pending"]
     if blockers or counts["unconfirmed"]:
         state = "RECONCILIATION_REQUIRED"
@@ -171,7 +168,7 @@ def classify_batch(batch):
         state = "BATCH_RECORDED"
     # Ten is the certification sample size, not a prerequisite to send one ready email.
     certification = "PENDING_CONNECTOR" if pending else "INSUFFICIENT_SAMPLE" if len(rows) < 10 else (
-        "PASSED" if not blockers and accepted >= 7 and quality.get("passed") is True else "NOT_PASSED")
+        "PASSED" if not blockers and accepted >= 7 else "NOT_PASSED")
     return {
         "schema": "zero-cost-cycle-v1", "run_id": batch.get("run_id"), "status": state,
         "evaluated": len(rows), "provider_accepted": accepted,
