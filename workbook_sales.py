@@ -240,32 +240,57 @@ def authorized(auth, sheets, company_name: str, website: str) -> bool:
     )
 
 
-def claim_candidate(sheets, candidate: dict, lane: str, run_id: str) -> SendAuthorization:
-    """Durable reservation after fresh source checks, before external actions.
+def claim_candidate(
+    sheets,
+    candidate: dict,
+    lane: str,
+    run_id: str,
+    *,
+    eligible_company_ids: set[str] | None = None,
+) -> SendAuthorization:
+    """Reserve one company using the batch's single fresh eligibility snapshot.
 
-    A single GitHub workflow concurrency group and the API's process lock own
-    serialization. Sheets append itself is NOT a distributed compare-and-swap.
-    Do not run multiple independent workers against this workbook.
+    The workflow concurrency group serializes outbound batches. The caller may
+    pass the company IDs from the fresh batch snapshot so this function does not
+    reload the entire workbook for every company.
     """
     from contact_policy import block_reason
-    blocked = block_reason(norm(candidate.get("company_id")), candidate.get("company_name", ""),
-                           candidate.get("candidate_website") or candidate.get("website", ""), lane)
+    blocked = block_reason(
+        norm(candidate.get("company_id")),
+        candidate.get("company_name", ""),
+        candidate.get("candidate_website") or candidate.get("website", ""),
+        lane,
+    )
     if blocked:
         raise ValueError(blocked)
-    if os.getenv("GITHUB_ACTIONS") != "true" or os.getenv("GITHUB_WORKFLOW") != "生贄 bulk outbound (Playwright/email; Vertex forbidden)":
+    if (
+        os.getenv("GITHUB_ACTIONS") != "true"
+        or os.getenv("GITHUB_WORKFLOW") != "生贄 bulk outbound (Playwright/email; Vertex forbidden)"
+    ):
         raise ValueError("serialized_github_workflow_required_for_send")
-    fresh = live_candidates(sheets, lane)
+
     key = norm(candidate.get("company_id"))
-    if not key or key not in {r["company_id"] for r in fresh}:
+    if eligible_company_ids is None:
+        fresh = live_candidates(sheets, lane)
+        eligible_company_ids = {r["company_id"] for r in fresh}
+    if not key or key not in set(eligible_company_ids):
         raise ValueError("candidate_changed_or_already_contacted")
+
     now = datetime.now(timezone.utc).isoformat()
-    values = [now, "RESERVATION", candidate["company_name"], candidate["candidate_website"], "",
-              "CLAIMED", "", "", "", "PRE_SEND", "claim:" + key, run_id,
-              key, lane, False, "", "", "", "", "", now]
+    values = [
+        now, "RESERVATION", candidate["company_name"], candidate["candidate_website"], "",
+        "CLAIMED", "", "", "", "PRE_SEND", "claim:" + key, run_id,
+        key, lane, False, "", "", "", "", "", now,
+    ]
     from outreach_evidence import HEADERS, append_verified
     append_verified(sheets, dict(zip(HEADERS, values)))
-    return SendAuthorization(key, candidate["company_name"], candidate["candidate_website"], lane, run_id)
-
+    return SendAuthorization(
+        key,
+        candidate["company_name"],
+        candidate["candidate_website"],
+        lane,
+        run_id,
+    )
 
 def meeting_handoff(company: dict, evidence: dict) -> dict:
     """Evidence contract for human handoff; booking alone never establishes SQL."""

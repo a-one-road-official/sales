@@ -64,8 +64,9 @@ def _ask(call, instruction, evidence):
 
 
 def research_company(candidate, site, *, model_call=None, search=None, fetch=None):
-    from outreach_master import local_ai
-    call, search, fetch = model_call or local_ai, search or search_public, fetch or fetch_primary
+    if model_call is None:
+        raise RuntimeError("scheduled_chatgpt_research_required")
+    call, search, fetch = model_call, search or search_public, fetch or fetch_primary
     if site.get('status') != 'VERIFIED':
         raise ValueError('OFFICIAL_COMPANY_RESEARCH_REQUIRED')
     name = str(candidate.get('company_name') or '').strip()

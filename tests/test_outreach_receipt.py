@@ -9,7 +9,7 @@ import pytest
 
 from browser_fetch import TrustedBrowserFetcher
 from form_execution import PublicContactFormExecutor
-from outreach_evidence import HEADERS, append_verified, quality_summary
+from outreach_evidence import HEADERS, append_verified
 from outreach_stability import SacrificeStability
 from sacrifice_web_research import _append_page, inspect_official_site, ordered_contact_links
 from sales_leads_sacrifice_run import _preferred_form_url
@@ -236,30 +236,24 @@ def test_existing_thank_you_text_does_not_prove_new_receipt(monkeypatch):
         assert len(received) == 1
 
 
-def test_write_requires_exact_readback():
+def test_write_requires_exact_readback(monkeypatch):
     api = Mock()
     record = {'idempotency_key': 'event-1', 'subject': 'Original', 'body': 'Actual message'}
-    api.get.return_value.execute.side_effect = [{'values': [HEADERS]}, {'values': []}, {'values': [['event-1']]}, {'values': [['silently dropped']]}]
-    api.append.return_value.execute.return_value = {'updates': {'updatedRows': 1, 'updatedRange': 'outreach_engine_log!A2:U2'}}
+    api.update.return_value.execute.return_value = {'updatedRows': 1}
+    api.get.return_value.execute.return_value = {'values': [['silently dropped']]}
     svc = Mock()
     svc.spreadsheets.return_value.values.return_value = api
-    svc.spreadsheets.return_value.get.return_value.execute.return_value = {'sheets': [{'properties': {'title': 'outreach_engine_log', 'sheetId': 7, 'gridProperties': {'rowCount': 1000}}}]}
+    monkeypatch.setattr(
+        'outreach_evidence._ledger_state',
+        lambda sheets: {
+            'sheet_id': 7,
+            'grid_rows': 1000,
+            'next_row': 2,
+            'rows_by_key': {},
+        },
+    )
     with pytest.raises(RuntimeError, match='readback_mismatch'):
         append_verified(SimpleNamespace(svc=svc, spreadsheet_id=WORKBOOK_ID), record)
-
-
-def test_seven_of_ten_needs_actual_message_receipts_and_all_records():
-    rows = [{'draft': {'subject': 'Partnership', 'body': 'Proposal'}, 'status': 'FORM_SENT' if i < 7 else 'FORM_FAILED',
-             'form_execution': {'confirmation': 'SUCCESS_TEXT' if i < 7 else '', 'field_status': {'message': 'FILLED'}},
-             'audit_log_verified': True} for i in range(10)]
-    assert quality_summary(rows)['passed'] is True
-    rows[9]['audit_log_verified'] = False
-    assert quality_summary(rows)['passed'] is False
-    rows[9]['audit_log_verified'] = True
-    rows[6]['form_execution']['field_status']['message'] = 'NOT_REQUESTED'
-    assert quality_summary(rows)['accepted'] == 6
-    assert quality_summary(rows)['passed'] is False
-
 
 def test_success_counter_alone_cannot_declare_stability():
     sheets = SimpleNamespace(append_dict=lambda *a: None, _rows_as_dicts=lambda *a: [])

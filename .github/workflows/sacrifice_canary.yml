@@ -113,31 +113,9 @@ jobs:
                   raise SystemExit('paid_ai_reference_in_send_path:' + name)
           print('paid_ai_send_path_scan=clean')
           PY
-      - name: Start isolated local runtime
-        if: ${{ steps.plan.outputs.active == 'true' && (inputs.mode == 'execute' || github.event_name == 'push') }}
-        run: |
-          set -euo pipefail
-          token="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-          echo "::add-mask::$token"
-          export LEAD_FACTORY_INTERNAL_TOKEN="$token"
-          echo "LEAD_FACTORY_INTERNAL_TOKEN=$token" >> "$GITHUB_ENV"
-          nohup python -m uvicorn main:app --host 127.0.0.1 --port 8080 > runtime.log 2>&1 &
-          echo $! > runtime.pid
-          for _ in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:8080/healthz > /dev/null; then exit 0; fi
-            sleep 2
-          done
-          echo 'LOCAL_RUNTIME_STARTUP_FAILED: no outbound retry was launched.'
-          exit 1
-      - name: Execute cohort and classify actual receipts or pending handoff
+      - name: Execute cohort directly with the minimal runtime
         if: ${{ steps.plan.outputs.active == 'true' && (inputs.mode == 'execute' || github.event_name == 'push') }}
         run: python outreach_cycle.py run
-      - name: Stop isolated runtime
-        if: ${{ always() }}
-        run: |
-          if [ -f runtime.pid ]; then
-            kill "$(cat runtime.pid)" 2>/dev/null || true
-          fi
       # Public runner output contains counts only. Full drafts, recipients, claims
       # and receipts are already written/read back in the private canonical Sheet.
       # No public raw-email artifact, browser trace or runtime.log upload.

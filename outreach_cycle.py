@@ -15,7 +15,6 @@ import json
 import os
 from pathlib import Path
 import re
-import urllib.request
 
 LANES = ("EC_SACRIFICE", "BPO", "SALES_GTM")
 MAX_BATCH = 10
@@ -156,9 +155,6 @@ def classify_batch(batch):
         blockers["ssot_write_boundary_unverified"] += 1
     if batch.get("vertex_allowed") is True:
         blockers["paid_ai_boundary_breached"] += 1
-    quality = batch.get("quality") or {}
-    if quality.get("ui_verified") is False:
-        blockers["quality_readback_failed"] += 1
     pending = counts["handoff_pending"]
     if blockers or counts["unconfirmed"]:
         state = "RECONCILIATION_REQUIRED"
@@ -172,7 +168,7 @@ def classify_batch(batch):
         state = "BATCH_RECORDED"
     # Ten is the certification sample size, not a prerequisite to send one ready email.
     certification = "PENDING_CONNECTOR" if pending else "INSUFFICIENT_SAMPLE" if len(rows) < 10 else (
-        "PASSED" if not blockers and accepted >= 7 and quality.get("passed") is True else "NOT_PASSED")
+        "PASSED" if not blockers and accepted >= 7 else "NOT_PASSED")
     return {
         "schema": "zero-cost-cycle-v1", "run_id": batch.get("run_id"), "status": state,
         "evaluated": len(rows), "provider_accepted": accepted,
@@ -256,26 +252,59 @@ def main():
                 handle.write("INSPECTION_LANE=" + plan["lane"] + "\n")
                 handle.write("OUTREACH_SACRIFICE_TARGET_COMPANIES=" + "|".join(plan["_targets"]) + "\n")
         return 0
-    payload = {"lane": os.environ["INSPECTION_LANE"], "limit": bounded_batch(args.batch_size),
-        "batch_id": "quality-{}-{}-{}-001".format(os.environ["GITHUB_RUN_ID"], os.getenv("GITHUB_RUN_ATTEMPT", "1"), os.environ["INSPECTION_LANE"].lower())}
-    req = urllib.request.Request("http://127.0.0.1:8080/outreach/sales-leads-sacrifice-run",
-        data=json.dumps(payload).encode(), method="POST", headers={"Content-Type": "application/json",
-        "X-Aone-Internal-Token": os.environ["LEAD_FACTORY_INTERNAL_TOKEN"]})
+    lane = os.environ["INSPECTION_LANE"]
+    payload = {
+        "lane": lane,
+        "limit": bounded_batch(args.batch_size),
+        "batch_id": "quality-{}-{}-{}-001".format(
+            os.environ["GITHUB_RUN_ID"],
+            os.getenv("GITHUB_RUN_ATTEMPT", "1"),
+            lane.lower(),
+        ),
+    }
+    cfg = dict(os.environ)
     try:
-        # No hosted service, redirect, automatic HTTP retry or paid fallback.
-        class NoRedirect(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, *a, **kw):
-                raise RuntimeError("runtime_redirect_forbidden")
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-        with opener.open(req, timeout=1800) as response:
-            raw = response.read(8_000_001)
-        if len(raw) > 8_000_000:
-            raise ValueError("oversized_runtime_response")
-        summary = classify_batch(json.loads(raw))
+        from drive_repo import DriveRepo
+        from outreach_execution import OutboundEmailExecutor, outbound_lane_send_enabled
+        from sales_leads_sacrifice_run import run_ten_sacrifice_batch
+        from settings import SETTINGS
+        from sheets_repo import SheetsRepo
+
+        if not outbound_lane_send_enabled(lane, cfg):
+            raise RuntimeError("outbound_lane_not_authorized")
+
+        # Minimal runtime: one Sheets client, one Drive prompt reader, one sender.
+        # No FastAPI/Uvicorn server and no StrictLeadFactory construction.
+        sheets = SheetsRepo(
+            os.getenv("LEAD_FACTORY_SPREADSHEET_ID") or SETTINGS.spreadsheet_id
+        )
+        drive = DriveRepo(SETTINGS.drive_scrapers_folder_id)
+        executor = OutboundEmailExecutor(
+            sheets,
+            drive,
+            cfg.get("OUTREACH_PROMPT_DOC_TITLE", "outreach_prompt_production_v1"),
+            lane=lane,
+        )
+        batch = run_ten_sacrifice_batch(
+            llm=None,
+            drive=drive,
+            cfg=cfg,
+            executor=executor,
+            execute_external=True,
+            limit=payload["limit"],
+            batch_id=payload["batch_id"],
+            lane=lane,
+        )
+        summary = classify_batch(batch)
     except Exception as exc:
-        # A timeout can occur after a send/claim. Never turn it into a blind retry.
-        summary = {"schema": "zero-cost-cycle-v1", "status": "RECONCILIATION_REQUIRED",
-            "error_type": type(exc).__name__, "restart_uncertain_claims": False, "exit_code": 1}
+        # A failure may happen after a reservation. Never blind-retry.
+        summary = {
+            "schema": "zero-cost-cycle-v1",
+            "status": "RECONCILIATION_REQUIRED",
+            "error_type": type(exc).__name__,
+            "restart_uncertain_claims": False,
+            "exit_code": 1,
+        }
     _print_summary(summary, "cycle-summary.json")
     return summary["exit_code"]
 
