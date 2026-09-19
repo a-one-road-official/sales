@@ -48,19 +48,18 @@ def _ledger_state(sheets) -> dict:
         raise RuntimeError("evidence_ledger_read_budget_exceeded")
     ranges = values_api.batchGet(
         spreadsheetId=WORKBOOK_ID,
-        ranges=[f"'{TAB}'!A2:A{grid_rows}", f"'{TAB}'!K2:K{grid_rows}"],
+        ranges=[f"'{TAB}'!A2:U{grid_rows}"],
     ).execute().get("valueRanges", [])
-    col_a = ranges[0].get("values", []) if len(ranges) > 0 else []
-    col_k = ranges[1].get("values", []) if len(ranges) > 1 else []
+    ledger_rows = ranges[0].get("values", []) if ranges else []
     rows_by_key = {}
-    for row_number, row in enumerate(col_k, start=2):
-        if not row or not str(row[0] or "").strip():
+    for row_number, row in enumerate(ledger_rows, start=2):
+        event_id = str(row[10] if len(row) > 10 else "").strip()
+        if not event_id:
             continue
-        event_id = str(row[0]).strip()
         if event_id in rows_by_key:
             raise RuntimeError("duplicate_evidence_event_id")
         rows_by_key[event_id] = row_number
-    last_used = max(len(col_a), len(col_k)) + 1
+    last_used = len(ledger_rows) + 1
     state = {
         "sheet_id": props["sheetId"],
         "grid_rows": grid_rows,
