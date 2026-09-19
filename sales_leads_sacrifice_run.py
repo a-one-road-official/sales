@@ -1037,8 +1037,8 @@ def run_ten_sacrifice_batch(
                             execution = executor.execute(row, cfg)
                         if execution.get("status") == "STALE_PROMPT":
                             _, prompt_meta = drive.read_live_prompt_by_title(prompt_title)
-                                draft = _verified_site_draft(candidate, site)
-                                prompt_meta["generation_mode"] = "CHATGPT_PREPARED_ONLY"
+                            draft = _verified_site_draft(candidate, site)
+                            prompt_meta["generation_mode"] = "CHATGPT_PREPARED_ONLY"
                             row.update(
                                 subject=draft["subject"],
                                 body=draft["body"],
