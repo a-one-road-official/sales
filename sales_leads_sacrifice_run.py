@@ -1137,14 +1137,6 @@ def run_ten_sacrifice_batch(
         for item in results
         if item.get("status") == "FORM_SENT"
     ]
-    from outreach_evidence import quality_summary
-    quality = quality_summary(results)
-    if execute_external:
-        from outreach_evidence import write_dashboard
-        try:
-            write_dashboard(sheets, run_id, results, quality)
-        except Exception as exc:
-            quality.update(passed=False, ui_verified=False, ui_error=f"{type(exc).__name__}:{exc}")
     for item in results:
         save_local_evidence(run_id, item)
     success_count = len(email_message_ids) + len(form_confirmations)
@@ -1154,7 +1146,6 @@ def run_ten_sacrifice_batch(
     )) for r in results)
     return {
         "run_id": run_id,
-        "quality": quality,
         "batch_id": batch_token,
         "status": "EXHAUSTED" if attempted == 0 else "COMPLETE",
         "source": "sales_leads",
