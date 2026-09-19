@@ -39,5 +39,7 @@ def test_control_module_has_no_model_or_cloud_execution_dependencies():
     imports += [alias.name for n in ast.walk(tree) if isinstance(n, ast.Import) for alias in n.names]
     assert not any(name and name.startswith(('openai', 'anthropic', 'vertexai', 'google.genai')) for name in imports)
     text = (ROOT / 'outreach_cycle.py').read_text()
-    assert 'http://127.0.0.1:8080/' in text
+    assert 'http://127.0.0.1:8080/' not in text
+    assert 'uvicorn' not in (ROOT / '.github/workflows/sacrifice_canary.yml').read_text()
+    assert 'run_ten_sacrifice_batch' in text
     assert 'restart_uncertain_claims' in text
