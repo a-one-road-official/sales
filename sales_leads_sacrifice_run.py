@@ -570,6 +570,11 @@ def run_ten_sacrifice_batch(
         and _cfg_truthy(cfg, "OUTREACH_FAST_SALES_GTM_MODE")
     )
     rows = load_rows_for_lane(normalized_lane, sheets=sheets)
+    eligible_company_ids = {
+        str(row.get("company_id") or "").strip()
+        for row in rows
+        if str(row.get("company_id") or "").strip()
+    }
     target_domain = {
         "BPO": "BPO",
         "SALES_GTM": "営業/GTM",
@@ -906,7 +911,7 @@ def run_ten_sacrifice_batch(
                                 from outreach_master import validate_email, verify_prompt_revision
                                 validate_email(draft)
                                 verify_prompt_revision(draft)
-                                authorization = claim_candidate(sheets, candidate, normalized_lane, run_id)
+                                authorization = claim_candidate(sheets, candidate, normalized_lane, run_id, eligible_company_ids=eligible_company_ids)
                                 _mark_runtime_consumed(normalized_lane, [candidate])
                                 form_executor.authorization = authorization
                                 _persist_draft(sheets, run_id, candidate, result)
@@ -1015,7 +1020,7 @@ def run_ten_sacrifice_batch(
                             raise RuntimeError("sacrifice_executor_not_configured")
                         from outreach_master import validate_email
                         validate_email(draft)
-                        authorization = claim_candidate(sheets, candidate, normalized_lane, run_id)
+                        authorization = claim_candidate(sheets, candidate, normalized_lane, run_id, eligible_company_ids=eligible_company_ids)
                         _mark_runtime_consumed(normalized_lane, [candidate])
                         executor.workbook_authorization = authorization
                         _persist_draft(sheets, run_id, candidate, result)
