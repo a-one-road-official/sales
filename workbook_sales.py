@@ -202,6 +202,26 @@ class WorkbookReader:
         return snapshot
 
 
+
+def outbound_candidate(row: dict) -> dict:
+    lane = str(row.get("lane") or "").strip().upper()
+    if lane not in {"EC_SACRIFICE", "BPO", "SALES_GTM"}:
+        raise ValueError("unsupported_outbound_lane")
+    return {
+        **row,
+        "record_origin": VERSION,
+        "source_row": row["company_id"],
+        "source_key": row["company_id"],
+        "domain": {
+            "EC_SACRIFICE": "EC/リテール",
+            "BPO": "BPO",
+            "SALES_GTM": "営業/GTM",
+        }[lane],
+        "source_sheet": VENDOR_TAB if row["origin"] == "WORKBOOK" else SSOT_TAB,
+        "source_sheet_actual": VENDOR_TAB if row["origin"] == "WORKBOOK" else SSOT_TAB,
+    }
+
+
 def live_candidates(sheets, lane: str) -> list[dict]:
     if getattr(sheets, "spreadsheet_id", "") != WORKBOOK_ID:
         raise ValueError("automatic_outreach_requires_new_workbook")
@@ -211,12 +231,7 @@ def live_candidates(sheets, lane: str) -> list[dict]:
     for r in snapshot["companies"]:
         if r["route"] != "AUTO_RESEARCH" or r["lane"] != lane:
             continue
-        selected.append({
-            **r, "record_origin": VERSION, "source_row": r["company_id"],
-            "source_key": r["company_id"], "domain": {"EC_SACRIFICE": "EC/リテール", "BPO": "BPO", "SALES_GTM": "営業/GTM"}[lane],
-            "source_sheet": VENDOR_TAB if r["origin"] == "WORKBOOK" else SSOT_TAB,
-            "source_sheet_actual": VENDOR_TAB if r["origin"] == "WORKBOOK" else SSOT_TAB,
-        })
+        selected.append(outbound_candidate(r))
     return selected
 
 
