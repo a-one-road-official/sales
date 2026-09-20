@@ -273,7 +273,16 @@ def reduce_event(row, event, now):
     status = text(row.get('Status'))
     def state(value, action):
         patch.update({STATE: value, 'AI次アクション': action})
-    if kind == 'DRAFT_READY':
+    if kind == 'QUALIFIED':
+        profile = deepcopy(e.get('profile') or {})
+        if not profile.get('evidence') or e.get('qualification') not in ('GO', 'UNKNOWN', 'NO_GO'):
+            raise ValueError('qualification_evidence_required')
+        allowed = ('maturity', 'maturity_evidence', 'foreign_exhibition', 'japan_branch',
+                   'japan_subsidiary', 'japan_direct_sales', 'timezone', 'timezone_evidence', 'campaign')
+        m.update({k: profile[k] for k in allowed if k in profile})
+        patch['営業判定'] = e['qualification']
+        patch['AI次アクション'] = '個別文面作成' if e['qualification'] == 'GO' else '判定根拠を確認'
+    elif kind == 'DRAFT_READY':
         if has_sent(row) or m.get('claim') or m.get('reply_id'):
             raise ValueError('existing_contact_or_claim_preserve_copy')
         packet = deepcopy(e['packet']); verify_draft(row, packet, now)
@@ -328,7 +337,7 @@ def reduce_event(row, event, now):
         if not row.get('First_Contacted_At'):
             patch['First_Contacted_At'] = at
         m.pop('claim', None)
-        if not is_late:
+        if not is_late and not m.get('reply_id'):
             state('SENT', '返信待ち')
             patch.update({'AI失敗工程': '', 'AI失敗理由': ''})
             if status in INITIAL:
@@ -375,7 +384,10 @@ def reduce_event(row, event, now):
             m['reply_id'] = e['message_id']; m['commercial'] = e.get('commercial', 'UNKNOWN')
             patch.update({'Last_Inbound': at, 'Gmail_Thread_ID': e.get('thread_id', ''),
                           'Inbound_Class': e.get('classification', 'QUESTION'), 'Inbound_Source': e['evidence'],
-                          'AI返信対応': '未対応'})
+                          'AI返信対応': '対応済み' if e.get('awaiting_human') is False else '未対応'})
+            if row.get('Last_Inbound') and stamp(at) < stamp(row['Last_Inbound']):
+                for field in ('Last_Inbound', 'Gmail_Thread_ID', 'Inbound_Class', 'Inbound_Source', 'AI返信対応'):
+                    patch.pop(field, None)
             state('REPLIED', e.get('next_action', '返信内容を確認して商談へ進める'))
             if status in INITIAL | {'AI送信済み', '送付済み', 'DM済', 'リマイン1', 'リマイン2', 'リマイン3'}:
                 patch['Status'] = '返信あり'
@@ -397,9 +409,11 @@ def reduce_event(row, event, now):
                 meetings.setdefault(previous_id, previous)
             m.pop('meeting_count_needs_reconcile', None)
         item = meetings.setdefault(e['calendar_event_id'], {})
+        if item.get('updated_at') and stamp(at) < stamp(item['updated_at']):
+            raise ValueError('older_calendar_evidence_preserve_current')
         if kind == 'MEETING_HELD' and not e.get('held_evidence'):
             raise ValueError('meeting_held_evidence_required')
-        item.update({'state': kind, 'start_at': iso(e['start_at']), 'evidence': e['evidence']})
+        item.update({'state': kind, 'start_at': iso(e['start_at']), 'evidence': e['evidence'], 'updated_at': at})
         m['suppressed'] = True
         future = [v['start_at'] for v in meetings.values() if v['state'] == 'MEETING_BOOKED' and stamp(v['start_at']) > stamp(now)]
         patch.update({'Next_Meeting': min(future, default=''),
@@ -417,7 +431,9 @@ def reduce_event(row, event, now):
         patch['AI次アクション'] = e.get('next_action', '決裁・支払・実行予定を確認')
     else:
         raise ValueError('unsupported_event_kind')
-    if is_late and kind not in ('SENT', 'MANUAL_SENT'):
+    facts = {'SENT', 'MANUAL_SENT', 'REPLIED', 'OPTOUT', 'BOUNCED', 'MEETING_BOOKED',
+             'MEETING_CANCELLED', 'MEETING_HELD', 'CONTRACT_SIGNED', 'PAYMENT_RECEIVED'}
+    if is_late and kind not in facts:
         patch = {}; m = load_object(row.get(META))
     e.update({'company_id': key, 'company_name': company, 'website': row['website'], 'recorded_at': iso(now)})
     compact = {k: v for k, v in e.items() if k not in ('proof', 'receipt')}
