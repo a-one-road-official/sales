@@ -119,6 +119,8 @@ def classify_batch(batch):
         form = row.get("form_execution") or {}
         recorded = row.get("audit_log_verified") is True
         reserved = row.get("send_reserved") is True
+        if row.get("ssot_tracking_error"):
+            blockers["ssot_tracking_unconfirmed"] += 1
         if row.get("critical_errors"):
             blockers["critical_record_error"] += 1
         if reserved and not recorded:

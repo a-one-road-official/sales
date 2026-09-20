@@ -643,6 +643,10 @@ def run_ten_sacrifice_batch(
     prompt, prompt_meta = drive.read_live_prompt_by_title(prompt_title)
 
     results = []
+    ssot_tracker = None
+    if _cfg_truthy(cfg, "OUTREACH_TRACK_SSOT"):
+        from customer_sheet import CustomerSheet
+        ssot_tracker = CustomerSheet(sheets.svc)
 
     for candidate in candidates:
         result = {
@@ -717,6 +721,20 @@ def run_ten_sacrifice_batch(
             if site.get("status") != "VERIFIED":
                 result.update(status="FAILED", stage="SITE_RESEARCH", error_message="official_site_not_verified")
             else:
+                if ssot_tracker is not None:
+                    name = candidate.get("company_name", "")
+                    official = site.get("official_website", site_url)
+                    customer = ssot_tracker.find(name, official)
+                    if customer is None:
+                        page_evidence = (site.get("pages") or [{}])[0]
+                        quote = str(page_evidence.get("text_excerpt") or page_evidence.get("text") or page_evidence.get("title") or "")
+                        customer = ssot_tracker.register(
+                            {"company_name": name, "website": official,
+                             "hq_country": candidate.get("country", ""),
+                             "Category": candidate.get("domain", "その他")},
+                            {"company_verified": True, "decision": "GO", "source_url": official,
+                             "quote": quote, "reason": "Existing permitted campaign; official site identity verified"}, run_id)
+                    result["ssot_row"] = customer["row_number"]
                 email = ""
                 proposed_email = ""
                 rejected_email = ""
@@ -1088,10 +1106,15 @@ def run_ten_sacrifice_batch(
             if str(value).strip()
         )
         result["critical_errors"] = sorted(critical_errors)
+        if ssot_tracker is not None:
+            try:
+                result["ssot_tracking"] = ssot_tracker.record_execution(candidate, result, run_id)
+            except Exception as exc:
+                result["ssot_tracking_error"] = f"{type(exc).__name__}:{exc}"
         results.append(result)
         from outreach_evidence import save_local_evidence
         save_local_evidence(run_id, result)
-        if execute_external and authorization is not None:
+        if execute_external:
             _record_attempt(sheets, run_id=run_id, candidate=candidate, result=result)
             save_local_evidence(run_id, result)
             if not result.get("audit_log_verified"):

@@ -20,6 +20,8 @@ def verify_prompt_revision(draft):
         raise ValueError("MASTER_PROMPT_CHANGED_REGENERATE")
 
 def validate_email(draft):
+    from customer_care import validate_customer_text
+    validate_customer_text(draft.get("subject"), draft.get("body"))
     parts = str(draft.get("body") or "").split("\n\n")
     if len(parts) < 6 or not re.fullmatch(r"Hi .+,", parts[0]):
         raise ValueError("EMAIL_LAYOUT")

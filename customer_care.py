@@ -172,10 +172,14 @@ def transition(row, event):
     events = history(row)
     prior = next((e for e in events if e.get("event_id") == event["event_id"]), None)
     if prior:
-        if prior != event:
+        expected = {**event, "status": event.get("kind"), "event_type": "OUTBOUND_SENT" if event.get("kind") in {"SENT", "MANUAL_SENT"} else event.get("kind")}
+        if prior != expected:
             raise ValueError("EVENT_ID_COLLISION")
         return {}
-    merged = dumps(events + [event])
+    stored_event = dict(event)
+    stored_event["status"] = event.get("kind")
+    stored_event["event_type"] = "OUTBOUND_SENT" if event.get("kind") in {"SENT", "MANUAL_SENT"} else event.get("kind")
+    merged = dumps(events + [stored_event])
     if len(merged) > 45000:
         raise ValueError("HISTORY_ARCHIVE_REQUIRED")
     changes = {"AI_会社ID": company_id(row), "Sales_History_JSON": merged}
@@ -222,6 +226,8 @@ def transition(row, event):
             raise ValueError("GMAIL_SENT_RECEIPT_REQUIRED")
         if receipt.get("recipient") != row.get("営業メール宛先"):
             raise ValueError("RECEIPT_RECIPIENT_MISMATCH")
+        if receipt.get("subject") != row.get("営業メール件名") or receipt.get("body_sha256") != hashlib.sha256(str(row.get("営業メール本文") or "").encode()).hexdigest():
+            raise ValueError("RECEIPT_MESSAGE_BYTES_MISMATCH")
         if kind == "SENT" and (not row.get("AI_送信予約ID") or event.get("claim_id") != row["AI_送信予約ID"]):
             raise ValueError("RECEIPT_CLAIM_MISMATCH")
         changes.update({"営業メール状態": "SENT", "Last_Outbound_At": at.isoformat(),

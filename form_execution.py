@@ -15,6 +15,7 @@ import hashlib
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
+from customer_care import identity_field_key, validate_identity_fields
 
 
 CAPTCHA_RE = re.compile(r"captcha|recaptcha|hcaptcha|turnstile", re.I)
@@ -141,6 +142,10 @@ def _field_key(el, label: str) -> str:
     marker = _marker(el, label)
     typ = (el.get_attribute("type") or "text").lower()
     tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
+    if tag == "input" and typ in {"text", ""}:
+        identity_key = identity_field_key(marker, el.get_attribute("autocomplete") or "")
+        if identity_key:
+            return identity_key
     if tag == "textarea":
         return "message"
     if typ == "email" or re.search(r"\b(e[- ]?mail|email)\b", marker):
@@ -837,6 +842,20 @@ def _execution_log_sheet() -> str:
     ).strip() or "LeadFactory_ExecutionLog"
 
 
+def _verify_identity_dom(form):
+    """Read actual person/company values, including values changed by page JS."""
+    observed = []
+    controls = form.locator("input:not([type=hidden]), textarea, select")
+    for index in range(controls.count()):
+        el = controls.nth(index)
+        if not el.is_visible() or not el.is_enabled():
+            continue
+        key = _field_key(el, _label_for(el))
+        if key in {"name", "first_name", "last_name", "company", "email", "ambiguous_person_name"}:
+            observed.append({"key": key, "final_value": _current_value(el)})
+    validate_identity_fields(observed)
+
+
 class PublicContactFormExecutor:
     def __init__(self, sheets=None, authorization=None):
         self.sheets = sheets
@@ -1382,6 +1401,7 @@ class PublicContactFormExecutor:
                     submit = _submit_control(form_context, form)
                     if submit is None:
                         return result_payload("FORM_FAILED", reason="SUBMIT_CONTROL_NOT_FOUND")
+                    _verify_identity_dom(form)
                     control_label = _control_label(submit)
                     if re.search(r"\bnext\b", control_label, re.I):
                         before_click_signature = _visible_step_signature(form)
@@ -1432,6 +1452,7 @@ class PublicContactFormExecutor:
                                           actual_message_lengths=[len(value) for value in actual_messages])
                 if contact_policy_blocked(page.locator("body").inner_text()):
                     return result_payload("BLOCKED", reason="CONTACT_POLICY_RESTRICTS_OUTREACH")
+                _verify_identity_dom(form)
                 if preview_only:
                     return result_payload("FORM_PREVIEW_READY", reason="PREVIEW_NO_SUBMISSION", submitted_message=matching_messages[0])
                 capture("before-submit")
