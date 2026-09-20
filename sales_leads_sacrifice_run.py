@@ -733,7 +733,7 @@ def run_ten_sacrifice_batch(
                              "hq_country": candidate.get("country", ""),
                              "Category": candidate.get("domain", "その他")},
                             {"company_verified": True, "decision": "GO", "source_url": official,
-                             "quote": quote, "reason": "Existing permitted campaign; official site identity verified"}, run_id)
+                             "quote": quote, "source_text": quote, "reason": "Existing permitted campaign; official site identity verified"}, run_id)
                     result["ssot_row"] = customer["row_number"]
                 email = ""
                 proposed_email = ""

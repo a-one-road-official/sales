@@ -74,7 +74,8 @@ def dumps(value):
 
 
 def packet_hash(packet):
-    fields = ("company_id", "company_name", "website", "recipient", "subject", "body", "prompt_sha256")
+    fields = ("company_id", "company_name", "website", "recipient", "subject", "body", "prompt_sha256",
+              "recipient_evidence", "evidence", "buyer_workflow", "offer_authority", "company_short_name")
     return hashlib.sha256(dumps({k: packet.get(k, "") for k in fields}).encode()).hexdigest()
 
 
@@ -133,8 +134,6 @@ def quality_check(row, packet, current_prompt_sha256):
     if not current_prompt_sha256 or packet.get("prompt_sha256") != current_prompt_sha256:
         raise ValueError("QUALITY_PROMPT_CHANGED")
     review = packet.get("review") or {}
-    if review.get("packet_sha256") != packet_hash(packet):
-        raise ValueError("QUALITY_REVIEW_BYTES_CHANGED")
     if not text(review.get("reviewer_run_id")) or not text(review.get("reason")):
         raise ValueError("QUALITY_REVIEW_PROVENANCE_REQUIRED")
     aware(review.get("reviewed_at"))
@@ -151,6 +150,18 @@ def quality_check(row, packet, current_prompt_sha256):
             raise ValueError("QUALITY_SOURCE_QUOTE_OR_RELEVANCE_MISSING")
     if not text(packet.get("buyer_workflow")) or not text(packet.get("offer_authority")):
         raise ValueError("QUALITY_BUYER_AND_OFFER_REQUIRED")
+    if review.get("packet_sha256") != packet_hash(packet):
+        raise ValueError("QUALITY_REVIEW_BYTES_CHANGED")
+    greeting = str(packet.get("body") or "").splitlines()[0].strip()
+    first_name = text(recipient_evidence.get("first_name"))
+    company_short = text(packet.get("company_short_name")) or text(row.get("company_name"))
+    permitted = {"Hi " + company_short + " team,"}
+    if first_name and recipient_evidence.get("person_name_source"):
+        permitted.add("Hi " + first_name + ",")
+    if greeting not in permitted:
+        raise ValueError("QUALITY_GREETING_UNVERIFIED")
+    if len(dumps(packet)) > 30000:
+        raise ValueError("QUALITY_PACKET_TOO_LARGE_PRESERVE_SOURCES")
     return packet_hash(packet)
 
 
@@ -168,12 +179,15 @@ def transition(row, event):
         raise ValueError("EVENT_COMPANY_IDENTITY_MISMATCH")
     if not text(event.get("event_id")) or not text(event.get("run_id")):
         raise ValueError("EVENT_PROVENANCE_REQUIRED")
+    event = dict(event)
+    if event.get("kind") == "SEND_FAILED" and event.get("definitely_not_sent") is not True:
+        event["kind"] = "SEND_UNKNOWN"
     at = aware(event.get("occurred_at"))
     events = history(row)
     prior = next((e for e in events if e.get("event_id") == event["event_id"]), None)
     if prior:
         expected = {**event, "status": event.get("kind"), "event_type": "OUTBOUND_SENT" if event.get("kind") in {"SENT", "MANUAL_SENT"} else event.get("kind")}
-        if prior != expected:
+        if {k: v for k, v in prior.items() if k != "run_id"} != {k: v for k, v in expected.items() if k != "run_id"}:
             raise ValueError("EVENT_ID_COLLISION")
         return {}
     stored_event = dict(event)
@@ -183,14 +197,40 @@ def transition(row, event):
     if len(merged) > 45000:
         raise ValueError("HISTORY_ARCHIVE_REQUIRED")
     changes = {"AI_会社ID": company_id(row), "Sales_History_JSON": merged}
-    if row.get("AI_状態更新日時") and at < aware(row["AI_状態更新日時"]):
+    stale = bool(row.get("AI_状態更新日時") and at < aware(row["AI_状態更新日時"]))
+    if stale and event.get("kind") not in {"SENT", "MANUAL_SENT"}:
         return changes
     kind = event.get("kind")
     state = text(row.get("営業メール状態"))
     initial = text(row.get("Status")) in INITIAL
+    contacted = bool(row.get("Last_Outbound_Message_ID") or row.get("First_Contacted_At") or any(
+        e.get("status") in {"SENT", "FORM_SENT", "MANUAL_SENT"} or e.get("event_type") in {"OUTBOUND_SENT", "MANUAL_SEND"}
+        for e in events))
     changes["AI_状態更新日時"] = at.isoformat()
-    if kind == "DRAFT_SAVED":
-        if state in ACTIVE_SEND or row.get("AI_手動対応") == "対応中" or not initial:
+    if kind == "CAMPAIGN_ENROLLED":
+        if not initial or contacted or state in ACTIVE_SEND or row.get("AI_手動対応") in {"対応中", "完了"}:
+            raise ValueError("CAMPAIGN_CUSTOMER_PROTECTED")
+        if text(row.get("営業メール送信可否")) in {"禁止", "停止", "NO", "DENIED"}:
+            raise ValueError("EXPLICIT_SEND_STOP_PRESERVED")
+        proof = event.get("approval") or {}
+        if proof.get("source") != "USER_INSTRUCTION" or not text(proof.get("reference")) or not text(event.get("campaign")):
+            raise ValueError("USER_CAMPAIGN_AUTHORITY_REQUIRED")
+        if proof.get("maturity_verified") is not True or not text(proof.get("maturity_evidence")) or row.get("営業判定") != "GO":
+            raise ValueError("MATURE_CAMPAIGN_QUALIFICATION_REQUIRED")
+        changes.update({"AI_Campaign": event["campaign"], "営業メール送信可否": "許可",
+            "営業メール承認": "USER_AUTHORIZED_SCOPE:" + proof["reference"],
+            "AI_次アクション": "個別文面・宛先の品質確認"})
+    elif kind == "WAVE_PLANNED":
+        if not initial or contacted or state in ACTIVE_SEND or row.get("AI_手動対応") in {"対応中", "完了"}:
+            raise ValueError("WAVE_CUSTOMER_PROTECTED")
+        aware(event.get("send_at"))
+        ZoneInfo(text(event.get("timezone")))
+        if not text(event.get("timezone_evidence")):
+            raise ValueError("RECIPIENT_TIMEZONE_EVIDENCE_REQUIRED")
+        changes.update({"AI_送信予定日時": event["send_at"], "AI_タイムゾーン": event["timezone"],
+            "AI_次アクション": "確認済み地域別送信枠待ち"})
+    elif kind == "DRAFT_SAVED":
+        if state in ACTIVE_SEND or row.get("AI_手動対応") in {"対応中", "完了"} or not initial or contacted:
             raise ValueError("DRAFT_CANNOT_REPLACE_ACTIVE_OR_CONTACTED_WORK")
         packet = event["packet"]
         quality_check(row, packet, event.get("current_prompt_sha256"))
@@ -200,7 +240,7 @@ def transition(row, event):
             "AI_品質確認JSON": dumps(packet), "AI_失敗工程": "", "AI_失敗理由": "",
             "AI_次アクション": "送信前確認・地域別送信枠へ"})
     elif kind in {"SEND_READY", "SEND_RESERVED"}:
-        if not initial or state in ACTIVE_SEND or row.get("AI_手動対応") == "対応中":
+        if not initial or contacted or state in ACTIVE_SEND or row.get("AI_手動対応") in {"対応中", "完了"}:
             raise ValueError("SEND_OWNERSHIP_OR_SALES_STAGE_BLOCKED")
         if text(row.get("営業メール送信可否")) != "許可" or not row.get("AI_Campaign"):
             raise ValueError("CAMPAIGN_PERMISSION_REQUIRED")
@@ -286,6 +326,19 @@ def transition(row, event):
             changes["AI_次アクション"] = "議事録・次の約束・有償提案を確認"
     else:
         raise ValueError("UNSUPPORTED_CUSTOMER_EVENT")
+    if event.get("kind") in {"SEND_FAILED", "SEND_UNKNOWN", "QUALITY_HOLD"}:
+        draft = event.get("rescue_draft") or {}
+        for key, value in (("営業メール件名", draft.get("subject")), ("営業メール本文", draft.get("body")),
+                           ("営業メール宛先", event.get("rescue_recipient"))):
+            if value and not row.get(key):
+                changes[key] = value
+    if stale:
+        # Retain all historical proof; only fill missing or newer contact fields.
+        keep = {"AI_会社ID", "Sales_History_JSON", "First_Contacted_At"}
+        old_outbound = row.get("Last_Outbound_At")
+        if not old_outbound or at >= aware(old_outbound):
+            keep |= {"Last_Outbound_At", "Last_Outbound_Message_ID", "Last_Outbound_Thread_ID", "Last_Outbound_Recipient"}
+        changes = {key: value for key, value in changes.items() if key in keep}
     return changes
 
 

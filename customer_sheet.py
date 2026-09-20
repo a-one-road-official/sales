@@ -119,6 +119,12 @@ def customer_event(row, kind, run_id, occurred_at, **details):
              'website': row['website'], **details}
     receipt = event.get('receipt') or {}
     canonical = ('gmail:' + receipt['message_id']) if kind in {'SENT', 'MANUAL_SENT'} and receipt.get('message_id') else ''
+    if kind == 'REPLIED' and event.get('message_id'):
+        canonical = 'gmail:' + event['message_id']
+    if kind in {'MEETING_BOOKED', 'MEETING_CANCELLED', 'MEETING_HELD'} and event.get('calendar_event_id'):
+        canonical = 'calendar:' + event['calendar_event_id'] + ':' + kind
+        if kind != 'MEETING_HELD':
+            canonical += ':' + str(event.get('meeting_at', ''))
     event.setdefault('event_id', canonical or 'customer:' + sha256(dumps(event).encode()).hexdigest()[:32])
     return event
 
@@ -144,15 +150,19 @@ def plan_event(row, event, *, row_number, headers, sheet_id, ledger_headers, led
         raise ValueError('LEDGER_SCHEMA_MISSING')
     at = event['occurred_at']
     kind = event['kind']
-    action = 'NEW_DM' if kind == 'SENT' else 'MANUAL_SEND' if kind == 'MANUAL_SENT' else kind
+    factual = kind in {'SENT', 'MANUAL_SENT', 'REPLIED', 'MEETING_HELD', 'MEETING_BOOKED'}
+    action = {'SENT': 'OUTBOUND_SENT', 'MANUAL_SENT': 'OUTBOUND_SENT', 'REPLIED': 'REPLY_RECEIVED',
+              'MEETING_HELD': 'MEETING_COMPLETED', 'MEETING_BOOKED': 'APPOINTMENT_CONFIRMED'}.get(kind, kind)
+    canonical_id = event.get('canonical_action_id') or (event.get('receipt') or {}).get('message_id') or (
+        event.get('message_id') if kind == 'REPLIED' else '') or event['event_id']
     canonical = {'event_id': event['event_id'], 'occurred_at': at,
         'date': datetime.fromisoformat(at.replace('Z', '+00:00')).astimezone(ZoneInfo('Asia/Tokyo')).date().isoformat(),
         'source_row': str(row_number), 'company_key': company_id(decoded), 'company_name': row['company_name'],
         'from_status': row.get('Status', ''), 'to_status': physical.get('Status', row.get('Status', '')),
-        'action_type': action, 'source': 'CUSTOMER_FIRST', 'recorded_at': recorded_at or datetime.now(timezone.utc).isoformat(),
+        'action_type': action, 'source': 'EVIDENCE_RECONCILE' if factual else 'CUSTOMER_FIRST', 'recorded_at': recorded_at or datetime.now(timezone.utc).isoformat(),
         'lead_id': company_id(decoded), 'writer': event['run_id'], 'reason': event.get('reason', kind),
         'evidence': dumps(event), 'code_version': VERSION, 'idempotency_key': event['event_id'],
-        'canonical_action_id': event['event_id'], 'source_origins': 'CUSTOMER_FIRST'}
+        'canonical_action_id': canonical_id, 'source_origins': 'SSOT / CUSTOMER_FIRST'}
     if len(canonical['evidence']) > 45000:
         raise ValueError('EVENT_CAPACITY_REQUIRES_ARCHIVAL')
     requests.append({'appendCells': {'sheetId': ledger_id, 'rows': [{'values': [cell(canonical.get(h, '')) for h in ledger_headers]}], 'fields': 'userEnteredValue'}})
@@ -248,30 +258,21 @@ class CustomerSheet:
         return {'written': True, 'row_number': row_number, 'state': plan['changes'].get('営業メール状態', before.get('営業メール状態', ''))}
 
     def register(self, candidate, evidence, run_id):
-        """SSOT registration before drafting; existing rows and statuses retained."""
         name, website = text(candidate.get('company_name')), text(candidate.get('website'))
         existing = self.find(name, website)
         if existing:
             return existing
-        if evidence.get('company_verified') is not True or evidence.get('decision') != 'GO' or not evidence.get('source_url') or not evidence.get('quote'):
-            raise ValueError('PRIMARY_QUALIFICATION_EVIDENCE_REQUIRED')
-        if candidate.get('hq_country') in {'Japan', '日本', 'JP'} or evidence.get('ceased') is True:
-            raise ValueError('EXCLUDED_COMPANY')
-        now = datetime.now(timezone.utc).isoformat()
-        key = company_id(candidate)
-        record = {'company_name': name, 'website': website, 'Status': '未接触',
-            'Category': candidate.get('Category', 'その他'), 'hq_country': candidate.get('hq_country', ''),
-            'record_origin': VERSION, 'added_at': now, '営業判定': 'GO', 'research_sources': evidence['source_url'],
-            'selection_reason': evidence.get('reason', evidence['quote']), '営業メール状態': 'QUALIFIED',
-            'AI次アクション': '企業別営業精査・個別文面作成', 'AI更新日時': now,
-            'AI実行JSON': dumps({'customer_first': {'version': VERSION, 'company_id': key,
-                 'qualification': evidence, 'registration_run_id': run_id}})}
-        self.service.spreadsheets().batchUpdate(spreadsheetId=SSOT_ID, body={'requests': [{'appendCells': {
-            'sheetId': self.props['sheetId'], 'rows': [{'values': [cell(record.get(h, '')) for h in self.headers]}], 'fields': 'userEnteredValue'}}]}).execute()
+        proposal = plan_registration(candidate, evidence, self.identities(), identity_scan_complete=True,
+            headers=self.headers, sheet_id=self.props['sheetId'], ledger_headers=self.ledger_headers,
+            ledger_id=self.tabs[LEDGER_TAB]['sheetId'], run_id=run_id,
+            occurred_at=datetime.now(timezone.utc).isoformat())
+        if proposal['existing']:
+            return self.read(proposal['row_number'])
+        self.service.spreadsheets().batchUpdate(spreadsheetId=SSOT_ID, body={'requests': proposal['requests']}).execute()
         self._identity = None
         refreshed = self.service.spreadsheets().get(spreadsheetId=SSOT_ID, fields='sheets.properties').execute()
         self.props = next(s['properties'] for s in refreshed['sheets'] if s['properties']['title'] == SSOT_TAB)
-        found = self.find(name, website, key)
+        found = self.find(name, website, proposal['company_id'])
         if not found:
             raise RuntimeError('SSOT_REGISTER_UNCONFIRMED_RECONCILE')
         return found
@@ -297,3 +298,62 @@ class CustomerSheet:
         event['rescue_draft'] = dict(result.get('draft') or {})
         event['rescue_recipient'] = (result.get('audit') or {}).get('recipient', '')
         return self.apply(row['row_number'], event)
+
+
+def plan_registration(candidate, evidence, existing_rows, *, identity_scan_complete,
+                      headers, sheet_id, ledger_headers, ledger_id, run_id, occurred_at,
+                      status_validation=None):
+    """Pure registration plan, following a completed fresh identity scan.
+
+    A single producer owns insertion. Re-read identity immediately before append;
+    read the exact new company back afterwards. A timeout is reconciled by key.
+    No message permission or customer send is created by registration.
+    """
+    from customer_care import aware
+    validate_headers(headers)
+    aware(occurred_at)
+    if identity_scan_complete is not True or not run_id:
+        raise ValueError('REGISTRATION_SCAN_OR_RUN_REQUIRED')
+    name, host = text(candidate.get('company_name')), domain(candidate.get('website'))
+    if not name or not host:
+        raise ValueError('REGISTRATION_IDENTITY_REQUIRED')
+    related = [r for r in existing_rows if norm(r.get('company_name')) == norm(name) or domain(r.get('website')) == host]
+    if related:
+        if len(related) == 1 and norm(related[0].get('company_name')) == norm(name) and domain(related[0].get('website')) == host:
+            return {'existing': True, 'requests': [], 'company_id': company_id(decode_row(related[0])),
+                    'row_number': related[0].get('row_number')}
+        raise ValueError('REGISTRATION_IDENTITY_AMBIGUOUS')
+    quote = text(evidence.get('quote'))
+    if evidence.get('company_verified') is not True or evidence.get('decision') != 'GO' or not domain(evidence.get('source_url')) or not quote or quote not in str(evidence.get('source_text') or ''):
+        raise ValueError('REGISTRATION_PRIMARY_EVIDENCE_REQUIRED')
+    if norm(candidate.get('hq_country')) in {'japan', '日本', 'jp'} or evidence.get('ceased') is True:
+        raise ValueError('REGISTRATION_EXCLUDED_COMPANY')
+    key = company_id(candidate)
+    event_id = 'registered:' + key
+    event = {'event_id': event_id, 'company_id': key, 'company_name': name, 'website': candidate['website'],
+             'kind': 'REGISTERED', 'status': 'REGISTERED', 'event_type': 'REGISTERED',
+             'run_id': run_id, 'occurred_at': occurred_at, 'evidence': evidence}
+    record = {'company_name': name, 'website': candidate['website'], 'Status': '未接触',
+        'Category': candidate.get('Category', 'その他'), 'hq_country': candidate.get('hq_country', ''),
+        'record_origin': VERSION, 'added_at': occurred_at, '営業判定': 'GO',
+        'research_sources': evidence['source_url'], 'selection_reason': evidence.get('reason', quote),
+        '営業メール状態': 'QUALIFIED', 'AI次アクション': '企業別精査・宛先確認・個別文面作成',
+        'AI更新日時': occurred_at, 'AI最終イベントID': event_id, 'Sales_History_JSON': dumps([event]),
+        'AI実行JSON': dumps({'customer_first': {'version': VERSION, 'company_id': key,
+            'qualification': evidence, 'raw_id': candidate.get('raw_id', ''), 'registration_run_id': run_id}})}
+    cells = [cell(record.get(h, '')) for h in headers]
+    if status_validation:
+        cells[headers.index('Status')]['dataValidation'] = status_validation
+    ledger = {'event_id': event_id, 'occurred_at': occurred_at,
+        'date': aware(occurred_at).astimezone(ZoneInfo('Asia/Tokyo')).date().isoformat(),
+        'company_key': key, 'company_name': name, 'action_type': 'REGISTERED', 'source': 'CUSTOMER_FIRST',
+        'recorded_at': occurred_at, 'writer': run_id, 'evidence': dumps(event),
+        'idempotency_key': event_id, 'canonical_action_id': event_id, 'code_version': VERSION}
+    requests = [
+        {'appendCells': {'sheetId': sheet_id, 'rows': [{'values': cells}], 'fields': 'userEnteredValue,dataValidation'}},
+        {'appendCells': {'sheetId': ledger_id, 'rows': [{'values': [cell(ledger.get(h, '')) for h in ledger_headers]}], 'fields': 'userEnteredValue'}},
+    ]
+    if any(len(str(v)) > 45000 for v in record.values()):
+        raise ValueError('REGISTRATION_EVIDENCE_TOO_LARGE')
+    return {'existing': False, 'spreadsheet_id': SSOT_ID, 'company_id': key, 'record': record,
+            'event_id': event_id, 'requests': requests, 'requires_identity_readback': True}
