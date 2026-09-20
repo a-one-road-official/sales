@@ -48,10 +48,17 @@ def validate_stub(monkeypatch):
 def ready(validate_stub):
     r = row()
     p = dict(company_id=s.identity(r)[0], website=r['website'], generator='chatgpt_master_agent',
-             draft={'subject': 'Fixture', 'body': 'Company-specific verified copy', 'master_prompt_hash': 'fixture'},
+             draft={'subject': 'Fixture', 'body': 'Hi Fixture Works team,\n\nCompany-specific verified copy', 'master_prompt_hash': 'fixture'},
              generated_at=NOW, review={k:True for k in s.REVIEW_KEYS},
              evidence=[dict(url='https://fixture.example/product', excerpt='Actual fixture product.', relevance='Company'),
                        dict(url='https://primary.example/report', excerpt='Source quotation.', relevance='Japan workflow')])
+    from customer_care import CUSTOMER_CHECKS, customer_packet_hash
+    p['recipient_evidence'] = {'email': r['営業メール宛先'], 'source_url': r['website'] + '/contact', 'source_excerpt': r['営業メール宛先']}
+    for source in p['evidence']:
+        source['source_text'] = 'Synthetic fixture source: ' + source['excerpt']
+    p['customer_review'] = {k: True for k in CUSTOMER_CHECKS}
+    p['customer_review'].update(reviewer_run_id='synthetic-test-review', reviewed_at=NOW, reason='Positive local fixture, not a customer.')
+    p['customer_review']['packet_sha256'] = customer_packet_hash(r, p)
     p['email_sha256'] = s.body_hash(p['draft']['subject'], p['draft']['body'])
     return apply(r, 'DRAFT_READY', packet=p)
 

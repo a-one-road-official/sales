@@ -67,3 +67,19 @@ Human surface: primary-sheet filter views AI｜失敗・保留・結果不明, A
 No distributed compare-and-swap is claimed for Sheets. One automatic sender owns its claim; fresh re-reads plus append-only events handle conflicts and uncertain writes. Human takeover during an already-issued Gmail call cannot cancel that call; reconcile before any resend. Keep hidden background processes absent.
 
 CI + schema + task configuration proves implementation, not 24-hour capacity or 1,500 real contacts. Acceptance also requires real scheduled cycles, same-row preclaim-failure recovery, Gmail receipts, matching ledger/UI counts and actual reply/meeting linkage. Report unverified elements explicitly.
+
+
+## Customer-specific quality hardening (2026-09-20)
+The canonical workflow/state/writer remains ssot_terminal.py. customer_care.py supplies only stateless customer-quality checks; do not add another queue, projection or timer.
+
+Every SSOT packet must include recipient_evidence={email,source_url,source_excerpt}; a person's first_name requires person_name_source. Each company/Japan evidence entry retains the actual captured source_text, its exact excerpt and relevance. Fetch the real source first; never manufacture source_text by copying a claimed quotation into it. Keep excerpts bounded and retain source URLs. A short company alias requires company_alias_evidence.
+
+After finalizing the recipient, subject, complete body and supporting evidence, the ChatGPT producer must reread as the recipient. Check sender_identity, recipient_fit, facts_supported, authorized_offer, natural_language and individualized. Record actual booleans, reviewer_run_id, reviewed_at and a concrete reason in customer_review. Compute customer_review.packet_sha256 with customer_care.customer_packet_hash(row,packet). For a DRAFT_READY event with a new recipient, hash a row containing that exact proposed recipient. Do not invent review provenance. The fingerprint does not prove semantic truth: actual source and commercial-scope review remain required.
+
+ssot_terminal.verify_draft runs these checks during draft saving, preflight and final submit request. An edited recipient, name, source or message invalidates the approval. Missing review is HOLD/COPY_REVIEW; retain original text and genuinely re-review it. Reuse unchanged text; no transport-triggered regeneration. The sender reads the full final subject/body and critical evidence too, may hold a defective draft, and never silently rewrites it.
+
+For a failed first draft, pass rescue_draft={subject,body} and rescue_recipient with HOLD/FAILED. The existing reducer saves available bytes in the same SSOT row without marking them ready or overwriting an existing draft. Keep definite failure, uncertain submission, human ownership and advanced sales stage rules unchanged.
+
+Forms verify actual DOM first/last/full names, company and email before every Next/final submit: Kazuma / Tamura, Kazuma Tamura, A-one road Co., Ltd., admin@a1-road.com. Ambiguous names or page-side mutation block the action. The local regression includes a page rewriting names to A1/A1 and proves no POST occurs in that case.
+
+Canonical real-send events use OUTBOUND_SENT, human replies REPLY_RECEIVED, held meetings MEETING_COMPLETED and source EVIDENCE_RECONCILE so current Sales Control formulas include them. canonical_action_id uses the actual Gmail ID without an extra prefix, deduplicating the existing CRM imports. For Calendar backfills, reuse a previously matched canonical_action_id; never invent a second meeting identity. Preparation/errors remain source ssot-terminal-v1 and count as zero sends.
