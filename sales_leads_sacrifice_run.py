@@ -1091,7 +1091,7 @@ def run_ten_sacrifice_batch(
         results.append(result)
         from outreach_evidence import save_local_evidence
         save_local_evidence(run_id, result)
-        if execute_external and authorization is not None:
+        if execute_external:
             _record_attempt(sheets, run_id=run_id, candidate=candidate, result=result)
             save_local_evidence(run_id, result)
             if not result.get("audit_log_verified"):

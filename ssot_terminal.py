@@ -184,10 +184,12 @@ def verify_draft(row, packet, now):
     checked = stamp(packet.get('rechecked_at') or packet['generated_at'])
     if generated > stamp(now) or checked > stamp(now) or (stamp(now)-checked) > timedelta(hours=48):
         raise ValueError('evidence_recheck_required_preserve_copy')
+    from customer_care import verify_customer_packet
+    verify_customer_packet(row, packet, now)
 
 
 def has_sent(row):
-    return bool(row.get('Last_Outbound_Message_ID') or text(row.get('Status')) in SENT_STATUSES
+    return bool(row.get('Last_Outbound_Message_ID') or row.get('Last_Outbound_At') or row.get('First_Contacted_At') or text(row.get('Status')) in SENT_STATUSES
                 or any(e.get('kind') in ('SENT', 'MANUAL_SENT', 'FORM_SENT') or
                        e.get('status') in ('SENT', 'FORM_SENT') for e in history(row)))
 
@@ -203,6 +205,8 @@ def preflight(row, proof, now, require_window=True):
         raise ValueError('unresolved_claim_reconcile_first')
     if row.get(STATE) not in ('DRAFT_READY', 'SEND_READY', 'FAILED'):
         raise ValueError('draft_not_ready')
+    if row.get('営業判定') != 'GO':
+        raise ValueError('qualification_not_go')
     if (proof.get('campaign_approved') is not True or row.get('営業メール送信可否') != '許可'
             or row.get('営業メール承認') not in ('承認済み', 'APPROVED')):
         raise ValueError('campaign_not_authorized')
@@ -285,7 +289,11 @@ def reduce_event(row, event, now):
     elif kind == 'DRAFT_READY':
         if has_sent(row) or m.get('claim') or m.get('reply_id'):
             raise ValueError('existing_contact_or_claim_preserve_copy')
-        packet = deepcopy(e['packet']); verify_draft(row, packet, now)
+        packet = deepcopy(e['packet'])
+        review_row = deepcopy(row)
+        if e.get('recipient'):
+            review_row['営業メール宛先'] = e['recipient']
+        verify_draft(review_row, packet, now)
         m['packet'] = packet
         patch.update({'営業メール件名': packet['draft']['subject'], '営業メール本文': packet['draft']['body'],
                       '営業メール根拠': dump(packet['evidence']), '営業メール生成日時': packet['generated_at']})
@@ -361,6 +369,10 @@ def reduce_event(row, event, now):
             if status in INITIAL and kind != 'HOLD':
                 patch['Status'] = 'AI送信結果不明' if out == 'UNKNOWN' else 'AI送信失敗'
         e['outcome'] = out
+        rescue = e.get('rescue_draft') or {}
+        for field, value in (('営業メール件名', rescue.get('subject')), ('営業メール本文', rescue.get('body')), ('営業メール宛先', e.get('rescue_recipient'))):
+            if value and not row.get(field):
+                patch[field] = value
     elif kind == 'HUMAN_TAKEOVER':
         if m.get('claim') or row.get(STATE) in ('SUBMITTING', 'UNKNOWN'):
             raise ValueError('reconcile_before_manual_send')
@@ -480,13 +492,17 @@ def sheet_requests(row, plan, headers, event_headers, existing_event_ids=()):
         requests.append({'updateCells': {'start': {'sheetId': SALES_SHEET_ID, 'rowIndex': n-1, 'columnIndex': headers.index(field)},
                                         'rows': [{'values': [cell(value)]}], 'fields': 'userEnteredValue'}})
     e = plan['event']; at = e['occurred_at']
+    kind = e['kind']
+    action = {'SENT': 'OUTBOUND_SENT', 'MANUAL_SENT': 'OUTBOUND_SENT', 'REPLIED': 'REPLY_RECEIVED', 'MEETING_HELD': 'MEETING_COMPLETED', 'MEETING_BOOKED': 'APPOINTMENT_CONFIRMED'}.get(kind, kind)
+    factual = kind in {'SENT', 'MANUAL_SENT', 'REPLIED', 'MEETING_HELD', 'MEETING_BOOKED'}
+    canonical_id = e.get('canonical_action_id') or (e.get('message_id') if kind in {'SENT', 'MANUAL_SENT', 'REPLIED'} else '') or e['event_id']
     canonical = {'event_id': e['event_id'], 'occurred_at': at,
                  'date': stamp(at).astimezone(ZoneInfo('Asia/Tokyo')).date().isoformat(),
                  'source_row': str(n), 'company_key': identity(row)[0], 'company_name': row['company_name'],
-                 'action_type': e['kind'], 'source': VERSION, 'recorded_at': e['recorded_at'],
+                 'action_type': action, 'source': 'EVIDENCE_RECONCILE' if factual else VERSION, 'recorded_at': e['recorded_at'],
                  'writer': VERSION, 'reason': e.get('reason', ''), 'evidence': dump(e),
                  'idempotency_key': e['event_id'], 'code_version': VERSION,
-                 'canonical_action_id': ('gmail:' + e['message_id']) if e.get('kind') in ('SENT', 'MANUAL_SENT') else e['event_id']}
+                 'canonical_action_id': canonical_id, 'source_origins': 'SSOT / ' + VERSION}
     requests.append({'appendCells': {'sheetId': EVENT_SHEET_ID,
                                      'rows': [{'values': [cell(canonical.get(h, '')) for h in event_headers]}],
                                      'fields': 'userEnteredValue'}})
