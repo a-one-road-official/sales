@@ -577,7 +577,6 @@ def sheet_requests(row, plan, headers, event_headers, existing_event_ids=()):
     canonical = {'event_id': e['event_id'], 'occurred_at': at,
                  'date': stamp(at).astimezone(ZoneInfo('Asia/Tokyo')).date().isoformat(),
                  'source_row': str(n), 'company_key': identity(row)[0], 'company_name': row['company_name'],
-                 'from_status': text(row.get(STATE)), 'to_status': plan['changes'].get(STATE, text(row.get(STATE))),
                  'action_type': action, 'source': 'EVIDENCE_RECONCILE' if factual else VERSION, 'recorded_at': e['recorded_at'],
                  'writer': VERSION, 'reason': e.get('reason', ''), 'evidence': dump(e),
                  'idempotency_key': e['event_id'], 'code_version': VERSION,
