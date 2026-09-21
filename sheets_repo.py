@@ -288,6 +288,38 @@ class SheetsRepo:
                 self._ensure_header(sheet, header)
 
 
+    def ensure_nagano_schema(self) -> None:
+        """Add the minimal Nagano Litmus fields to the technical result and human SSOT."""
+        technical_headers = (
+            "employee_count",
+            "annual_revenue_amount",
+            "annual_revenue_currency",
+            "founded_year",
+            "industries_served",
+            "exhibition_history",
+            "product_portfolio",
+            "nagano_litmus",
+            "nagano_priority",
+            "nagano_manufacturing_fit",
+            "nagano_commercial_maturity",
+            "nagano_industry_breadth",
+            "nagano_reason",
+            "nagano_version",
+        )
+        for header in technical_headers:
+            self._ensure_header("LeadFactory_GateResults", header)
+
+        sheet, _ = self._human_ssot_config()
+        for header in (
+            "Nagano_Litmus",
+            "Nagano_Commercial",
+            "Nagano_Breadth",
+            "Nagano_Reason",
+            "Nagano_Version",
+        ):
+            self._ensure_header(sheet, header)
+
+
     def _update_dict_fields(self, sheet: str, row_number: int, changes: dict) -> None:
         if not changes:
             return
@@ -1341,7 +1373,7 @@ class SheetsRepo:
             "japan_checked_at": first_value("evaluated_at") if (g6_or_m3_result or japan_evidence) else "",
             "original_domain": domain,
             "subcategory": first_value("subcategory") or lane_subcategory,
-            "priority": first_value("priority", "priority_signal"),
+            "priority": first_value("nagano_priority", "priority", "priority_signal"),
             "classification_confidence": first_value("classification_confidence", "confidence"),
             "selection_reason": first_value("selection_reason", "most_important_reason", "M3_reason"),
             "record_origin": "LeadFactory",
@@ -1371,6 +1403,11 @@ class SheetsRepo:
             "LF_duplicate_state": first_value("duplicate_state"),
             "LF_intake_status": first_value("intake_status"),
             "LF_history": f"{now}|PROMOTED|{first_value('final_result', 'screening_status')}",
+            "Nagano_Litmus": first_value("nagano_litmus"),
+            "Nagano_Commercial": first_value("nagano_commercial_maturity"),
+            "Nagano_Breadth": first_value("nagano_industry_breadth"),
+            "Nagano_Reason": first_value("nagano_reason"),
+            "Nagano_Version": first_value("nagano_version"),
         }
 
     def promote_candidates_batch(self, candidates: list[dict], max_rows: int = 500) -> list[dict]:
@@ -1662,6 +1699,12 @@ class SheetsRepo:
             if lane_key == "GROWTH" and source_type.startswith("MITTELSTAND_"):
                 continue
             out.append(d)
+        priority_rank = {"P1": 0, "P2": 1, "P3": 2, "": 3, "HOLD": 4}
+        out.sort(key=lambda item: (
+            priority_rank.get(str(item.get("nagano_priority") or "").strip().upper(), 3),
+            str(item.get("evaluated_at") or ""),
+            str(item.get("company_name") or ""),
+        ))
         return out
 
 
