@@ -82,3 +82,33 @@ For a failed first draft, pass rescue_draft={subject,body} and rescue_recipient 
 Forms verify actual DOM first/last/full names, company and email before every Next/final submit: Kazuma / Tamura, Kazuma Tamura, A-one road Co., Ltd., admin@a1-road.com. Ambiguous names or page-side mutation block the action. The local regression includes a page rewriting names to A1/A1 and proves no POST occurs in that case.
 
 Canonical real-send events use OUTBOUND_SENT, human replies REPLY_RECEIVED, held meetings MEETING_COMPLETED and source EVIDENCE_RECONCILE so current Sales Control formulas include them. canonical_action_id uses the actual Gmail ID without an extra prefix, deduplicating the existing CRM imports. For Calendar backfills, reuse a previously matched canonical_action_id; never invent a second meeting identity. Preparation/errors remain source ssot-terminal-v1 and count as zero sends.
+
+## Canonical staged send ledger
+
+The current state is the SSOT company row and the append-only `SalesOS_Action_Events` ledger. Legacy
+`outreach_engine_log` / `CONNECTOR_HANDOFF` rows are historical evidence only and MUST NOT be
+used to infer that a company was not sent.
+
+Every automatic first-contact send must progress through explicit, read-backed stages under one
+company ID and one reservation claim:
+
+```
+DRAFT_READY
+  -> SEND_READY
+  -> RESERVED
+  -> SUBMIT_REQUESTED
+  -> SENT
+```
+
+Each transition is persisted to the company row and appended to `SalesOS_Action_Events`, then read
+back before the next transition. The Gmail call occurs only after `SUBMIT_REQUESTED` has been
+persisted. Its returned Gmail message is re-read and only a verified SENT receipt may produce the
+`SENT` event.
+
+A crash after `SUBMIT_REQUESTED` but before `SENT` is not retried blindly. The company remains
+SUBMITTING/UNKNOWN and the next run reconciles Gmail first. Gmail SENT/inbound history is the
+authoritative final-delivery evidence; legacy handoff logs are not.
+
+Immediately before reservation, the sender also re-checks the exact recipient address on a current
+official company page. A stale address copied from intake is insufficient. The proof must contain the
+exact address, official URL/excerpt, and a fresh checked_at timestamp.
