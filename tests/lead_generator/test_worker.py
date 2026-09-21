@@ -58,6 +58,11 @@ class Tests(unittest.TestCase):
     def test_excluded_us_rejected(self):
         r=record();r['country']='United States'
         self.assertEqual(qualification(r)['decision'],'REJECT')
+    def test_audited_direct_japan_and_acquired_domains_rejected(self):
+        r=record();r['website']='https://www.alfalaval.com/'
+        self.assertEqual(qualification(r)['decision'],'REJECT')
+        r=record();r['website']='https://www.arculus.de/'
+        self.assertEqual(qualification(r)['decision'],'REJECT')
     def test_vdma_membership_is_valid_or_signal_without_exhibition(self):
         r=record();r.pop('exhibition_proof');r.pop('commercial_proof');r['payment_capacity']={}
         r['source_family']='vdma_members'
