@@ -31,11 +31,20 @@ def apply(r, kind, **kw):
 
 
 def proof(r):
+    recipient = r['営業メール宛先']
     return dict(campaign_approved=True, identity_verified=True, recipient_verified=True,
                 history_complete=True, no_prior_send=True, no_reply=True, no_opt_out=True,
-                sender_verified=True, sender=s.SENDER, history_query='in:sent to:fixture.example',
+                sender_verified=True, sender=s.SENDER, history_query='gmail-authoritative-all-time',
+                history_source='GMAIL',
+                gmail_sent_query_complete=True, gmail_inbound_query_complete=True,
+                gmail_sent_query=f'in:sent to:{recipient} -in:trash -in:spam',
+                gmail_inbound_query=f'from:{recipient} -in:trash -in:spam',
+                gmail_sent_match_count=0, gmail_human_reply_match_count=0,
                 recipient_evidence_url='https://fixture.example/contact',
-                recipient=r['営業メール宛先'], checked_at=NOW)
+                recipient_evidence_email=recipient, recipient_evidence_kind='OFFICIAL',
+                recipient_evidence_excerpt=f'Contact us at {recipient}',
+                recipient_evidence_checked_at=NOW,
+                recipient=recipient, checked_at=NOW)
 
 
 @pytest.fixture
@@ -222,6 +231,32 @@ def test_corrupt_history_never_erased(bad):
 def test_each_preflight_guard_stays_required(validate_stub,field):
     r=ready(validate_stub); p=proof(r); p[field]=False
     with pytest.raises(ValueError,match='send_check_required'): s.preflight(r,p,NOW)
+
+
+def test_legacy_handoff_log_cannot_prove_not_sent(validate_stub):
+    r=ready(validate_stub); p=proof(r); p['history_source']='LEGACY_LOG'
+    with pytest.raises(ValueError,match='gmail_history_must_be_authoritative'):
+        s.preflight(r,p,NOW)
+
+
+def test_actual_gmail_sent_match_blocks_duplicate(validate_stub):
+    r=ready(validate_stub); p=proof(r); p['gmail_sent_match_count']=1
+    with pytest.raises(ValueError,match='prior_send_exists'):
+        s.preflight(r,p,NOW)
+
+
+def test_stale_or_changed_recipient_evidence_blocks_send(validate_stub):
+    r=ready(validate_stub); p=proof(r); p['recipient_evidence_email']='other@fixture.example'
+    with pytest.raises(ValueError,match='recipient_evidence_email_mismatch'):
+        s.preflight(r,p,NOW)
+
+
+def test_send_stage_cannot_skip_reservation_and_submit_request(validate_stub):
+    r=ready(validate_stub)
+    receipt=dict(message_id='m',thread_id='t',sender=s.SENDER,recipient=r['営業メール宛先'],
+                 label_ids=['SENT'],verified=True,sent_at=NOW,email_sha256=s.load_object(r[s.META])['packet']['email_sha256'])
+    with pytest.raises(ValueError,match='invalid_stage_transition'):
+        apply(r,'SENT',claim_id='no-claim',receipt=receipt)
 
 
 def test_human_approval_revocation_is_respected(validate_stub):

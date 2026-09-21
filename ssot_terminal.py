@@ -194,6 +194,54 @@ def has_sent(row):
                        e.get('status') in ('SENT', 'FORM_SENT') for e in history(row)))
 
 
+def verify_gmail_authority(proof, recipient):
+    """Gmail SENT/inbound search is authoritative; legacy handoff/status is never proof of non-send."""
+    if proof.get('history_source') != 'GMAIL':
+        raise ValueError('gmail_history_must_be_authoritative')
+    for key in ('gmail_sent_query_complete', 'gmail_inbound_query_complete'):
+        if proof.get(key) is not True:
+            raise ValueError('gmail_history_query_incomplete:' + key)
+    sent_query = text(proof.get('gmail_sent_query')).casefold()
+    inbound_query = text(proof.get('gmail_inbound_query')).casefold()
+    address = text(recipient).casefold()
+    if 'in:sent' not in sent_query or ('to:' + address) not in sent_query:
+        raise ValueError('gmail_sent_query_not_exact_recipient')
+    if ('from:' + address) not in inbound_query:
+        raise ValueError('gmail_inbound_query_not_exact_recipient')
+    try:
+        sent_count = int(proof.get('gmail_sent_match_count'))
+        human_reply_count = int(proof.get('gmail_human_reply_match_count'))
+    except (TypeError, ValueError) as exc:
+        raise ValueError('gmail_history_counts_required') from exc
+    if sent_count != 0:
+        raise ValueError('gmail_prior_send_exists_reconcile_ssot')
+    if human_reply_count != 0:
+        raise ValueError('gmail_prior_reply_exists_reconcile_ssot')
+    return True
+
+
+def verify_fresh_recipient_authority(row, proof, now):
+    """The exact address must be visible on a freshly checked official company page."""
+    recipient = text(row.get('営業メール宛先')).casefold()
+    if text(proof.get('recipient_evidence_email')).casefold() != recipient:
+        raise ValueError('fresh_recipient_evidence_email_mismatch')
+    source_url = text(proof.get('recipient_evidence_url'))
+    source_excerpt = text(proof.get('recipient_evidence_excerpt'))
+    if text(proof.get('recipient_evidence_kind')).upper() != 'OFFICIAL':
+        raise ValueError('fresh_recipient_evidence_not_official')
+    if recipient not in source_excerpt.casefold():
+        raise ValueError('fresh_recipient_not_visible_in_source')
+    company_host = host(row.get('website'))
+    source_host = host(source_url)
+    if not (source_host == company_host or source_host.endswith('.' + company_host)
+            or company_host.endswith('.' + source_host)):
+        raise ValueError('fresh_recipient_source_domain_mismatch')
+    checked = stamp(proof.get('recipient_evidence_checked_at'))
+    if not timedelta(0) <= stamp(now) - checked <= timedelta(minutes=5):
+        raise ValueError('fresh_recipient_evidence_required')
+    return True
+
+
 def preflight(row, proof, now, require_window=True):
     """Evidence acquisition stays in connected tools; unknown != no prior contact."""
     m = load_object(row.get(META))
@@ -225,6 +273,8 @@ def preflight(row, proof, now, require_window=True):
         raise ValueError('recipient_required')
     if proof.get('recipient', '').lower() != recipient:
         raise ValueError('recipient_changed')
+    verify_gmail_authority(proof, recipient)
+    verify_fresh_recipient_authority(row, proof, now)
     checked = stamp(proof['checked_at'])
     if not timedelta(0) <= stamp(now)-checked <= timedelta(minutes=5):
         raise ValueError('fresh_send_checks_required')
@@ -259,6 +309,32 @@ def confirm_delivery(row, proof, now, claim_id):
     return True
 
 
+STAGE_TRANSITIONS = {
+    'RESEARCH_PENDING': {'QUALIFIED', 'DRAFT_READY', 'HOLD', 'FAILED'},
+    'DRAFT_READY': {'DRAFT_READY', 'SEND_READY', 'HOLD', 'FAILED', 'HUMAN_TAKEOVER'},
+    'SEND_READY': {'RESERVED', 'HOLD', 'FAILED', 'HUMAN_TAKEOVER'},
+    'SUBMITTING': {'SUBMIT_REQUESTED', 'SENT', 'UNKNOWN', 'FAILED'},
+    'UNKNOWN': {'SENT', 'RECONCILED_NOT_SENT', 'HUMAN_TAKEOVER'},
+    'FAILED': {'DRAFT_READY', 'SEND_READY', 'HOLD', 'HUMAN_TAKEOVER'},
+    'HOLD': {'DRAFT_READY', 'SEND_READY', 'HUMAN_TAKEOVER'},
+    'SENT': {'REPLIED', 'OPTOUT', 'BOUNCED', 'MEETING_BOOKED'},
+}
+
+
+def assert_stage_transition(row, kind):
+    """Every outbound step is explicit; never skip from a draft straight to SENT."""
+    current = text(row.get(STATE)) or 'RESEARCH_PENDING'
+    if kind in {'DRAFT_READY', 'SEND_READY', 'RESERVED', 'SUBMIT_REQUESTED',
+                'SENT', 'UNKNOWN', 'FAILED', 'HOLD', 'HUMAN_TAKEOVER',
+                'RECONCILED_NOT_SENT'}:
+        allowed = STAGE_TRANSITIONS.get(current, set())
+        if kind not in allowed:
+            # SUBMIT_REQUESTED keeps the projection in SUBMITTING; it is still a distinct event.
+            if not (current == 'SUBMITTING' and kind == 'SUBMIT_REQUESTED'):
+                raise ValueError(f'invalid_stage_transition:{current}->{kind}')
+    return current
+
+
 def reduce_event(row, event, now):
     """Produce narrow changes + immutable event, never a full replacement row."""
     key, company, domain = assert_identity(row, event)
@@ -271,6 +347,7 @@ def reduce_event(row, event, now):
     prior = history(row)
     if any(e.get('event_id') == eid for e in prior):
         return {'duplicate': True, 'changes': {}, 'event': event}
+    previous_stage = assert_stage_transition(row, kind)
     m = load_object(row.get(META)); m['company_id'] = key
     patch = {}; e = deepcopy(event)
     is_late = bool(row.get('AI更新日時') and stamp(at) < stamp(row['AI更新日時']))
@@ -449,6 +526,8 @@ def reduce_event(row, event, now):
         patch = {}; m = load_object(row.get(META))
     e.update({'company_id': key, 'company_name': company, 'website': row['website'], 'recorded_at': iso(now)})
     compact = {k: v for k, v in e.items() if k not in ('proof', 'receipt')}
+    compact['from_stage'] = previous_stage
+    compact['to_stage'] = patch.get(STATE, previous_stage)
     if e.get('receipt'):
         compact.update({k: e['receipt'].get(k) for k in ('message_id', 'thread_id', 'recipient', 'sent_at')})
     prior.append(compact)
