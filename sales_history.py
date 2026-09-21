@@ -143,16 +143,28 @@ def is_outbound_attempt_event(event: dict) -> bool:
     return is_contact_event(event) or status in ATTEMPT_EVENT_STATUSES or event_type in ATTEMPT_EVENT_TYPES
 
 
-def has_contact_history(row: dict) -> bool:
+def has_delivery_history(row: dict) -> bool:
+    """Recipient-side contact evidence, used only for lifecycle/status promotion."""
     status = text(row.get("Status"))
     if status in CONTACTED_STATUSES:
         return True
-    if any(text(row.get(k)) for k in SALES_HISTORY_FIELDS if k != HISTORY_FIELD):
+    if text(row.get(FIRST_CONTACTED_FIELD)):
+        return True
+    return any(is_contact_event(item) for item in parse_history(row.get(HISTORY_FIELD)))
+
+
+def has_contact_history(row: dict) -> bool:
+    """Any durable outbound attempt; used to suppress duplicate first contact."""
+    if has_delivery_history(row):
+        return True
+    if any(text(row.get(k)) for k in (
+        LAST_OUTBOUND_AT_FIELD, LAST_OUTBOUND_MESSAGE_ID_FIELD,
+        LAST_OUTBOUND_THREAD_ID_FIELD, LAST_OUTBOUND_RECIPIENT_FIELD,
+    )):
         return True
     raw = text(row.get(HISTORY_FIELD))
     if raw and not parse_history(raw) and raw not in {"[]", "null"}:
         return True  # corrupt history must not reopen outreach
-    # A provider-accepted attempt must never reopen first-contact automation.
     return any(is_outbound_attempt_event(item) for item in parse_history(row.get(HISTORY_FIELD)))
 
 
@@ -178,7 +190,7 @@ def guarded_status(current: Any, requested: Any, *, row: dict | None = None, sou
         return requested_value
 
     # Existing factual contact evidence can heal a corrupted/uncontacted display.
-    contacted = has_contact_history(row)
+    contacted = has_delivery_history(row)
     if contacted and requested_value in UNTOUCHED_STATUSES:
         return current_value if current_value not in UNTOUCHED_STATUSES else "送付済み"
     if contacted and requested_value in CLASSIFICATION_STATUSES:
