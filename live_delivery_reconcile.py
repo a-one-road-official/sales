@@ -107,7 +107,7 @@ def read_outbounds(date_jst):
         sidx = {str(h): i for i, h in enumerate(sales_header) if h}
         needed = {
             "Last_Outbound_Message_ID", "Last_Outbound_Thread_ID",
-            "Last_Outbound_Recipient", "Last_Outbound_At", "company_name",
+            "Last_Outbound_Recipient", "Last_Outbound_At", "company_name", "営業メール件名",
         }
         if not needed.issubset(sidx):
             raise RuntimeError("sales_delivery_schema_mismatch")
@@ -132,6 +132,7 @@ def read_outbounds(date_jst):
                 item["accepted_at"] = text(vals[sidx["Last_Outbound_At"]])
             if not item["company_name"]:
                 item["company_name"] = text(vals[sidx["company_name"]])
+            item["subject"] = text(vals[sidx["営業メール件名"]])
 
     result = [
         item for item in chosen.values()
