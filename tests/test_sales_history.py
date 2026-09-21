@@ -17,10 +17,21 @@ def test_contacted_record_cannot_regress_to_uncontacted():
     assert guarded_status("送付済み", "未接触", row=row) == "送付済み"
 
 
-def test_history_heals_uncontacted_status_after_a_prior_send():
+def test_gmail_accepted_history_blocks_duplicate_but_does_not_promote_status():
     history = append_history("", {
-        "status": "SENT",
+        "status": "GMAIL_ACCEPTED",
         "idempotency_key": "outbound:1",
+        "executed_at": "2026-09-15T00:00:00+00:00",
+    })
+    row = {"Status": "未接触", "Sales_History_JSON": history}
+    assert has_contact_history(row)
+    assert guarded_status("未接触", "未接触", row=row) == "未接触"
+
+
+def test_delivered_history_heals_uncontacted_status():
+    history = append_history("", {
+        "status": "DELIVERED",
+        "idempotency_key": "delivery:1",
         "executed_at": "2026-09-15T00:00:00+00:00",
     })
     row = {"Status": "未接触", "Sales_History_JSON": history}
@@ -75,7 +86,9 @@ def test_history_append_is_idempotent():
     assert len(parse_history(second)) == 1
 
 
-def test_sent_event_is_contact_event():
-    assert is_contact_event({"status": "SENT"})
+def test_delivery_event_is_contact_event_but_gmail_acceptance_is_not():
+    assert not is_contact_event({"status": "SENT"})
+    assert not is_contact_event({"status": "GMAIL_ACCEPTED"})
+    assert is_contact_event({"status": "DELIVERED"})
     assert is_contact_event({"event_type": "NEW_DM"})
     assert not is_contact_event({"status": "FAILED"})
