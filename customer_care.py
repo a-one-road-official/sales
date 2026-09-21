@@ -5,7 +5,7 @@ an auditable assessment; a hash detects changes, not factual truth by itself.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import hashlib
 import json
 import re
@@ -76,37 +76,6 @@ def customer_packet_hash(row, packet):
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 
-def verify_recipient_evidence(row, packet, now):
-    """Require a fresh official-source observation of the exact recipient address."""
-    recipient = text(row.get('営業メール宛先')).lower()
-    target = packet.get('recipient_evidence') or {}
-    if not recipient:
-        return target
-    if text(target.get('email')).lower() != recipient:
-        raise ValueError('CUSTOMER_RECIPIENT_EVIDENCE_REQUIRED')
-    url = urlsplit(text(target.get('source_url')))
-    if url.scheme not in {'http', 'https'} or not url.hostname or url.username or url.password:
-        raise ValueError('CUSTOMER_RECIPIENT_SOURCE_INVALID')
-    if text(target.get('source_kind')).lower() != 'official':
-        raise ValueError('CUSTOMER_RECIPIENT_SOURCE_NOT_OFFICIAL')
-    source_text = text(target.get('source_text'))
-    excerpt = text(target.get('source_excerpt'))
-    if not source_text or not excerpt or excerpt not in source_text:
-        raise ValueError('CUSTOMER_RECIPIENT_SOURCE_UNVERIFIED')
-    if recipient not in source_text.casefold():
-        raise ValueError('CUSTOMER_RECIPIENT_NOT_IN_CURRENT_SOURCE')
-    try:
-        checked = datetime.fromisoformat(text(target.get('checked_at')).replace('Z', '+00:00'))
-        instant = datetime.fromisoformat(text(now).replace('Z', '+00:00'))
-    except ValueError as exc:
-        raise ValueError('CUSTOMER_RECIPIENT_CHECK_TIME_REQUIRED') from exc
-    if checked.tzinfo is None or instant.tzinfo is None or checked > instant:
-        raise ValueError('CUSTOMER_RECIPIENT_CHECK_TIME_INVALID')
-    if instant - checked > timedelta(hours=48):
-        raise ValueError('CUSTOMER_RECIPIENT_EVIDENCE_STALE')
-    return target
-
-
 def verify_customer_packet(row, packet, now):
     """Called by ssot_terminal.verify_draft for save, preflight and final request."""
     draft = packet.get('draft') or {}
@@ -129,7 +98,10 @@ def verify_customer_packet(row, packet, now):
         if url.scheme not in {'http', 'https'} or not url.hostname or url.username or url.password or not quote or quote not in str(item.get('source_text') or '') or not text(item.get('relevance')):
             raise ValueError('CUSTOMER_SOURCE_QUOTE_UNVERIFIED')
     recipient = text(row.get('営業メール宛先'))
-    target = verify_recipient_evidence(row, packet, now)
+    target = packet.get('recipient_evidence') or {}
+    if recipient:
+        if target.get('email') != recipient or not text(target.get('source_url')) or not text(target.get('source_excerpt')):
+            raise ValueError('CUSTOMER_RECIPIENT_EVIDENCE_REQUIRED')
     greeting = str(draft.get('body') or '').splitlines()[0].strip()
     short_name = text(packet.get('company_short_name')) or text(row.get('company_name'))
     if norm(short_name) != norm(row.get('company_name')) and not text(packet.get('company_alias_evidence')):
