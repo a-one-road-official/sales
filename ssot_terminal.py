@@ -344,6 +344,10 @@ STAGE_TRANSITIONS = {
                          'REPLIED', 'OPTOUT', 'MEETING_BOOKED'},
     'DEFERRED': {'DELIVERED', 'BOUNCED', 'REJECTED', 'UNKNOWN_LOG_GAP',
                  'REPLIED', 'OPTOUT', 'MEETING_BOOKED'},
+    # Legacy production rows already projected Gmail SENT as state=SENT.
+    # They may be reconciled into a real delivery outcome, but new SENT events are rejected.
+    'SENT': {'DELIVERED', 'BOUNCED', 'REJECTED', 'DEFERRED', 'UNKNOWN_LOG_GAP',
+             'REPLIED', 'OPTOUT', 'MEETING_BOOKED'},
     'DELIVERED': {'REPLIED', 'OPTOUT', 'MEETING_BOOKED'},
     'BOUNCED': {'HUMAN_TAKEOVER'},
     'REJECTED': {'HUMAN_TAKEOVER'},
