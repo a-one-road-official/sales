@@ -1,0 +1,108 @@
+name: Delivery reconciliation canary
+
+on:
+  workflow_dispatch:
+    inputs:
+      date_jst:
+        description: "JST date to reconcile"
+        required: false
+        default: "2026-09-21"
+      polls:
+        description: "Number of 5-minute reconciliation polls"
+        required: false
+        default: "24"
+  push:
+    branches: [fix/delivery-closed-loop-20260921]
+    paths:
+      - ".github/delivery-reconcile-trigger"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: delivery-reconciliation-canary
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    env:
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      LEAD_FACTORY_TASKS_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      PYTHONUNBUFFERED: "1"
+      DATE_JST: ${{ inputs.date_jst || '2026-09-21' }}
+      POLLS: ${{ inputs.polls || '24' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Install reconciliation runtime
+        run: |
+          python -m pip install --disable-pip-version-check google-auth google-api-python-client
+
+      - name: Poll Workspace delivery outcomes every five minutes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f live-delivery-report.json
+          for i in $(seq 1 "$POLLS"); do
+            echo "=== reconciliation poll $i/$POLLS ==="
+            python live_delivery_reconcile.py \
+              --date-jst "$DATE_JST" \
+              --target 70 \
+              --output live-delivery-report.json
+
+            python - <<'PY'
+          import json, os
+          report = json.load(open("live-delivery-report.json", encoding="utf-8"))
+          summary = {
+              "attempted": report.get("attempted", 0),
+              "terminal_count": report.get("terminal_count", 0),
+              "unresolved": report.get("unresolved", 0),
+              "counts": report.get("counts", {}),
+              "circuit_breaker": report.get("circuit_breaker", False),
+              "circuit_breaker_reasons": report.get("circuit_breaker_reasons", []),
+          }
+          print(json.dumps(summary, ensure_ascii=False))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write("\n```json\n" + json.dumps(summary, ensure_ascii=False, indent=2) + "\n```\n")
+          if report.get("circuit_breaker"):
+              open("/tmp/stop-breaker", "w").write("1")
+          if report.get("cohort_closed"):
+              open("/tmp/stop-closed", "w").write("1")
+          PY
+
+            if [ -f /tmp/stop-breaker ]; then
+              echo "Circuit breaker opened. Stop immediately; do not send more customers."
+              exit 2
+            fi
+            if [ -f /tmp/stop-closed ]; then
+              echo "All observed outbound attempts have explicit terminal outcomes."
+              exit 0
+            fi
+            if [ "$i" -lt "$POLLS" ]; then
+              sleep 300
+            fi
+          done
+
+          echo "Reconciliation window ended with unresolved delivery outcomes."
+          exit 3
+
+      - name: Preserve final delivery report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-delivery-report
+          path: live-delivery-report.json
+          retention-days: 7
