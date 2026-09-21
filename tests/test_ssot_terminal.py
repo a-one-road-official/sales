@@ -44,6 +44,10 @@ def proof(r):
                 recipient_evidence_email=recipient, recipient_evidence_kind='OFFICIAL',
                 recipient_evidence_excerpt=f'Contact us at {recipient}',
                 recipient_evidence_checked_at=NOW,
+                dedupe_verified=True, company_duplicate_count=1,
+                recipient_other_company_count=0, core_copy_other_company_count=0,
+                company_prior_outbound_count=0,
+                dedupe_basis='SSOT exact company/domain + recipient + core copy + Gmail all-time',
                 recipient=recipient, checked_at=NOW)
 
 
@@ -257,6 +261,24 @@ def test_send_stage_cannot_skip_reservation_and_submit_request(validate_stub):
                  label_ids=['SENT'],verified=True,sent_at=NOW,email_sha256=s.load_object(r[s.META])['packet']['email_sha256'])
     with pytest.raises(ValueError,match='invalid_stage_transition'):
         apply(r,'SENT',claim_id='no-claim',receipt=receipt)
+
+
+@pytest.mark.parametrize('field,value,error', [
+    ('company_duplicate_count', 2, 'company_duplicate_detected'),
+    ('recipient_other_company_count', 1, 'recipient_reused_by_other_company'),
+    ('core_copy_other_company_count', 1, 'duplicate_customer_copy_detected'),
+    ('company_prior_outbound_count', 1, 'company_prior_outbound_detected'),
+])
+def test_hard_duplicate_gate_blocks_send(validate_stub, field, value, error):
+    r=ready(validate_stub); p=proof(r); p[field]=value
+    with pytest.raises(ValueError,match=error):
+        s.preflight(r,p,NOW)
+
+
+def test_dedupe_proof_is_mandatory(validate_stub):
+    r=ready(validate_stub); p=proof(r); p['dedupe_verified']=False
+    with pytest.raises(ValueError,match='dedupe_verification_required'):
+        s.preflight(r,p,NOW)
 
 
 def test_human_approval_revocation_is_respected(validate_stub):
