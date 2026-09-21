@@ -324,7 +324,7 @@ STAGE_TRANSITIONS = {
 def assert_stage_transition(row, kind):
     """Every outbound step is explicit; never skip from a draft straight to SENT."""
     current = text(row.get(STATE)) or 'RESEARCH_PENDING'
-    if kind in {'QUALIFIED', 'DRAFT_READY', 'SEND_READY', 'RESERVED', 'SUBMIT_REQUESTED',
+    if kind in {'DRAFT_READY', 'SEND_READY', 'RESERVED', 'SUBMIT_REQUESTED',
                 'SENT', 'UNKNOWN', 'FAILED', 'HOLD', 'HUMAN_TAKEOVER',
                 'RECONCILED_NOT_SENT'}:
         allowed = STAGE_TRANSITIONS.get(current, set())
@@ -339,7 +339,6 @@ def reduce_event(row, event, now):
     """Produce narrow changes + immutable event, never a full replacement row."""
     key, company, domain = assert_identity(row, event)
     kind, eid = text(event.get('kind')), text(event.get('event_id'))
-    previous_stage = assert_stage_transition(row, kind)
     if not kind or not eid:
         raise ValueError('event_id_and_kind_required')
     at = iso(event['occurred_at'])
@@ -348,6 +347,7 @@ def reduce_event(row, event, now):
     prior = history(row)
     if any(e.get('event_id') == eid for e in prior):
         return {'duplicate': True, 'changes': {}, 'event': event}
+    previous_stage = assert_stage_transition(row, kind)
     m = load_object(row.get(META)); m['company_id'] = key
     patch = {}; e = deepcopy(event)
     is_late = bool(row.get('AI更新日時') and stamp(at) < stamp(row['AI更新日時']))
