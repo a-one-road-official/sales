@@ -194,6 +194,32 @@ def has_sent(row):
                        e.get('status') in ('SENT', 'FORM_SENT') for e in history(row)))
 
 
+def verify_gmail_authority(proof, recipient):
+    """Gmail SENT/inbound search is authoritative; legacy handoff/status is never proof of non-send."""
+    if proof.get('history_source') != 'GMAIL':
+        raise ValueError('gmail_history_must_be_authoritative')
+    for key in ('gmail_sent_query_complete', 'gmail_inbound_query_complete'):
+        if proof.get(key) is not True:
+            raise ValueError('gmail_history_query_incomplete:' + key)
+    sent_query = text(proof.get('gmail_sent_query')).casefold()
+    inbound_query = text(proof.get('gmail_inbound_query')).casefold()
+    address = text(recipient).casefold()
+    if 'in:sent' not in sent_query or ('to:' + address) not in sent_query:
+        raise ValueError('gmail_sent_query_not_exact_recipient')
+    if ('from:' + address) not in inbound_query:
+        raise ValueError('gmail_inbound_query_not_exact_recipient')
+    try:
+        sent_count = int(proof.get('gmail_sent_match_count'))
+        human_reply_count = int(proof.get('gmail_human_reply_match_count'))
+    except (TypeError, ValueError) as exc:
+        raise ValueError('gmail_history_counts_required') from exc
+    if sent_count != 0:
+        raise ValueError('gmail_prior_send_exists_reconcile_ssot')
+    if human_reply_count != 0:
+        raise ValueError('gmail_prior_reply_exists_reconcile_ssot')
+    return True
+
+
 def preflight(row, proof, now, require_window=True):
     """Evidence acquisition stays in connected tools; unknown != no prior contact."""
     m = load_object(row.get(META))
@@ -225,6 +251,7 @@ def preflight(row, proof, now, require_window=True):
         raise ValueError('recipient_required')
     if proof.get('recipient', '').lower() != recipient:
         raise ValueError('recipient_changed')
+    verify_gmail_authority(proof, recipient)
     checked = stamp(proof['checked_at'])
     if not timedelta(0) <= stamp(now)-checked <= timedelta(minutes=5):
         raise ValueError('fresh_send_checks_required')
