@@ -255,6 +255,7 @@ def observation_from_event(flat):
     remote_host = text(_lookup(flat, "smtp_out_remote_host", ""))
     remote_ip = text(_lookup(flat, "smtp_out_connect_ip", ""))
     rfc_id = normalize_message_id(_lookup(flat, "rfc2822_message_id", ""))
+    subject = text(_lookup(flat, "subject", ""))
     recipients = _lookup(flat, "destination", []) or []
     recipient_addresses = []
     if isinstance(recipients, list):
@@ -296,6 +297,7 @@ def observation_from_event(flat):
         "observed_at": text(flat.get("_activity_time")),
         "provider_event_id": text(flat.get("_unique_qualifier")),
         "rfc2822_message_id": rfc_id,
+        "subject": subject,
         "remote_host": remote_host,
         "remote_ip": remote_ip,
         "recipient_addresses": recipient_addresses,
@@ -306,31 +308,42 @@ def observation_from_event(flat):
 
 
 def reconcile_outbounds(outbounds, *, now, admin=DEFAULT_ADMIN):
-    """Resolve current Workspace delivery observations for Gmail-accepted messages."""
+    """Resolve Workspace delivery observations for Gmail-accepted messages.
+
+    The preferred key is RFC 2822 Message-ID when available.  For legacy rows that
+    only stored Gmail's internal hex ID, use exact subject + exact recipient within
+    the narrow audit window.  That fallback lets us reconcile today's existing
+    73 sends without requiring Gmail domain-wide delegation.
+    """
     outbounds = [dict(x) for x in (outbounds or [])]
     if not outbounds:
         return []
-    gmail_ids = [text(x.get("message_id")) for x in outbounds if text(x.get("message_id"))]
-    metadata = gmail_rfc2822_ids(gmail_ids, admin=admin)
+
     starts = [stamp(x["accepted_at"]) for x in outbounds if x.get("accepted_at")]
     start = min(starts) - timedelta(minutes=10)
     end = stamp(now) + timedelta(minutes=1)
     events = list_gmail_delivery_events(start, end, admin=admin)
 
+    observations = [observation_from_event(flat) for flat in events]
     by_rfc = {}
-    for flat in events:
-        obs = observation_from_event(flat)
-        if obs["rfc2822_message_id"]:
-            by_rfc.setdefault(obs["rfc2822_message_id"], []).append(obs)
+    by_subject_recipient = {}
+    for obs in observations:
+        rfc_id = normalize_message_id(obs.get("rfc2822_message_id"))
+        if rfc_id:
+            by_rfc.setdefault(rfc_id, []).append(obs)
+        subject = text(obs.get("subject")).casefold()
+        for recipient in obs.get("recipient_addresses") or []:
+            by_subject_recipient.setdefault((subject, text(recipient).casefold()), []).append(obs)
 
-    results = []
     rank = {"DELIVERED": 5, "REJECTED": 5, "BOUNCED": 5, "DEFERRED": 4,
             "GMAIL_ACCEPTED": 2, "": 0}
+    results = []
     for outbound in outbounds:
-        mid = text(outbound.get("message_id"))
-        meta = metadata.get(mid, {})
-        rfc_id = normalize_message_id(meta.get("rfc2822_message_id"))
-        candidates = by_rfc.get(rfc_id, [])
+        rfc_id = normalize_message_id(outbound.get("rfc2822_message_id"))
+        candidates = list(by_rfc.get(rfc_id, [])) if rfc_id else []
+        if not candidates:
+            key = (text(outbound.get("subject")).casefold(), text(outbound.get("recipient")).casefold())
+            candidates = list(by_subject_recipient.get(key, []))
         candidates = sorted(
             candidates,
             key=lambda o: (rank.get(o.get("provider_status"), 0), text(o.get("observed_at"))),
@@ -338,17 +351,24 @@ def reconcile_outbounds(outbounds, *, now, admin=DEFAULT_ADMIN):
         )
         observation = dict(candidates[0]) if candidates else {
             "source": "WORKSPACE_EMAIL_LOG",
-            "verified": bool(rfc_id),
+            "verified": False,
             "provider_status": "",
             "observed_at": stamp(now).isoformat(),
             "rfc2822_message_id": rfc_id,
             "search_complete": True,
             "diagnostic": "no_matching_delivery_event_yet",
         }
-        observation["message_id"] = mid
-        observation["thread_id"] = text(outbound.get("thread_id") or meta.get("thread_id"))
-        observation["rfc2822_message_id"] = rfc_id
-        observation["gmail_subject"] = text(meta.get("subject"))
+        observation["message_id"] = text(outbound.get("message_id"))
+        observation["thread_id"] = text(outbound.get("thread_id"))
+        observation["rfc2822_message_id"] = rfc_id or text(observation.get("rfc2822_message_id"))
+        observation["gmail_subject"] = text(outbound.get("subject"))
+        # Exact subject+recipient is acceptable as legacy matching evidence only
+        # when the provider event itself carries that exact pair.
+        if candidates and not observation.get("verified"):
+            observation["verified"] = True
+            observation["match_method"] = "EXACT_SUBJECT_RECIPIENT"
+        elif candidates:
+            observation["match_method"] = "RFC2822_MESSAGE_ID" if rfc_id else "EXACT_SUBJECT_RECIPIENT"
         results.append(observation)
     return results
 
