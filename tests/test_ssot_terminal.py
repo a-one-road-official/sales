@@ -114,7 +114,7 @@ def test_every_preclaim_failure_has_human_recovery_material(validate_stub):
 
 def test_full_initial_send_path_and_idempotence(validate_stub):
     r=sent(validate_stub)
-    assert r['Status']=='AI送信済み' and r[s.STATE]=='SENT'
+    assert r['Status']=='AI送信済み' and r[s.STATE]=='DELIVERY_PENDING'
     assert r['Last_Outbound_Message_ID']=='synthetic-message-1'
     assert not s.load_object(r[s.META]).get('claim')
     ev=s.history(r)[-1]
@@ -279,6 +279,53 @@ def test_dedupe_proof_is_mandatory(validate_stub):
     r=ready(validate_stub); p=proof(r); p['dedupe_verified']=False
     with pytest.raises(ValueError,match='dedupe_verification_required'):
         s.preflight(r,p,NOW)
+
+
+def test_sent_receipt_is_not_done_until_positive_delivery_evidence(validate_stub):
+    r=ready(validate_stub); p=proof(r)
+    apply(r,'SEND_READY',proof=p)
+    claim='claim-delivery'; apply(r,'RESERVED',proof=p,run_id='run-delivery',event_id=claim)
+    apply(r,'SUBMIT_REQUESTED',proof=p,claim_id=claim)
+    h=s.load_object(r[s.META])['packet']['email_sha256']
+    receipt=dict(message_id='m-delivery',thread_id='t-delivery',sender=s.SENDER,
+                 recipient=r['営業メール宛先'],label_ids=['SENT'],verified=True,
+                 sent_at=NOW,email_sha256=h)
+    apply(r,'SENT',claim_id=claim,receipt=receipt)
+    assert r[s.STATE] == 'DELIVERY_PENDING'
+    assert s.load_object(r[s.META]).get('delivery') is None
+
+
+def test_positive_delivery_evidence_marks_done(validate_stub):
+    r=ready(validate_stub); p=proof(r)
+    apply(r,'SEND_READY',proof=p)
+    claim='claim-done'; apply(r,'RESERVED',proof=p,run_id='run-done',event_id=claim)
+    apply(r,'SUBMIT_REQUESTED',proof=p,claim_id=claim)
+    h=s.load_object(r[s.META])['packet']['email_sha256']
+    receipt=dict(message_id='m-done',thread_id='t-done',sender=s.SENDER,
+                 recipient=r['営業メール宛先'],label_ids=['SENT'],verified=True,
+                 sent_at=NOW,email_sha256=h)
+    apply(r,'SENT',claim_id=claim,receipt=receipt)
+    apply(r,'DELIVERY_CONFIRMED',delivery_evidence=dict(
+        method='RECIPIENT_AUTO_ACK', outbound_message_id='m-done',
+        observed_at=NOW, verified=True, detail='auto acknowledgement in same recipient thread'))
+    assert r[s.STATE] == 'DONE'
+    assert s.load_object(r[s.META])['delivery']['state'] == 'DONE'
+
+
+def test_delivery_done_requires_positive_evidence(validate_stub):
+    r=ready(validate_stub); p=proof(r)
+    apply(r,'SEND_READY',proof=p)
+    claim='claim-bad'; apply(r,'RESERVED',proof=p,run_id='run-bad',event_id=claim)
+    apply(r,'SUBMIT_REQUESTED',proof=p,claim_id=claim)
+    h=s.load_object(r[s.META])['packet']['email_sha256']
+    receipt=dict(message_id='m-bad',thread_id='t-bad',sender=s.SENDER,
+                 recipient=r['営業メール宛先'],label_ids=['SENT'],verified=True,
+                 sent_at=NOW,email_sha256=h)
+    apply(r,'SENT',claim_id=claim,receipt=receipt)
+    with pytest.raises(ValueError,match='positive_delivery_evidence_required'):
+        apply(r,'DELIVERY_CONFIRMED',delivery_evidence=dict(
+            method='NO_BOUNCE_TIMEOUT', outbound_message_id='m-bad',
+            observed_at=NOW, verified=True))
 
 
 def test_human_approval_revocation_is_respected(validate_stub):
