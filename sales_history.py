@@ -49,8 +49,10 @@ SALES_STATUS_RANK = {
 }
 TERMINAL_STATUSES = {"拒否", "合意・契約締結", "受注"}
 
-SUCCESS_EVENT_STATUSES = {"SENT", "FORM_SENT"}
-SUCCESS_EVENT_TYPES = {"NEW_DM", "OUTBOUND_SENT", "FORM_SENT", "MANUAL_SEND"}
+SUCCESS_EVENT_STATUSES = {"DELIVERED", "FORM_SENT"}
+SUCCESS_EVENT_TYPES = {"NEW_DM", "OUTBOUND_DELIVERED", "FORM_SENT", "MANUAL_SEND_DELIVERED"}
+ATTEMPT_EVENT_STATUSES = {"GMAIL_ACCEPTED", "SENT"}
+ATTEMPT_EVENT_TYPES = {"OUTBOUND_ACCEPTED", "OUTBOUND_SENT", "GMAIL_ACCEPTED"}
 
 # Automatic systems may record evidence freely, but CRM lifecycle ownership is
 # intentionally narrow. Actual outbound delivery can establish "contacted".
@@ -127,10 +129,18 @@ def history_has_event(existing: Any, event: dict) -> bool:
 
 
 def is_contact_event(event: dict) -> bool:
+    """True only when recipient-side delivery/contact is positively established."""
     status = text(event.get("status")).upper()
     event_type = text(event.get("event_type") or event.get("action_type")).upper()
     return (status in SUCCESS_EVENT_STATUSES or event_type in SUCCESS_EVENT_TYPES
             or text(event.get("to_status")) in CONTACTED_STATUSES)
+
+
+def is_outbound_attempt_event(event: dict) -> bool:
+    """Gmail acceptance blocks duplicate retries even before remote delivery is known."""
+    status = text(event.get("status")).upper()
+    event_type = text(event.get("event_type") or event.get("action_type")).upper()
+    return is_contact_event(event) or status in ATTEMPT_EVENT_STATUSES or event_type in ATTEMPT_EVENT_TYPES
 
 
 def has_contact_history(row: dict) -> bool:
@@ -142,7 +152,8 @@ def has_contact_history(row: dict) -> bool:
     raw = text(row.get(HISTORY_FIELD))
     if raw and not parse_history(raw) and raw not in {"[]", "null"}:
         return True  # corrupt history must not reopen outreach
-    return any(is_contact_event(item) for item in parse_history(row.get(HISTORY_FIELD)))
+    # A provider-accepted attempt must never reopen first-contact automation.
+    return any(is_outbound_attempt_event(item) for item in parse_history(row.get(HISTORY_FIELD)))
 
 
 def status_rank(value: Any) -> int:
@@ -259,9 +270,18 @@ def guarded_sales_fields(current: dict, changes: dict, *, source: str) -> dict:
 
 
 def history_event_from_execution(record: dict) -> dict:
+    raw_status = text(record.get("status")).upper()
+    status = "GMAIL_ACCEPTED" if raw_status == "SENT" else raw_status
+    event_type = {
+        "GMAIL_ACCEPTED": "OUTBOUND_ACCEPTED",
+        "DELIVERED": "OUTBOUND_DELIVERED",
+        "BOUNCED": "OUTBOUND_BOUNCED",
+        "REJECTED": "OUTBOUND_REJECTED",
+        "DEFERRED": "OUTBOUND_DEFERRED",
+    }.get(status, status)
     return {
-        "event_type": "OUTBOUND_SENT" if text(record.get("status")).upper() == "SENT" else text(record.get("status")).upper(),
-        "status": text(record.get("status")).upper(),
+        "event_type": event_type,
+        "status": status,
         "idempotency_key": text(record.get("idempotency_key")),
         "draft_id": text(record.get("draft_id")),
         "source_row": text(record.get("source_row")),
