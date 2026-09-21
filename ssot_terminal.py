@@ -242,6 +242,28 @@ def verify_fresh_recipient_authority(row, proof, now):
     return True
 
 
+def verify_hard_dedupe(proof):
+    """First contact is blocked unless company, recipient and reviewed copy are unique."""
+    if proof.get('dedupe_verified') is not True:
+        raise ValueError('dedupe_verification_required')
+    checks = (
+        ('company_duplicate_count', 1, 'company_duplicate_detected'),
+        ('recipient_other_company_count', 0, 'recipient_reused_by_other_company'),
+        ('core_copy_other_company_count', 0, 'duplicate_customer_copy_detected'),
+        ('company_prior_outbound_count', 0, 'company_prior_outbound_detected'),
+    )
+    for key, expected, error in checks:
+        try:
+            value = int(proof.get(key))
+        except (TypeError, ValueError) as exc:
+            raise ValueError('dedupe_count_required:' + key) from exc
+        if value != expected:
+            raise ValueError(error)
+    if not text(proof.get('dedupe_basis')):
+        raise ValueError('dedupe_basis_required')
+    return True
+
+
 def preflight(row, proof, now, require_window=True):
     """Evidence acquisition stays in connected tools; unknown != no prior contact."""
     m = load_object(row.get(META))
@@ -275,6 +297,7 @@ def preflight(row, proof, now, require_window=True):
         raise ValueError('recipient_changed')
     verify_gmail_authority(proof, recipient)
     verify_fresh_recipient_authority(row, proof, now)
+    verify_hard_dedupe(proof)
     checked = stamp(proof['checked_at'])
     if not timedelta(0) <= stamp(now)-checked <= timedelta(minutes=5):
         raise ValueError('fresh_send_checks_required')
