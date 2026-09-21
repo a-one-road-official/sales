@@ -23,7 +23,7 @@ SALES_TAB = '営業リスト＿Factory/BPO'
 SALES_SHEET_ID = 515643202
 EVENT_SHEET_ID = 1373888845
 SENDER = 'admin@a1-road.com'
-VERSION = 'ssot-terminal-v1'
+VERSION = 'ssot-terminal-v2-delivery-closed-loop'
 META = 'AI実行JSON'
 HISTORY = 'Sales_History_JSON'
 STATE = '営業メール状態'
@@ -336,11 +336,22 @@ STAGE_TRANSITIONS = {
     'RESEARCH_PENDING': {'QUALIFIED', 'DRAFT_READY', 'HOLD', 'FAILED'},
     'DRAFT_READY': {'DRAFT_READY', 'SEND_READY', 'HOLD', 'FAILED', 'HUMAN_TAKEOVER'},
     'SEND_READY': {'RESERVED', 'HOLD', 'FAILED', 'HUMAN_TAKEOVER'},
-    'SUBMITTING': {'SUBMIT_REQUESTED', 'SENT', 'UNKNOWN', 'FAILED'},
-    'UNKNOWN': {'SENT', 'RECONCILED_NOT_SENT', 'HUMAN_TAKEOVER'},
+    'SUBMITTING': {'SUBMIT_REQUESTED', 'GMAIL_ACCEPTED', 'UNKNOWN', 'FAILED'},
+    'UNKNOWN': {'GMAIL_ACCEPTED', 'RECONCILED_NOT_SENT', 'HUMAN_TAKEOVER'},
     'FAILED': {'DRAFT_READY', 'SEND_READY', 'HOLD', 'HUMAN_TAKEOVER'},
     'HOLD': {'DRAFT_READY', 'SEND_READY', 'HUMAN_TAKEOVER'},
-    'SENT': {'REPLIED', 'OPTOUT', 'BOUNCED', 'MEETING_BOOKED'},
+    'DELIVERY_PENDING': {'DELIVERED', 'BOUNCED', 'REJECTED', 'DEFERRED', 'UNKNOWN_LOG_GAP',
+                         'REPLIED', 'OPTOUT', 'MEETING_BOOKED'},
+    'DEFERRED': {'DELIVERED', 'BOUNCED', 'REJECTED', 'UNKNOWN_LOG_GAP',
+                 'REPLIED', 'OPTOUT', 'MEETING_BOOKED'},
+    # Legacy production rows already projected Gmail SENT as state=SENT.
+    # They may be reconciled into a real delivery outcome, but new SENT events are rejected.
+    'SENT': {'DELIVERED', 'BOUNCED', 'REJECTED', 'DEFERRED', 'UNKNOWN_LOG_GAP',
+             'REPLIED', 'OPTOUT', 'MEETING_BOOKED'},
+    'DELIVERED': {'REPLIED', 'OPTOUT', 'MEETING_BOOKED'},
+    'BOUNCED': {'HUMAN_TAKEOVER'},
+    'REJECTED': {'HUMAN_TAKEOVER'},
+    'UNKNOWN_LOG_GAP': {'HUMAN_TAKEOVER'},
 }
 
 
@@ -348,7 +359,8 @@ def assert_stage_transition(row, kind):
     """Every outbound step is explicit; never skip from a draft straight to SENT."""
     current = text(row.get(STATE)) or 'RESEARCH_PENDING'
     if kind in {'DRAFT_READY', 'SEND_READY', 'RESERVED', 'SUBMIT_REQUESTED',
-                'SENT', 'UNKNOWN', 'FAILED', 'HOLD', 'HUMAN_TAKEOVER',
+                'GMAIL_ACCEPTED', 'DELIVERED', 'BOUNCED', 'REJECTED', 'DEFERRED',
+                'UNKNOWN_LOG_GAP', 'UNKNOWN', 'FAILED', 'HOLD', 'HUMAN_TAKEOVER',
                 'RECONCILED_NOT_SENT'}:
         allowed = STAGE_TRANSITIONS.get(current, set())
         if kind not in allowed:
@@ -356,6 +368,50 @@ def assert_stage_transition(row, kind):
             if not (current == 'SUBMITTING' and kind == 'SUBMIT_REQUESTED'):
                 raise ValueError(f'invalid_stage_transition:{current}->{kind}')
     return current
+
+
+DELIVERY_EVIDENCE_SOURCES = {
+    'WORKSPACE_EMAIL_LOG', 'GMAIL_DSN', 'RECIPIENT_AUTO_ACK',
+    'RECIPIENT_HUMAN_REPLY', 'PROVIDER_EVENT',
+}
+
+
+def validate_delivery_event(row, event, kind, now):
+    """Validate delivery evidence after Gmail accepted the outbound message."""
+    delivery = load_object(row.get(META)).get('delivery') or {}
+    message_id = text(event.get('outbound_message_id') or event.get('message_id'))
+    if not delivery or text(delivery.get('message_id')) != message_id:
+        raise ValueError('matching_delivery_message_required')
+    evidence = event.get('delivery_evidence') or {}
+    source = text(evidence.get('source')).upper()
+    if source not in DELIVERY_EVIDENCE_SOURCES or evidence.get('verified') is not True:
+        raise ValueError('verified_delivery_evidence_required')
+    observed = stamp(evidence.get('observed_at') or event.get('occurred_at'))
+    if observed > stamp(now) + timedelta(minutes=2):
+        raise ValueError('delivery_evidence_in_future')
+    provider_status = text(evidence.get('provider_status')).upper()
+    smtp = text(evidence.get('smtp_code') or evidence.get('enhanced_status'))
+    if kind == 'DELIVERED':
+        if source in {'WORKSPACE_EMAIL_LOG', 'PROVIDER_EVENT'} and provider_status not in {'DELIVERED', 'ACCEPTED'}:
+            raise ValueError('provider_delivered_status_required')
+        if source in {'RECIPIENT_AUTO_ACK', 'RECIPIENT_HUMAN_REPLY'}:
+            if text(evidence.get('thread_id')) != text(delivery.get('thread_id')):
+                raise ValueError('recipient_evidence_thread_mismatch')
+    elif kind in {'BOUNCED', 'REJECTED'}:
+        if source not in {'WORKSPACE_EMAIL_LOG', 'GMAIL_DSN', 'PROVIDER_EVENT'}:
+            raise ValueError('delivery_failure_source_required')
+        if not (smtp.startswith('5') or provider_status in {'BOUNCED', 'REJECTED', 'DROPPED'}):
+            raise ValueError('permanent_delivery_failure_required')
+        if kind == 'REJECTED' and smtp and not (smtp.startswith('5.7') or provider_status in {'REJECTED', 'DROPPED'}):
+            raise ValueError('policy_reject_evidence_required')
+    elif kind == 'DEFERRED':
+        if not (smtp.startswith('4') or provider_status in {'DEFERRED', 'TEMPORARY_FAILURE', 'IN_PROGRESS'}):
+            raise ValueError('temporary_delivery_failure_required')
+    elif kind == 'UNKNOWN_LOG_GAP':
+        accepted = stamp(delivery.get('accepted_at'))
+        if evidence.get('search_complete') is not True or observed - accepted < timedelta(hours=24):
+            raise ValueError('unknown_requires_complete_24h_reconciliation')
+    return delivery, evidence
 
 
 def reduce_event(row, event, now):
@@ -419,39 +475,79 @@ def reduce_event(row, event, now):
         m['claim']['request_event_id'] = eid
         patch['AI最終試行日時'] = at
         state('SUBMITTING', '送信要求を記録済み。応答不明時は再送せず照合')
-    elif kind in ('SENT', 'MANUAL_SENT'):
+    elif kind in ('GMAIL_ACCEPTED', 'MANUAL_GMAIL_ACCEPTED'):
         receipt = e.get('receipt') or {}
         recipient = text(receipt.get('recipient')).lower()
         if (not receipt.get('message_id') or not receipt.get('thread_id') or
                 'SENT' not in receipt.get('label_ids', []) or receipt.get('sender') != SENDER
                 or recipient != text(row.get('営業メール宛先')).lower()
                 or receipt.get('verified') is not True):
-            raise ValueError('verified_gmail_sent_receipt_required')
-        if any(x.get('message_id') == receipt['message_id'] and x.get('kind') in ('SENT', 'MANUAL_SENT') for x in prior):
+            raise ValueError('verified_gmail_acceptance_receipt_required')
+        if any(x.get('message_id') == receipt['message_id'] and x.get('kind') in
+               ('GMAIL_ACCEPTED', 'MANUAL_GMAIL_ACCEPTED') for x in prior):
             return {'duplicate': True, 'changes': {}, 'event': e}
-        if kind == 'SENT':
+        if kind == 'GMAIL_ACCEPTED':
             claim = m.get('claim') or {}
             if not claim or e.get('claim_id') != claim.get('id') or claim.get('request_started') is not True:
                 raise ValueError('matching_claim_required')
             if receipt.get('email_sha256') != claim['email_sha256']:
-                raise ValueError('sent_copy_mismatch_reconcile')
+                raise ValueError('accepted_copy_mismatch_reconcile')
         elif text(row.get(OWNER)) != '手動対応中':
             raise ValueError('manual_handoff_required')
         at = iso(receipt['sent_at']); e['occurred_at'] = at
-        e['status'] = 'SENT'; e['message_id'] = receipt['message_id']; e['recipient'] = recipient
+        e['status'] = 'GMAIL_ACCEPTED'; e['message_id'] = receipt['message_id']; e['recipient'] = recipient
         if not row.get('Last_Outbound_At') or stamp(at) >= stamp(row['Last_Outbound_At']):
             patch.update({'Last_Outbound_At': at, 'Last_Outbound_Message_ID': receipt['message_id'],
                           'Last_Outbound_Thread_ID': receipt['thread_id'], 'Last_Outbound_Recipient': recipient})
         if not row.get('First_Contacted_At'):
             patch['First_Contacted_At'] = at
         m.pop('claim', None)
+        m['delivery'] = {'state': 'DELIVERY_PENDING', 'message_id': receipt['message_id'],
+                         'thread_id': receipt['thread_id'], 'recipient': recipient, 'accepted_at': at}
         if not is_late and not m.get('reply_id'):
-            state('SENT', '返信待ち')
+            state('DELIVERY_PENDING', 'Python配送監視でDELIVERED/失敗を確定')
             patch.update({'AI失敗工程': '', 'AI失敗理由': ''})
-            if status in INITIAL:
-                patch['Status'] = 'AI送信済み' if kind == 'SENT' else '送付済み'
-            if kind == 'MANUAL_SENT':
-                patch[OWNER] = '手動完了'
+            if kind == 'MANUAL_GMAIL_ACCEPTED':
+                patch[OWNER] = '手動対応中'
+    elif kind == 'SENT':
+        raise ValueError('sent_label_is_not_delivery_proof_use_gmail_accepted')
+    elif kind in ('DELIVERED', 'BOUNCED', 'REJECTED', 'DEFERRED', 'UNKNOWN_LOG_GAP'):
+        delivery, delivery_evidence = validate_delivery_event(row, e, kind, now)
+        observed_at = iso(delivery_evidence.get('observed_at') or at)
+        delivery = deepcopy(delivery)
+        delivery.update({'state': kind, 'observed_at': observed_at,
+                         'evidence': deepcopy(delivery_evidence)})
+        m['delivery'] = delivery
+        e['message_id'] = delivery['message_id']
+        e['recipient'] = delivery.get('recipient', '')
+        e['delivery_evidence'] = deepcopy(delivery_evidence)
+        if not is_late:
+            if kind == 'DELIVERED':
+                state('DELIVERED', '返信待ち')
+                patch.update({'AI失敗工程': '', 'AI失敗理由': ''})
+                if status in INITIAL:
+                    patch['Status'] = 'AI送信済み'
+            elif kind == 'DEFERRED':
+                state('DEFERRED', '配送遅延。Python配送監視で再照合')
+                patch.update({'AI失敗工程': 'DELIVERY', 'AI失敗理由':
+                              text(delivery_evidence.get('diagnostic') or 'temporary delivery failure')})
+            elif kind == 'UNKNOWN_LOG_GAP':
+                state('UNKNOWN_LOG_GAP', '配送ログ未確定。自動再送禁止・人間確認')
+                patch.update({'AI失敗工程': 'DELIVERY_RECONCILE',
+                              'AI失敗理由': e.get('reason', '24h delivery evidence gap')})
+                if status in INITIAL:
+                    patch['Status'] = 'AI送信結果不明'
+                m['retry_blocked'] = True
+            else:
+                state(kind, '不達・拒否を記録。自動再送禁止')
+                patch.update({'AI失敗工程': 'DELIVERY',
+                              'AI失敗理由': text(delivery_evidence.get('diagnostic') or
+                                                 e.get('reason') or kind)})
+                if status in INITIAL:
+                    patch['Status'] = 'AI送信失敗'
+                m['retry_blocked'] = True
+                if kind == 'BOUNCED':
+                    m['suppressed'] = True
     elif kind in ('FAILED', 'HOLD', 'UNKNOWN'):
         if not e.get('stage') or not e.get('reason'):
             raise ValueError('failure_stage_and_reason_required')
@@ -486,7 +582,7 @@ def reduce_event(row, event, now):
         state('FAILED', '未送信確定。再試行または手動引継ぎ')
         if status in INITIAL:
             patch['Status'] = 'AI送信失敗'
-    elif kind in ('REPLIED', 'OPTOUT', 'BOUNCED'):
+    elif kind in ('REPLIED', 'OPTOUT'):
         if not e.get('message_id') or not e.get('evidence'):
             raise ValueError('inbound_message_evidence_required')
         if kind == 'REPLIED' and (e.get('human_reply') is not True or not e.get('thread_id')):
@@ -494,6 +590,11 @@ def reduce_event(row, event, now):
         m['suppressed'] = True
         if kind == 'REPLIED':
             m['reply_id'] = e['message_id']; m['commercial'] = e.get('commercial', 'UNKNOWN')
+            if m.get('delivery') and text(e.get('thread_id')) == text(m['delivery'].get('thread_id')):
+                m['delivery'].update({'state': 'DELIVERED', 'observed_at': at,
+                                      'evidence': {'source': 'RECIPIENT_HUMAN_REPLY',
+                                                   'verified': True, 'thread_id': e.get('thread_id'),
+                                                   'observed_at': at}})
             patch.update({'Last_Inbound': at, 'Gmail_Thread_ID': e.get('thread_id', ''),
                           'Inbound_Class': e.get('classification', 'QUESTION'), 'Inbound_Source': e['evidence'],
                           'AI返信対応': '対応済み' if e.get('awaiting_human') is False else '未対応'})
@@ -503,13 +604,10 @@ def reduce_event(row, event, now):
             state('REPLIED', e.get('next_action', '返信内容を確認して商談へ進める'))
             if status in INITIAL | {'AI送信済み', '送付済み', 'DM済', 'リマイン1', 'リマイン2', 'リマイン3'}:
                 patch['Status'] = '返信あり'
-        elif kind == 'OPTOUT':
+        else:
             state('DO_NOT_CONTACT', '配信停止を維持')
             if status not in {'受注', '合意・契約締結'}:
                 patch['Status'] = '拒否'
-        else:
-            state('BOUNCED', '不達宛先を抑止。代替窓口を確認')
-            patch.update({'AI失敗工程': 'DELIVERY', 'AI失敗理由': e.get('reason', '不達通知')})
     elif kind in ('MEETING_BOOKED', 'MEETING_CANCELLED', 'MEETING_HELD'):
         if not e.get('calendar_event_id') or e.get('identity_verified') is not True or not e.get('evidence'):
             raise ValueError('verified_company_calendar_evidence_required')
@@ -543,8 +641,10 @@ def reduce_event(row, event, now):
         patch['AI次アクション'] = e.get('next_action', '決裁・支払・実行予定を確認')
     else:
         raise ValueError('unsupported_event_kind')
-    facts = {'SENT', 'MANUAL_SENT', 'REPLIED', 'OPTOUT', 'BOUNCED', 'MEETING_BOOKED',
-             'MEETING_CANCELLED', 'MEETING_HELD', 'CONTRACT_SIGNED', 'PAYMENT_RECEIVED'}
+    facts = {'GMAIL_ACCEPTED', 'MANUAL_GMAIL_ACCEPTED', 'DELIVERED', 'BOUNCED',
+             'REJECTED', 'DEFERRED', 'UNKNOWN_LOG_GAP', 'REPLIED', 'OPTOUT',
+             'MEETING_BOOKED', 'MEETING_CANCELLED', 'MEETING_HELD',
+             'CONTRACT_SIGNED', 'PAYMENT_RECEIVED'}
     if is_late and kind not in facts:
         patch = {}; m = load_object(row.get(META))
     e.update({'company_id': key, 'company_name': company, 'website': row['website'], 'recorded_at': iso(now)})
@@ -595,9 +695,16 @@ def sheet_requests(row, plan, headers, event_headers, existing_event_ids=()):
                                         'rows': [{'values': [cell(value)]}], 'fields': 'userEnteredValue'}})
     e = plan['event']; at = e['occurred_at']
     kind = e['kind']
-    action = {'SENT': 'OUTBOUND_SENT', 'MANUAL_SENT': 'OUTBOUND_SENT', 'REPLIED': 'REPLY_RECEIVED', 'MEETING_HELD': 'MEETING_COMPLETED', 'MEETING_BOOKED': 'APPOINTMENT_CONFIRMED'}.get(kind, kind)
-    factual = kind in {'SENT', 'MANUAL_SENT', 'REPLIED', 'MEETING_HELD', 'MEETING_BOOKED'}
-    canonical_id = e.get('canonical_action_id') or (e.get('message_id') if kind in {'SENT', 'MANUAL_SENT', 'REPLIED'} else '') or e['event_id']
+    action = {'GMAIL_ACCEPTED': 'OUTBOUND_ACCEPTED', 'MANUAL_GMAIL_ACCEPTED': 'OUTBOUND_ACCEPTED',
+              'DELIVERED': 'OUTBOUND_DELIVERED', 'BOUNCED': 'OUTBOUND_BOUNCED',
+              'REJECTED': 'OUTBOUND_REJECTED', 'DEFERRED': 'OUTBOUND_DEFERRED',
+              'UNKNOWN_LOG_GAP': 'OUTBOUND_UNKNOWN', 'REPLIED': 'REPLY_RECEIVED',
+              'MEETING_HELD': 'MEETING_COMPLETED', 'MEETING_BOOKED': 'APPOINTMENT_CONFIRMED'}.get(kind, kind)
+    factual = kind in {'GMAIL_ACCEPTED', 'MANUAL_GMAIL_ACCEPTED', 'DELIVERED', 'BOUNCED',
+                       'REJECTED', 'DEFERRED', 'UNKNOWN_LOG_GAP', 'REPLIED',
+                       'MEETING_HELD', 'MEETING_BOOKED'}
+    canonical_id = e.get('canonical_action_id') or (
+        f"{action}:{e.get('message_id')}" if e.get('message_id') and factual else e['event_id'])
     canonical = {'event_id': e['event_id'], 'occurred_at': at,
                  'date': stamp(at).astimezone(ZoneInfo('Asia/Tokyo')).date().isoformat(),
                  'source_row': str(n), 'company_key': identity(row)[0], 'company_name': row['company_name'],

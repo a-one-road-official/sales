@@ -36,6 +36,7 @@ from sales_history import (
     history_event_from_execution,
     history_has_event,
     is_contact_event,
+    is_outbound_attempt_event,
     parse_history,
 )
 
@@ -1104,13 +1105,14 @@ class SheetsRepo:
         event.setdefault("source_row", str(row_number))
         event.setdefault("company_name", row.get("company_name", ""))
         if history_has_event(row.get(HISTORY_FIELD), event):
-            return {"row_number": row_number, "written": False, "duplicate": True, "contacted": is_contact_event(event)}
+            return {"row_number": row_number, "written": False, "duplicate": True,
+                    "attempted": is_outbound_attempt_event(event), "contacted": is_contact_event(event)}
 
         changes = {HISTORY_FIELD: append_history(row.get(HISTORY_FIELD), event)}
-        if is_contact_event(event):
+        attempted = is_outbound_attempt_event(event)
+        contacted = is_contact_event(event)
+        if attempted:
             at = str(event.get("executed_at") or datetime.now(timezone.utc).isoformat())
-            if not str(row.get(FIRST_CONTACTED_FIELD) or "").strip():
-                changes[FIRST_CONTACTED_FIELD] = at
             changes[LAST_OUTBOUND_AT_FIELD] = at
             if str(event.get("message_id") or "").strip():
                 changes[LAST_OUTBOUND_MESSAGE_ID_FIELD] = event.get("message_id")
@@ -1120,7 +1122,18 @@ class SheetsRepo:
                 changes[LAST_OUTBOUND_RECIPIENT_FIELD] = event.get("recipient")
                 if not str(row.get("営業メール宛先") or "").strip():
                     changes["営業メール宛先"] = event.get("recipient")
-            changes["営業メール状態"] = "SENT"
+            status_key = str(event.get("status") or "").strip().upper()
+            changes["営業メール状態"] = {
+                "GMAIL_ACCEPTED": "DELIVERY_PENDING",
+                "DELIVERED": "DELIVERED",
+                "BOUNCED": "BOUNCED",
+                "REJECTED": "REJECTED",
+                "DEFERRED": "DEFERRED",
+            }.get(status_key, status_key or "DELIVERY_PENDING")
+        if contacted:
+            at = str(event.get("executed_at") or datetime.now(timezone.utc).isoformat())
+            if not str(row.get(FIRST_CONTACTED_FIELD) or "").strip():
+                changes[FIRST_CONTACTED_FIELD] = at
             if str(row.get("Status") or "").strip() in {"", "未接触", "判定中"}:
                 changes["Status"] = "送付済み"
 
@@ -1135,7 +1148,8 @@ class SheetsRepo:
             audit_event_id=f"status:{audit_id}",
             expected_company_name=row.get("company_name", ""),
         )
-        return {"row_number": row_number, "written": True, "contacted": is_contact_event(event)}
+        return {"row_number": row_number, "written": True,
+                "attempted": is_outbound_attempt_event(event), "contacted": is_contact_event(event)}
 
     def _narrow_update_sales_fields(
         self,
