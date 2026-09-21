@@ -337,10 +337,12 @@ STAGE_TRANSITIONS = {
     'DRAFT_READY': {'DRAFT_READY', 'SEND_READY', 'HOLD', 'FAILED', 'HUMAN_TAKEOVER'},
     'SEND_READY': {'RESERVED', 'HOLD', 'FAILED', 'HUMAN_TAKEOVER'},
     'SUBMITTING': {'SUBMIT_REQUESTED', 'SENT', 'UNKNOWN', 'FAILED'},
+    'DELIVERY_PENDING': {'DELIVERY_CONFIRMED', 'BOUNCED', 'REPLIED', 'OPTOUT'},
+    'DONE': {'REPLIED', 'OPTOUT', 'BOUNCED', 'MEETING_BOOKED'},
     'UNKNOWN': {'SENT', 'RECONCILED_NOT_SENT', 'HUMAN_TAKEOVER'},
     'FAILED': {'DRAFT_READY', 'SEND_READY', 'HOLD', 'HUMAN_TAKEOVER'},
     'HOLD': {'DRAFT_READY', 'SEND_READY', 'HUMAN_TAKEOVER'},
-    'SENT': {'REPLIED', 'OPTOUT', 'BOUNCED', 'MEETING_BOOKED'},
+    'SENT': {'DELIVERY_CONFIRMED', 'REPLIED', 'OPTOUT', 'BOUNCED', 'MEETING_BOOKED'},
 }
 
 
@@ -348,7 +350,7 @@ def assert_stage_transition(row, kind):
     """Every outbound step is explicit; never skip from a draft straight to SENT."""
     current = text(row.get(STATE)) or 'RESEARCH_PENDING'
     if kind in {'DRAFT_READY', 'SEND_READY', 'RESERVED', 'SUBMIT_REQUESTED',
-                'SENT', 'UNKNOWN', 'FAILED', 'HOLD', 'HUMAN_TAKEOVER',
+                'SENT', 'DELIVERY_CONFIRMED', 'UNKNOWN', 'FAILED', 'HOLD', 'HUMAN_TAKEOVER',
                 'RECONCILED_NOT_SENT'}:
         allowed = STAGE_TRANSITIONS.get(current, set())
         if kind not in allowed:
@@ -446,12 +448,28 @@ def reduce_event(row, event, now):
             patch['First_Contacted_At'] = at
         m.pop('claim', None)
         if not is_late and not m.get('reply_id'):
-            state('SENT', '返信待ち')
+            state('DELIVERY_PENDING', '受理確認待ち。DONEは相手側受理の正の証拠が出た時だけ')
             patch.update({'AI失敗工程': '', 'AI失敗理由': ''})
             if status in INITIAL:
                 patch['Status'] = 'AI送信済み' if kind == 'SENT' else '送付済み'
             if kind == 'MANUAL_SENT':
                 patch[OWNER] = '手動完了'
+    elif kind == 'DELIVERY_CONFIRMED':
+        evidence = e.get('delivery_evidence') or {}
+        method = text(evidence.get('method')).upper()
+        allowed_methods = {'WORKSPACE_ELS_DELIVERED', 'PROVIDER_DELIVERED', 'RECIPIENT_AUTO_ACK', 'RECIPIENT_HUMAN_REPLY'}
+        if method not in allowed_methods:
+            raise ValueError('positive_delivery_evidence_required')
+        outbound_id = text(evidence.get('outbound_message_id'))
+        if not outbound_id or outbound_id != text(row.get('Last_Outbound_Message_ID')):
+            raise ValueError('delivery_evidence_must_match_latest_outbound')
+        if evidence.get('verified') is not True or not text(evidence.get('observed_at')):
+            raise ValueError('verified_delivery_evidence_required')
+        m['delivery'] = {'state': 'DONE', 'method': method, 'outbound_message_id': outbound_id,
+                         'observed_at': iso(evidence['observed_at']), 'evidence': evidence.get('detail', '')}
+        if not is_late and not m.get('reply_id'):
+            state('DONE', '送信完了DONE。返信待ち')
+        e['status'] = 'DONE'
     elif kind in ('FAILED', 'HOLD', 'UNKNOWN'):
         if not e.get('stage') or not e.get('reason'):
             raise ValueError('failure_stage_and_reason_required')
@@ -543,7 +561,7 @@ def reduce_event(row, event, now):
         patch['AI次アクション'] = e.get('next_action', '決裁・支払・実行予定を確認')
     else:
         raise ValueError('unsupported_event_kind')
-    facts = {'SENT', 'MANUAL_SENT', 'REPLIED', 'OPTOUT', 'BOUNCED', 'MEETING_BOOKED',
+    facts = {'SENT', 'MANUAL_SENT', 'DELIVERY_CONFIRMED', 'REPLIED', 'OPTOUT', 'BOUNCED', 'MEETING_BOOKED',
              'MEETING_CANCELLED', 'MEETING_HELD', 'CONTRACT_SIGNED', 'PAYMENT_RECEIVED'}
     if is_late and kind not in facts:
         patch = {}; m = load_object(row.get(META))
@@ -595,8 +613,11 @@ def sheet_requests(row, plan, headers, event_headers, existing_event_ids=()):
                                         'rows': [{'values': [cell(value)]}], 'fields': 'userEnteredValue'}})
     e = plan['event']; at = e['occurred_at']
     kind = e['kind']
-    action = {'SENT': 'OUTBOUND_SENT', 'MANUAL_SENT': 'OUTBOUND_SENT', 'REPLIED': 'REPLY_RECEIVED', 'MEETING_HELD': 'MEETING_COMPLETED', 'MEETING_BOOKED': 'APPOINTMENT_CONFIRMED'}.get(kind, kind)
-    factual = kind in {'SENT', 'MANUAL_SENT', 'REPLIED', 'MEETING_HELD', 'MEETING_BOOKED'}
+    action = {'SENT': 'OUTBOUND_SENT', 'MANUAL_SENT': 'OUTBOUND_SENT',
+              'DELIVERY_CONFIRMED': 'DELIVERY_CONFIRMED',
+              'REPLIED': 'REPLY_RECEIVED', 'MEETING_HELD': 'MEETING_COMPLETED',
+              'MEETING_BOOKED': 'APPOINTMENT_CONFIRMED'}.get(kind, kind)
+    factual = kind in {'SENT', 'MANUAL_SENT', 'DELIVERY_CONFIRMED', 'REPLIED', 'MEETING_HELD', 'MEETING_BOOKED'}
     canonical_id = e.get('canonical_action_id') or (e.get('message_id') if kind in {'SENT', 'MANUAL_SENT', 'REPLIED'} else '') or e['event_id']
     canonical = {'event_id': e['event_id'], 'occurred_at': at,
                  'date': stamp(at).astimezone(ZoneInfo('Asia/Tokyo')).date().isoformat(),
