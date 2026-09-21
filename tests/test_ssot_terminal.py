@@ -83,12 +83,19 @@ def submitting(validate_stub):
     return apply(r, 'SUBMIT_REQUESTED', proof=proof(r), claim_id='evt:RESERVED')
 
 
-def sent(validate_stub):
+def accepted(validate_stub):
     r=submitting(validate_stub)
     receipt=dict(message_id='synthetic-message-1', thread_id='synthetic-thread-1', sender=s.SENDER,
                  recipient=r['営業メール宛先'], label_ids=['SENT'], verified=True, sent_at=NOW,
                  email_sha256=s.load_object(r[s.META])['packet']['email_sha256'])
-    return apply(r, 'SENT', claim_id='evt:RESERVED', receipt=receipt)
+    return apply(r, 'GMAIL_ACCEPTED', claim_id='evt:RESERVED', receipt=receipt)
+
+
+def sent(validate_stub):
+    r=accepted(validate_stub)
+    return apply(r, 'DELIVERED', outbound_message_id='synthetic-message-1',
+                 delivery_evidence={'source':'WORKSPACE_EMAIL_LOG','verified':True,
+                                    'provider_status':'DELIVERED','observed_at':NOW})
 
 
 def test_promotion_precedes_copy_and_never_duplicates():
@@ -114,21 +121,30 @@ def test_every_preclaim_failure_has_human_recovery_material(validate_stub):
 
 def test_full_initial_send_path_and_idempotence(validate_stub):
     r=sent(validate_stub)
-    assert r['Status']=='AI送信済み' and r[s.STATE]=='SENT'
+    assert r['Status']=='AI送信済み' and r[s.STATE]=='DELIVERED'
     assert r['Last_Outbound_Message_ID']=='synthetic-message-1'
-    assert not s.load_object(r[s.META]).get('claim')
+    meta=s.load_object(r[s.META])
+    assert not meta.get('claim')
+    assert meta['delivery']['state']=='DELIVERED'
     ev=s.history(r)[-1]
     assert s.reduce_event(r,ev,NOW)['duplicate']
 
 
+def test_gmail_sent_label_alone_stays_delivery_pending(validate_stub):
+    r=accepted(validate_stub)
+    assert r[s.STATE]=='DELIVERY_PENDING'
+    assert r['Status']=='未接触'
+    assert s.load_object(r[s.META])['delivery']['state']=='DELIVERY_PENDING'
+
+
 @pytest.mark.parametrize('missing',['message_id','thread_id','sender','verified','email_sha256'])
-def test_missing_or_wrong_receipt_cannot_count_sent(validate_stub,missing):
+def test_missing_or_wrong_receipt_cannot_count_accepted(validate_stub,missing):
     r=submitting(validate_stub)
     receipt=dict(message_id='m',thread_id='t',sender=s.SENDER,recipient=r['営業メール宛先'],
                  label_ids=['SENT'],verified=True,sent_at=NOW,
                  email_sha256=s.load_object(r[s.META])['packet']['email_sha256'])
     receipt.pop(missing)
-    with pytest.raises(ValueError): apply(r,'SENT',claim_id='evt:RESERVED',receipt=receipt)
+    with pytest.raises(ValueError): apply(r,'GMAIL_ACCEPTED',claim_id='evt:RESERVED',receipt=receipt)
 
 
 def test_timeouts_are_unknown_and_cannot_be_blind_retried(validate_stub):
@@ -151,15 +167,19 @@ def test_advanced_lifecycle_survives_failed_followup(validate_stub):
     assert r['Status']=='商談中' and r[s.STATE]=='FAILED'
 
 
-def test_manual_takeover_pauses_ai_and_manual_receipt_closes_it(validate_stub):
+def test_manual_takeover_pauses_ai_and_manual_receipt_waits_for_delivery(validate_stub):
     r=ready(validate_stub)
     r=apply(r,'FAILED',stage='CONTACT',reason='manual review')
     r=apply(r,'HUMAN_TAKEOVER')
     with pytest.raises(ValueError,match='human_owned'): s.preflight(r,proof(r),NOW)
     receipt=dict(message_id='manual-m',thread_id='manual-t',sender=s.SENDER,
                  recipient=r['営業メール宛先'],label_ids=['SENT'],verified=True,sent_at=NOW)
-    r=apply(r,'MANUAL_SENT',receipt=receipt)
-    assert r['Status']=='送付済み' and r[s.OWNER]=='手動完了'
+    r=apply(r,'MANUAL_GMAIL_ACCEPTED',receipt=receipt)
+    assert r[s.STATE]=='DELIVERY_PENDING' and r[s.OWNER]=='手動対応中'
+    r=apply(r,'DELIVERED',outbound_message_id='manual-m',
+            delivery_evidence={'source':'RECIPIENT_AUTO_ACK','verified':True,
+                               'thread_id':'manual-t','observed_at':NOW})
+    assert r['Status']=='AI送信済み' and r[s.STATE]=='DELIVERED'
 
 
 def test_reply_stops_outbound_and_retains_copy(validate_stub):
@@ -198,11 +218,11 @@ def test_held_count_is_per_unique_event():
 
 def test_disjoint_current_counts_have_no_missing_five_success_three_failed_two_unknown():
     rows=[]
-    for i, state in enumerate(['SENT']*5+['FAILED']*3+['UNKNOWN']*2):
+    for i, state in enumerate(['DELIVERED']*5+['FAILED']*3+['UNKNOWN']*2):
         r=row(); r['website']=f'https://fixture{i}.example'; r['LF_lead_id']=f'fixture{i}'; r[s.META]='{}'; r[s.STATE]=state; rows.append(r)
     out=s.summary(rows)
     assert out['companies']==out['partition_total']==10
-    assert out['current_states']=={'SENT':5,'FAILED':3,'UNKNOWN':2}
+    assert out['current_states']=={'DELIVERED':5,'FAILED':3,'UNKNOWN':2}
 
 
 def test_duplicate_company_not_double_counted():
@@ -260,7 +280,15 @@ def test_send_stage_cannot_skip_reservation_and_submit_request(validate_stub):
     receipt=dict(message_id='m',thread_id='t',sender=s.SENDER,recipient=r['営業メール宛先'],
                  label_ids=['SENT'],verified=True,sent_at=NOW,email_sha256=s.load_object(r[s.META])['packet']['email_sha256'])
     with pytest.raises(ValueError,match='invalid_stage_transition'):
-        apply(r,'SENT',claim_id='no-claim',receipt=receipt)
+        apply(r,'GMAIL_ACCEPTED',claim_id='no-claim',receipt=receipt)
+
+
+def test_legacy_sent_event_is_rejected_as_delivery_proof(validate_stub):
+    r=submitting(validate_stub)
+    receipt=dict(message_id='m',thread_id='t',sender=s.SENDER,recipient=r['営業メール宛先'],
+                 label_ids=['SENT'],verified=True,sent_at=NOW,email_sha256=s.load_object(r[s.META])['packet']['email_sha256'])
+    with pytest.raises(ValueError,match='sent_label_is_not_delivery_proof'):
+        apply(r,'SENT',claim_id='evt:RESERVED',receipt=receipt)
 
 
 @pytest.mark.parametrize('field,value,error', [
