@@ -274,6 +274,7 @@ def preflight(row, proof, now, require_window=True):
     if proof.get('recipient', '').lower() != recipient:
         raise ValueError('recipient_changed')
     verify_gmail_authority(proof, recipient)
+    verify_fresh_recipient_authority(row, proof, now)
     checked = stamp(proof['checked_at'])
     if not timedelta(0) <= stamp(now)-checked <= timedelta(minutes=5):
         raise ValueError('fresh_send_checks_required')
