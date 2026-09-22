@@ -3,7 +3,7 @@ name: Continuous SSOT outbound
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "0 * * * *"
   push:
     branches: [main]
     paths:
@@ -20,13 +20,13 @@ concurrency:
 jobs:
   cycle:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 58
     env:
       GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       LEAD_FACTORY_TASKS_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      CONTINUOUS_SEND_BATCH: "20"
+      CONTINUOUS_SEND_BATCH: "20"\n      CONTINUOUS_LOOP_SECONDS: "3300"
       PYTHONUNBUFFERED: "1"
 
     steps:
