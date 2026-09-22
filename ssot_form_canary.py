@@ -16,6 +16,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from google.auth import default
 from googleapiclient.discovery import build
@@ -29,7 +30,15 @@ EVENT_TAB = "SalesOS_Action_Events"
 
 # Explicit canary pool. The runner stops after 5 confirmed FORM_SENT successes.
 # These rows currently have verified first-party form URLs in MESSAGE_INPUT_PACKET_V1.
-CANARY_ROWS = [662, 862, 632, 842, 1258, 1276, 1312, 1334, 1352, 1466, 1676, 1766, 1932, 1984, 2016]
+CANARY_ROWS = [
+    # Retryable V2 rows from the first canary plus additional current-V2 forms.
+    662, 862, 632, 842, 1258, 1276, 1312, 1352, 1466, 1676, 1766, 2016,
+    496, 584, 616, 654, 882, 896, 984, 1006, 1026, 1032, 1034, 1056,
+    1072, 1122, 1124, 1132, 1176, 1232, 1252, 1446, 1454, 2844,
+    3341, 3349, 3358, 3581, 3629, 3669, 3726, 3774, 3789, 3806,
+    3837, 3861, 4038, 4094, 4246, 4294, 4302, 4310, 4894, 4910,
+    5115, 5209,
+]
 TARGET_SUCCESS = 5
 MIN_SUCCESS = 3
 
@@ -74,22 +83,28 @@ def read_row(svc, row: int) -> dict:
     values = list(values) + [""] * (136 - len(values))
     meta = parse_json(values[132])
     packet = meta.get("message_input_packet_v1") or {}
+    form_url = str(
+        meta.get("form_url")
+        or packet.get("form_url")
+        or (meta.get("channel") or {}).get("form")
+        or ""
+    ).strip()
+    website = str(values[6] or "").strip()
+    if not website and form_url:
+        parsed = urlparse(form_url)
+        if parsed.scheme == "https" and parsed.hostname:
+            website = f"https://{parsed.hostname}"
     return {
         "row": row,
         "company": str(values[0] or "").strip(),
         "status": str(values[1] or "").strip(),
-        "website": str(values[6] or "").strip(),
+        "website": website,
         "subject": str(values[113] or "").strip(),
         "body": str(values[114] or ""),
         "recipient": str(values[112] or "").strip(),
         "email_state": str(values[117] or "").strip(),
         "meta": meta,
-        "form_url": str(
-            meta.get("form_url")
-            or packet.get("form_url")
-            or (meta.get("channel") or {}).get("form")
-            or ""
-        ).strip(),
+        "form_url": form_url,
         "copy_version": str(meta.get("copy_version") or packet.get("copy_version") or "").strip(),
     }
 
@@ -166,6 +181,10 @@ def main():
         if previous_form_state == "FORM_SENT":
             results.append({"row": row_number, "company": row["company"], "status": "SKIP_ALREADY_FORM_SENT"})
             continue
+        if previous_form_state == "FORM_UNCONFIRMED":
+            # Never click a form twice after an ambiguous previous submission.
+            results.append({"row": row_number, "company": row["company"], "status": "SKIP_FORM_UNCONFIRMED"})
+            continue
         if not row["company"] or not row["website"] or not row["form_url"] or not row["body"]:
             results.append({"row": row_number, "company": row["company"], "status": "SKIP_MISSING_INPUT"})
             continue
@@ -183,11 +202,13 @@ def main():
             compact_message=compact,
         )
         if not preview.get("ready"):
+            attempts = preview.get("attempts", [])
+            last_attempt = attempts[-1] if attempts else {}
             result = {
                 "status": "FORM_FAILED",
-                "reason": "PREVIEW_NOT_READY",
+                "reason": str(last_attempt.get("reason") or "PREVIEW_NOT_READY"),
                 "form_url": row["form_url"],
-                "preview_attempts": preview.get("attempts", []),
+                "preview_attempts": attempts,
             }
         else:
             submit_message = preview.get("message") or row["body"]
@@ -260,6 +281,10 @@ def main():
             "reason": result.get("reason", ""),
             "confirmation": result.get("confirmation", ""),
             "form_url": row["form_url"],
+            "preview_reasons": [
+                str(item.get("reason") or item.get("status") or "")
+                for item in result.get("preview_attempts", [])
+            ],
         })
 
     summary = {
