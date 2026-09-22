@@ -1,50 +1,16 @@
-name: Continuous SSOT outbound
+name: Retired Python continuous outbound
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 * * * *"
-  push:
-    branches: [main]
-    paths:
-      - ".github/continuous-outbound-trigger"
 
 permissions:
   contents: read
-  id-token: write
-
-concurrency:
-  group: continuous-ssot-outbound
-  cancel-in-progress: false
 
 jobs:
-  cycle:
+  retired:
     runs-on: ubuntu-latest
-    timeout-minutes: 58
-    env:
-      GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
-      GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
-      LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      LEAD_FACTORY_TASKS_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      CONTINUOUS_SEND_BATCH: "20"
-      CONTINUOUS_LOOP_SECONDS: "3300"
-      PYTHONUNBUFFERED: "1"
-
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Zero paid model gate
-        run: python cost_guard.py
-
-      - name: Install deterministic runtime
-        run: python -m pip install --disable-pip-version-check google-auth google-api-python-client
-
-      - name: Authenticate existing Google service identity
-        uses: google-github-actions/auth@v3
-        with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-      - name: Continuous START STOP loop
-        run: python continuous_outbound_runtime.py loop
+      - run: |
+          echo "Customer-facing email sending has moved to ChatGPT Outbound A/B using the connected Gmail tool."
+          echo "Python/GitHub customer email sending is intentionally disabled."
+          exit 1
