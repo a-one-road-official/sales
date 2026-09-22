@@ -26,7 +26,8 @@ jobs:
       GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       LEAD_FACTORY_TASKS_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      CONTINUOUS_SEND_BATCH: "20"\n      CONTINUOUS_LOOP_SECONDS: "3300"
+      CONTINUOUS_SEND_BATCH: "20"
+      CONTINUOUS_LOOP_SECONDS: "3300"
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -45,5 +46,5 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Reconcile provider delivery then drain queue if START
-        run: python continuous_outbound_runtime.py cycle
+      - name: Continuous START STOP loop
+        run: python continuous_outbound_runtime.py loop
