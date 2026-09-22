@@ -96,6 +96,25 @@ def sheets_service():
     return build("sheets", "v4", credentials=creds, cache_discovery=False)
 
 
+def delegation_client_id():
+    """Return the Workspace DWD OAuth client ID for one-time Admin Console repair."""
+    signer = text(
+        os.getenv("LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT")
+        or os.getenv("LEAD_FACTORY_TASKS_SERVICE_ACCOUNT")
+    )
+    if not signer:
+        return ""
+    try:
+        creds, _ = default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        iam = build("iam", "v1", credentials=creds, cache_discovery=False)
+        account = iam.projects().serviceAccounts().get(
+            name=f"projects/-/serviceAccounts/{signer}"
+        ).execute()
+        return text(account.get("oauth2ClientId"))
+    except Exception:
+        return ""
+
+
 def get_values(svc, range_):
     return svc.spreadsheets().values().get(
         spreadsheetId=SSOT_ID, range=f"'{SALES_TAB}'!{range_}"
@@ -619,13 +638,38 @@ def send_batch(svc):
 
 def cycle():
     svc = sheets_service()
-    # Delivery authority is a hard precondition for continued outbound. If
-    # Workspace reconciliation is unavailable, fail before any new sends.
+    # Measurement failure must never be mistaken for delivery success. Keep the
+    # business counter frozen, expose the exact blocker, and continue draining
+    # approved current-version inventory while START so time is not lost.
     try:
         rec = reconcile(svc)
     except Exception as exc:
-        upsert_goal(svc, "OUTBOUND_RECONCILE_HEALTH", f"ERROR:{type(exc).__name__}", "No new sends until provider delivery authority is restored")
-        raise
+        client_id = delegation_client_id()
+        upsert_goal(
+            svc,
+            "OUTBOUND_RECONCILE_HEALTH",
+            f"ERROR:{type(exc).__name__}",
+            "Provider-delivery proof unavailable; no pending email is counted as DELIVERED",
+        )
+        if client_id:
+            upsert_goal(
+                svc,
+                "OUTBOUND_WORKSPACE_DWD_CLIENT_ID",
+                client_id,
+                "Google Admin Console > Security > API controls > Domain-wide delegation",
+            )
+        upsert_goal(
+            svc,
+            "OUTBOUND_WORKSPACE_DWD_REQUIRED_SCOPES",
+            "https://www.googleapis.com/auth/admin.reports.audit.readonly,https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.send",
+            "Grant these scopes to the service-account OAuth client so provider delivery can be proven",
+        )
+        rec = {
+            "status": "RECONCILE_AUTH_ERROR",
+            "error": f"{type(exc).__name__}:{exc}",
+            "delivered_count_frozen": True,
+            "dwd_client_id": client_id,
+        }
 
     cfg, _ = read_goal_config(svc)
     if cfg.get("OUTBOUND_RUN_STATE", "STOP").upper() != "START":
