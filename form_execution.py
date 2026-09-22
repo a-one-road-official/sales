@@ -857,9 +857,16 @@ def _verify_identity_dom(form):
 
 
 class PublicContactFormExecutor:
-    def __init__(self, sheets=None, authorization=None):
+    def __init__(self, sheets=None, authorization=None, explicit_source_rows=None):
         self.sheets = sheets
         self.authorization = authorization
+        # Form-only explicit canary authorization. This never authorizes email.
+        # It is bounded to exact SSOT row numbers supplied by the caller.
+        self.explicit_source_rows = {
+            str(value).strip()
+            for value in (explicit_source_rows or [])
+            if str(value).strip()
+        }
 
     def preview_candidates(self, *, form_urls, website, company_name, subject, message, compact_message=""):
         """Try up to three official pages without issuing a non-GET request.
@@ -917,7 +924,9 @@ class PublicContactFormExecutor:
         for row in rows:
             if str(row.get("idempotency_key") or "") == idempotency_key:
                 return row
-            successful = str(row.get("status") or "").upper() in {"SENT", "FORM_SENT"}
+            # Cross-channel policy: an email SENT record must never block
+            # the company's official contact form. Only a prior FORM_SENT does.
+            successful = str(row.get("status") or "").upper() == "FORM_SENT"
             if not successful:
                 continue
             if source_row and str(row.get("source_row") or "").strip() == str(source_row).strip():
@@ -994,7 +1003,16 @@ class PublicContactFormExecutor:
             return payload
 
         from workbook_sales import authorized
-        if not preview_only and not authorized(self.authorization, self.sheets, company_name, website):
+        explicit_form_authorized = (
+            not preview_only
+            and bool(source_row)
+            and str(source_row).strip() in self.explicit_source_rows
+        )
+        if (
+            not preview_only
+            and not explicit_form_authorized
+            and not authorized(self.authorization, self.sheets, company_name, website)
+        ):
             return result_payload("BLOCKED", reason="workbook_authorization_required")
         if not form_url or not _same_host_or_subdomain(form_url, website):
             return result_payload("FORM_FAILED", reason="FORM_HOST_UNVERIFIED")
