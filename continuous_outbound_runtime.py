@@ -711,8 +711,49 @@ def cycle():
     return {"run_state": "START", "reconcile": rec, "send": sent}
 
 
+def continuous_loop():
+    """Durable START/STOP loop.
+
+    GitHub Actions is only the process host/watchdog. Business state lives in
+    SalesOS_Goal_Config. While START, keep draining current-version inventory.
+    STOP or delivered-target completion exits cleanly. The workflow restarts
+    periodically only as a watchdog in case the runner is recycled.
+    """
+    deadline = time.monotonic() + max(
+        300, min(20700, int(os.getenv("CONTINUOUS_LOOP_SECONDS", "3300")))
+    )
+    results = []
+    while time.monotonic() < deadline:
+        result = cycle()
+        results.append(result)
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+
+        state = text(result.get("run_state")).upper()
+        if state != "START":
+            return {"status": "STOPPED", "last": result, "cycles": len(results)}
+
+        send = result.get("send") or {}
+        if send.get("state") == "TARGET_REACHED":
+            return {"status": "TARGET_REACHED", "last": result, "cycles": len(results)}
+
+        # External admin permission blockers are retried without terminating the
+        # START job. Normal batches loop fast; empty inventory backs off.
+        if send.get("state") == "START_BLOCKED_GMAIL_DWD":
+            time.sleep(60)
+        elif int(send.get("eligible", 0) or 0) == 0:
+            time.sleep(30)
+        else:
+            time.sleep(5)
+
+    return {
+        "status": "WATCHDOG_HANDOFF",
+        "cycles": len(results),
+        "last": results[-1] if results else {},
+    }
+
+
 if __name__ == "__main__":
-    mode = sys.argv[1] if len(sys.argv) > 1 else "cycle"
+    mode = sys.argv[1] if len(sys.argv) > 1 else "loop"
     svc = sheets_service()
     if mode == "reconcile":
         result = reconcile(svc)
@@ -720,6 +761,8 @@ if __name__ == "__main__":
         result = send_batch(svc)
     elif mode == "cycle":
         result = cycle()
+    elif mode == "loop":
+        result = continuous_loop()
     else:
-        raise SystemExit("usage: python continuous_outbound_runtime.py [cycle|reconcile|send]")
+        raise SystemExit("usage: python continuous_outbound_runtime.py [loop|cycle|reconcile|send]")
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
