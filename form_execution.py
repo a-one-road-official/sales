@@ -78,6 +78,13 @@ APPROVED_FORM_ACTION_HOSTS = {
 APPROVED_FORM_ACTION_PATH_PREFIXES = (
     "/submissions/v3/public/submit/formsnext/",
 )
+# Tally is a public embedded form processor. It is allowed only for HTTPS form
+# actions rendered inside an official first-party contact page/iframe.
+APPROVED_GENERIC_FORM_ACTION_HOSTS = {
+    "tally.so",
+    "www.tally.so",
+    "api.tally.so",
+}
 
 
 def _form_action_allowed(action: str, website: str) -> bool:
@@ -85,9 +92,13 @@ def _form_action_allowed(action: str, website: str) -> bool:
     if _same_host_or_subdomain(action, website):
         return True
     parsed = urlparse(str(action or ""))
+    if parsed.scheme != "https":
+        return False
+    action_host = _host(action)
+    if action_host in APPROVED_GENERIC_FORM_ACTION_HOSTS:
+        return True
     return (
-        parsed.scheme == "https"
-        and _host(action) in APPROVED_FORM_ACTION_HOSTS
+        action_host in APPROVED_FORM_ACTION_HOSTS
         and any(parsed.path.startswith(prefix) for prefix in APPROVED_FORM_ACTION_PATH_PREFIXES)
     )
 
@@ -158,7 +169,7 @@ def _field_key(el, label: str) -> str:
         return "monthly_traffic"
     if re.search(r"ecommerce[_ -]?platform|e-commerce\s+platform|\bplatform\b", marker):
         return "platform"
-    if re.search(r"reason[_ -]?for[_ -]?contact|(?:type[_ -]?of[_ -]?(?:enquiry|inquiry))|(?:inquiry|enquiry|service)[_ -]?type|looking\s+to\s+talk|相談先|問い合わせ先", marker):
+    if re.search(r"reason[_ -]?for[_ -]?contact|(?:type[_ -]?of[_ -]?(?:enquiry|inquiry))|(?:inquiry|enquiry|service)[_ -]?type|looking\s+to\s+talk|interested\s+in|interest[_ -]?area|相談先|問い合わせ先", marker):
         return "reason"
     if re.search(r"how[_ -]?did[_ -]?you[_ -]?(?:learn|hear)|流入元|知ったきっかけ", marker):
         return "discovery_source"
@@ -199,6 +210,8 @@ def _field_key(el, label: str) -> str:
         return "phone"
     if re.search(r"\b(website|web site|url|サイト|ウェブ)\b", marker):
         return "website"
+    if re.search(r"\b(company|organization|organisation)[ _-]*(?:type|kind|category)\b|\b(?:type|kind|category)[ _-]*(?:of[ _-]*)?(?:company|organization|organisation)\b", marker):
+        return "company_type"
     if re.search(r"\b(company|organization|organisation|法人|会社|企業)\b", marker):
         return "company"
     if re.search(r"\b(job title|title|role|position|職種|役職|代表|founder|ceo)\b", marker):
@@ -229,6 +242,8 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
         return "admin@a1-road.com"
     if key == "company":
         return "A-one road Co., Ltd."
+    if key == "company_type":
+        return "Other"
     if key == "role":
         return "Founder & CEO"
     if key == "industry":
@@ -276,6 +291,7 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
 
 def _select_option(el, key: str) -> tuple[bool, str]:
     wanted = {
+        "company_type": ("other", "consulting", "service provider", "professional services"),
         "country": ("japan", "日本", "jp"),
         "region": ("apac", "asia pacific", "asia-pacific", "asia"),
         "state": ("kanagawa", "神奈川"),
@@ -366,6 +382,7 @@ def _dom_click_matching_option(el, wanted_tokens) -> str:
 def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
     """Select a visible option from a HubSpot-style custom dropdown."""
     wanted = {
+        "company_type": ("other", "consulting", "service provider", "professional services"),
         "country": ("japan", "日本"),
         "region": ("apac", "asia pacific", "asia-pacific", "asia"),
         "state": ("kanagawa", "神奈川"),
@@ -594,6 +611,7 @@ def _dismiss_cookie_banner(contexts) -> bool:
     """Dismiss an ordinary cookie-consent overlay when it blocks the form."""
     decision_re = re.compile(
         r"reject(?:\s+all)?|only\s+necessary|necessary\s+cookies?|"
+        r"accept\s+essential(?:\s+only)?|essential\s+only|necessary\s+only|"
         r"decline(?:\s+all)?|deny(?:\s+all)?",
         re.I,
     )
