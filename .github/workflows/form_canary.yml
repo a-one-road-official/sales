@@ -1,0 +1,63 @@
+name: Form canary 3-5
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/form-canary-trigger"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: form-canary-3-5
+  cancel-in-progress: false
+
+jobs:
+  form-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      LEAD_FACTORY_SHEETS_READ_MIN_INTERVAL_SECONDS: "0.25"
+      LEAD_FACTORY_SHEETS_WRITE_MIN_INTERVAL_SECONDS: "0.25"
+      OUTREACH_FORM_ACTION_TIMEOUT_MS: "12000"
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — form only
+        run: |
+          set -euo pipefail
+          ! grep -q "messages().send" ssot_form_canary.py
+          ! grep -q "gmail.send" ssot_form_canary.py
+          echo "Form canary contains no email-send path."
+
+      - name: Authenticate Google Sheets
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Install form runtime
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Submit verified public forms
+        run: python ssot_form_canary.py
+
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: form-canary-evidence
+          path: |
+            form-canary-result.json
+            form-canary-evidence/
+          if-no-files-found: warn
+          retention-days: 7
