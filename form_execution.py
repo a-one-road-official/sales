@@ -28,6 +28,40 @@ SUCCESS_RE = re.compile(
 )
 CORE_FIELDS = ("name", "company", "email", "phone", "country", "address", "role", "message")
 
+AUTOMATION_SUPPRESSED_STATUSES = {
+    "返信あり", "アポ確定", "商談化", "商談中", "商談実施",
+    "提案", "提案済み", "受注", "合意・契約締結",
+    "拒否", "NG", "配信停止", "DO_NOT_CONTACT",
+}
+
+
+def _ssot_automation_suppressed(sheets, source_row: str) -> tuple[bool, str]:
+    """Block every automated outbound channel after a human reply/advanced state.
+
+    Email and form remain independent before a human reply. Once a human reply or
+    later sales stage is verified, no automated first-touch/follow-up channel may
+    fire again for that SSOT row.
+    """
+    if sheets is None or not str(source_row or "").strip().isdigit():
+        return False, ""
+    try:
+        row_number = int(str(source_row).strip())
+        rows = sheets.read(f"'営業リスト＿Factory/BPO'!A{row_number}:EC{row_number}")
+        row = rows[0] if rows else []
+        row = list(row) + [""] * max(0, 133 - len(row))
+        status = str(row[1] or "").strip()
+        meta_raw = str(row[132] or "").strip()
+        meta = json.loads(meta_raw) if meta_raw else {}
+        if status in AUTOMATION_SUPPRESSED_STATUSES:
+            return True, f"SSOT_STATUS:{status}"
+        if isinstance(meta, dict) and meta.get("auto_outbound_blocked") is True:
+            return True, str(meta.get("suppression_reason") or "AUTO_OUTBOUND_BLOCKED")
+    except Exception:
+        # Fail closed only when an explicit source row was supplied; an unreadable
+        # suppression ledger must never create a duplicate customer action.
+        return True, "SSOT_SUPPRESSION_LOOKUP_FAILED"
+    return False, ""
+
 
 def contact_policy_blocked(text: str) -> bool:
     return bool(re.search(
@@ -1019,6 +1053,13 @@ class PublicContactFormExecutor:
                 payload["reason"] = reason
             payload.update(extra)
             return payload
+
+        suppressed, suppression_reason = _ssot_automation_suppressed(self.sheets, source_row)
+        if not preview_only and suppressed:
+            return result_payload(
+                "BLOCKED",
+                reason="AUTO_OUTBOUND_SUPPRESSED:" + suppression_reason,
+            )
 
         from workbook_sales import authorized
         explicit_form_authorized = (
