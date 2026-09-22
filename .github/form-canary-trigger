@@ -1,0 +1,5 @@
+form canary start 2026-09-22T12:46+09:00
+scope=form-only
+target_success=5
+minimum_success=3
+email_send_path=forbidden
