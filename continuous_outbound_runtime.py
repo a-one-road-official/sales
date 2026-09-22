@@ -62,6 +62,18 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def aware_iso(value: str) -> str:
+    """Normalize legacy SSOT timestamps; naive values are JST by sheet contract."""
+    raw = text(value)
+    if not raw:
+        return ""
+    dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        from zoneinfo import ZoneInfo
+        dt = dt.replace(tzinfo=ZoneInfo("Asia/Tokyo"))
+    return dt.isoformat()
+
+
 def jst_date(iso_value: str) -> str:
     dt = datetime.fromisoformat(iso_value.replace("Z", "+00:00"))
     return dt.astimezone(timezone.utc).astimezone().date().isoformat()
@@ -397,7 +409,7 @@ def delivery_outbounds(rows):
             "message_id": row["message_id"],
             "thread_id": row["thread_id"],
             "recipient": row["last_recipient"],
-            "accepted_at": row["last_outbound"],
+            "accepted_at": aware_iso(row["last_outbound"]),
             "subject": row["subject"],
         })
     return out
