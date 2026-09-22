@@ -102,13 +102,14 @@ def delegation_client_id():
         os.getenv("LEAD_FACTORY_GMAIL_SIGNING_SERVICE_ACCOUNT")
         or os.getenv("LEAD_FACTORY_TASKS_SERVICE_ACCOUNT")
     )
-    if not signer:
+    project = text(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT"))
+    if not signer or not project:
         return ""
     try:
         creds, _ = default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
         iam = build("iam", "v1", credentials=creds, cache_discovery=False)
         account = iam.projects().serviceAccounts().get(
-            name=f"projects/-/serviceAccounts/{signer}"
+            name=f"projects/{project}/serviceAccounts/{signer}"
         ).execute()
         return text(account.get("oauth2ClientId"))
     except Exception:
@@ -606,7 +607,38 @@ def send_batch(svc):
     limit = max(1, min(100, int(os.getenv("CONTINUOUS_SEND_BATCH", DEFAULT_BATCH))))
     rows = read_sales_rows(svc)
     candidates = [r for r in rows if send_candidate(r)]
-    gmail = gmail_service()
+    try:
+        gmail = gmail_service()
+    except Exception as exc:
+        client_id = delegation_client_id()
+        upsert_goal(
+            svc,
+            "OUTBOUND_RUNTIME_HEALTH",
+            f"BLOCKED:GMAIL_DWD:{type(exc).__name__}",
+            "Continuous sender is START but cannot impersonate admin@a1-road.com until Workspace domain-wide delegation is granted",
+        )
+        if client_id:
+            upsert_goal(
+                svc,
+                "OUTBOUND_WORKSPACE_DWD_CLIENT_ID",
+                client_id,
+                "Google Admin Console > Security > API controls > Domain-wide delegation",
+            )
+        upsert_goal(
+            svc,
+            "OUTBOUND_WORKSPACE_DWD_REQUIRED_SCOPES",
+            "https://www.googleapis.com/auth/admin.reports.audit.readonly,https://www.googleapis.com/auth/gmail.readonly,https://www.googleapis.com/auth/gmail.send",
+            "Grant all three scopes to the service-account OAuth client; next 5-minute cycle resumes automatically",
+        )
+        return {
+            "state": "START_BLOCKED_GMAIL_DWD",
+            "eligible": len(candidates),
+            "attempted": 0,
+            "gmail_accepted": 0,
+            "error": f"{type(exc).__name__}:{exc}",
+            "dwd_client_id": client_id,
+        }
+    upsert_goal(svc, "OUTBOUND_RUNTIME_HEALTH", "RUNNING", "Continuous sender Gmail authority available")
     results = []
     for row in candidates[:limit]:
         try:
