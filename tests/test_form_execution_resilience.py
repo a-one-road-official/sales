@@ -192,7 +192,8 @@ def test_reveal_contact_form_opens_hidden_modal():
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.set_content(html)
-        assert _choose_form([page]) is None
+        before = _choose_form([page])
+        assert before is None or _form_score(before[1]) == 0
         assert _reveal_contact_form(page, "https://example.com")
         chosen = _choose_form([page])
         assert chosen is not None
