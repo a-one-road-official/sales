@@ -138,3 +138,36 @@ def test_label_for_reads_local_preceding_sibling():
         assert _label_for(field) == "Company"
         assert _field_key(field, _label_for(field)) == "company"
         browser.close()
+
+
+def test_contact_reason_is_classified_for_hubspot_style_name():
+    html = """
+    <html><body><form>
+      <select name="contact_reason">
+        <option>General inquiry</option>
+        <option>Sales and commercial support</option>
+      </select>
+    </form></body></html>
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content(html)
+        field = page.locator("select")
+        assert _field_key(field, _label_for(field)) == "reason"
+        browser.close()
+
+
+def test_optional_other_communications_checkbox_is_marketing():
+    label = "I agree to receive other communications from Zivid. You may unsubscribe at any time."
+    lower = label.lower()
+    import re
+    marketing = bool(re.search(
+        r"newsletter|marketing|promotional?|promotions?|offers?|"
+        r"product updates?|commercial communications?|"
+        r"other communications?|receive.{0,80}communications?|"
+        r"communications? from|email communications?|subscribe|subscription|"
+        r"news and updates|メルマガ|配信|宣伝|広告",
+        lower,
+    ))
+    assert marketing
