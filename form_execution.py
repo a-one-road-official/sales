@@ -372,6 +372,61 @@ def _value_for(key: str, marker: str, *, subject: str, message: str, overrides: 
     return None
 
 
+def _available_choice_labels(el, context=None, limit: int = 40) -> list[str]:
+    """Collect visible/native option labels for ChatGPT repair without choosing one."""
+    labels = []
+    try:
+        tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
+    except Exception:
+        tag = ""
+    if tag == "select":
+        try:
+            options = el.locator("option")
+            for index in range(min(options.count(), limit)):
+                text = str(options.nth(index).inner_text() or "").strip()
+                if text and text not in labels:
+                    labels.append(text)
+        except Exception:
+            pass
+        return labels
+
+    try:
+        el.click(timeout=2500)
+    except Exception:
+        try:
+            el.press("ArrowDown")
+        except Exception:
+            pass
+    roots = [
+        el.locator("xpath=.."),
+        el.locator("xpath=../.."),
+        el.locator("xpath=ancestor::*[@data-hsfc-id='DropdownField'][1]"),
+    ]
+    if context is not None:
+        roots.extend([
+            context.locator("[role=listbox]:visible"),
+            context.locator("[role=option]:visible"),
+        ])
+    for root in roots:
+        try:
+            options = root.locator("[role=option]:visible, li:visible")
+            for index in range(min(options.count(), limit)):
+                text = str(options.nth(index).inner_text() or "").strip()
+                if text and text not in labels:
+                    labels.append(text)
+                if len(labels) >= limit:
+                    break
+        except Exception:
+            continue
+        if len(labels) >= limit:
+            break
+    try:
+        el.press("Escape")
+    except Exception:
+        pass
+    return labels[:limit]
+
+
 def _select_option(el, key: str, override_tokens=()) -> tuple[bool, str]:
     wanted = tuple(str(token).strip().casefold() for token in (override_tokens or ()) if str(token).strip())
     if not wanted:
@@ -1464,6 +1519,7 @@ class PublicContactFormExecutor:
                             item["action"] = "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
                             if required:
                                 missing_required.append(key or marker or f"field_{index}")
+                                item["available_choices"] = _available_choice_labels(el, form_context)
                             field_audit.append(item)
                             continue
 
@@ -1480,6 +1536,7 @@ class PublicContactFormExecutor:
                                     )
                                     if required:
                                         missing_required.append(key or marker or f"field_{index}")
+                                        item["available_choices"] = _available_choice_labels(el, form_context)
                                 else:
                                     item["action"] = "SELECTED"
                                     item["final_value"] = selected_text or _current_value(el) or value
@@ -1492,6 +1549,7 @@ class PublicContactFormExecutor:
                                     item["action"] = "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
                                     if required:
                                         missing_required.append(key or marker or f"field_{index}")
+                                        item["available_choices"] = _available_choice_labels(el, form_context)
                                 else:
                                     item["action"] = "SELECTED"
                                     item["final_value"] = selected_text or _current_value(el)
@@ -1545,10 +1603,12 @@ class PublicContactFormExecutor:
                             label = _label_for(el)
                             marker = _marker(el, label)
                             key = _field_key(el, label)
-                            if not key or key in custom_seen:
+                            dedupe_key = key or _normalise_override_key(marker)
+                            if not dedupe_key or dedupe_key in custom_seen:
                                 continue
-                            custom_seen.add(key)
-                            present_keys.add(key)
+                            custom_seen.add(dedupe_key)
+                            if key:
+                                present_keys.add(key)
                             required = (
                                 _required(el)
                                 or key in {
@@ -1563,7 +1623,7 @@ class PublicContactFormExecutor:
                             )
                             item = {
                                 "index": 10000 + custom_index,
-                                "key": key,
+                                "key": key or "unknown",
                                 "marker": marker,
                                 "label": label,
                                 "type": "custom_dropdown",
@@ -1579,6 +1639,7 @@ class PublicContactFormExecutor:
                                 )
                                 if required:
                                     missing_required.append(key or marker or f"custom_field_{custom_index}")
+                                    item["available_choices"] = _available_choice_labels(el, form_context)
                                 field_audit.append(item)
                                 continue
                             selected, selected_text = _select_custom_option(
@@ -1591,6 +1652,7 @@ class PublicContactFormExecutor:
                                 )
                                 if required:
                                     missing_required.append(key or marker or f"custom_field_{custom_index}")
+                                    item["available_choices"] = _available_choice_labels(el, form_context)
                             else:
                                 item["action"] = "SELECTED"
                                 item["final_value"] = selected_text or _current_value(el) or value
@@ -1703,18 +1765,29 @@ class PublicContactFormExecutor:
                         required = any(_required(el) for el in controls)
                         if not required:
                             continue
-                        # Choose only a truthful partnership/general inquiry or
-                        # sender role. Never invent a purchasing intention.
-                        match = next((el for el in controls if re.search(
-                            r"\bpartners?(?:hips?)?\b|\bothers?\b|general (?:inquiry|enquiry)|founder|\bceo\b",
-                            _label_for(el), re.I)), None)
+                        labels = [str(_label_for(el) or el.get_attribute("value") or "").strip() for el in controls]
+                        group_marker = " ".join([group] + labels)
+                        override = _field_override(group_marker, field_overrides)
+                        wanted = [str(x).casefold() for x in (override or {}).get("choices", []) if str(x).strip()]
+                        # Choose only an explicit ChatGPT override or a truthful
+                        # partnership/general-inquiry/sender-role option.
+                        match = None
+                        if wanted:
+                            match = next((el for el in controls if any(
+                                token in str(_label_for(el) or el.get_attribute("value") or "").casefold()
+                                for token in wanted
+                            )), None)
+                        if match is None:
+                            match = next((el for el in controls if re.search(
+                                r"\bpartners?(?:hips?)?\b|\bothers?\b|general (?:inquiry|enquiry)|founder|\bceo\b",
+                                str(_label_for(el) or el.get_attribute("value") or ""), re.I)), None)
                         if match is not None:
                             try:
                                 match.check()
                             except Exception:
                                 pass
                         if not any(el.is_checked() for el in controls):
-                            missing_required.append(f"radio_required:{group}")
+                            missing_required.append(f"radio_required:{group}:" + " | ".join(labels[:20]))
 
                     core_present = {
                         key for key in CORE_FIELDS
