@@ -305,7 +305,7 @@ def _field_key(el, label: str) -> str:
         return "monthly_traffic"
     if re.search(r"ecommerce[_ -]?platform|e-commerce\s+platform|\bplatform\b", marker):
         return "platform"
-    if re.search(r"reason[_ -]?for[_ -]?contact|(?:type[_ -]?of[_ -]?(?:enquiry|inquiry))|(?:inquiry|enquiry|service)[_ -]?type|looking\s+to\s+talk|interested\s+in|interest[_ -]?area|相談先|問い合わせ先", marker):
+    if re.search(r"(?:contact[_ -]?reason|reason[_ -]?for[_ -]?contact)|(?:type[_ -]?of[_ -]?(?:enquiry|inquiry))|(?:inquiry|enquiry|service)[_ -]?type|looking\s+to\s+talk|interested\s+in|interest[_ -]?area|相談先|問い合わせ先", marker):
         return "reason"
     if re.search(r"how[_ -]?did[_ -]?you[_ -]?(?:learn|hear)|流入元|知ったきっかけ", marker):
         return "discovery_source"
@@ -523,7 +523,7 @@ def _select_option(el, key: str, override_tokens=()) -> tuple[bool, str]:
         "region": ("apac", "asia pacific", "asia-pacific", "asia"),
         "state": ("kanagawa", "神奈川"),
         "industry": ("consulting", "professional services", "other"),
-        "reason": ("partnership", "partner", "business development", "other"),
+        "reason": ("general inquiry", "general enquiry", "partnership", "partner", "business development", "other"),
         "discovery_source": ("found you online", "online marketing"),
         "category": ("other",),
         "platform": ("other",),
@@ -617,7 +617,7 @@ def _select_custom_option(el, key: str, context=None, override_tokens=()) -> tup
         "state": ("kanagawa", "神奈川"),
         "industry": ("consulting", "professional services", "other"),
         "role": ("founder", "ceo", "chief executive", "owner"),
-        "reason": ("partnership", "partner", "business development", "other"),
+        "reason": ("general inquiry", "general enquiry", "partnership", "partner", "business development", "other"),
         "discovery_source": ("found you online", "online marketing"),
         "category": ("other",),
         "platform": ("other",),
@@ -1820,7 +1820,14 @@ class PublicContactFormExecutor:
                         required = _required(el)
                         lower = f"{marker} {label}".lower()
                         marketing = bool(
-                            re.search(r"newsletter|marketing|updates|メルマガ|配信|宣伝|広告", lower)
+                            re.search(
+                                r"newsletter|marketing|promotional?|promotions?|offers?|"
+                                r"product updates?|commercial communications?|"
+                                r"other communications?|receive.{0,80}communications?|"
+                                r"communications? from|email communications?|subscribe|subscription|"
+                                r"news and updates|メルマガ|配信|宣伝|広告",
+                                lower,
+                            )
                         )
                         consent = bool(
                             re.search(r"agree|consent|privacy|terms|同意|個人情報|利用規約", lower)
