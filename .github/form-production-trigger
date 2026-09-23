@@ -1,7 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-24T06:25:00+09:00
+requested_at=2026-09-24T07:17:11+09:00
 claims=1
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r5757-20260924T0625JST
+claim_ids=chatgpt-form-r5789-20260924T0717JST
+source_rows=5789
+canonical_domains=yunextraffic.com
 reason=FORM_ONLY-current-batch
 code=form_runtime_entrypoint_v1
