@@ -459,6 +459,7 @@ def main() -> None:
         recoverable_discovery_reasons = {
             "FORM_HTTP_403", "FORM_HTTP_404", "FORM_NOT_FOUND",
             "FORM_NAVIGATION_FAILED", "FORM_HOST_UNVERIFIED",
+            "MESSAGE_FIELD_MISSING",
         }
         if (
             result.get("status") == "FORM_FAILED"
