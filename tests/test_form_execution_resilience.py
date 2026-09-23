@@ -10,6 +10,7 @@ from form_execution import (
     CAPTCHA_FAILURE_RE,
     _form_page_allowed,
     _verify_identity_dom,
+    _reveal_contact_form,
 )
 
 
@@ -171,3 +172,29 @@ def test_optional_other_communications_checkbox_is_marketing():
         lower,
     ))
     assert marketing
+
+
+def test_reveal_contact_form_opens_hidden_modal():
+    html = """
+    <html><body>
+      <button id="open" type="button" onclick="document.getElementById('modal').style.display='block'">Contact us</button>
+      <div id="modal" style="display:none">
+        <form>
+          <input name="name" />
+          <input type="email" name="email" />
+          <textarea name="message"></textarea>
+          <button type="submit">Submit</button>
+        </form>
+      </div>
+    </body></html>
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content(html)
+        assert _choose_form([page]) is None
+        assert _reveal_contact_form(page, "https://example.com")
+        chosen = _choose_form([page])
+        assert chosen is not None
+        assert _form_score(chosen[1]) > 0
+        browser.close()
