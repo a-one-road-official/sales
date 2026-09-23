@@ -10,7 +10,7 @@ import os
 import re
 import json
 from datetime import datetime, timezone
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urldefrag
 import time
 import hashlib
 from pathlib import Path
@@ -27,6 +27,20 @@ SUCCESS_RE = re.compile(
     r"message\s+sent|受付|送信完了|お問い合わせ.{0,20}受け付け|ありがとうございました",
     re.I,
 )
+VALIDATION_ERROR_RE = re.compile(
+    r"please\s+complete\s+(?:this|the)\s+required\s+field|required\s+field(?:s)?|"
+    r"please\s+(?:complete|fill|select|choose).{0,80}(?:required|field|option)|"
+    r"invalid\s+form|submission\s+failed|could\s+not\s+be\s+sent|"
+    r"there\s+was\s+an\s+error|something\s+went\s+wrong|"
+    r"入力.{0,20}(?:必須|してください)|必須項目|選択してください",
+    re.I,
+)
+CAPTCHA_FAILURE_RE = re.compile(
+    r"recaptcha.{0,80}(?:failed|validation)|captcha.{0,80}(?:failed|validation|required)|"
+    r"suspected\s+as\s+abusive\s+usage|verify\s+(?:that\s+)?you(?:['’]re|\s+are)\s+human",
+    re.I,
+)
+
 CORE_FIELDS = ("name", "company", "email", "phone", "country", "address", "role", "message")
 
 AUTOMATION_SUPPRESSED_STATUSES = {
@@ -212,9 +226,15 @@ def _field_key(el, label: str) -> str:
         return "category"
     if re.search(r"\b(subject|件名)\b", marker):
         return "subject"
-    if tag == "textarea" or re.search(
-        r"\b(message|inquiry|enquiry|comment|detail|body|content|質問|内容|お問い合わせ)\b",
-        marker,
+    if tag == "textarea":
+        return "message"
+    if (
+        tag == "input"
+        and typ not in {"checkbox", "radio", "button", "submit", "file"}
+        and re.search(
+            r"\b(message|inquiry|enquiry|comment|detail|body|content|質問|内容|お問い合わせ)\b",
+            marker,
+        )
     ):
         return "message"
     if re.search(r"\b(first[- _]?name|given[- _]?name|名)\b", marker):
@@ -865,17 +885,79 @@ def _submit_control(form_context, form):
     return None
 
 
+def _mark_synthetic_form_candidates(context) -> None:
+    """Mark the smallest useful container around contact controls when no <form> exists.
+
+    Modern SPA/embedded forms sometimes render controls in a div/section and submit
+    through JavaScript. Playwright's semantic locators already pierce open shadow DOM;
+    this fallback keeps the executor DOM-first without OCR.
+    """
+    try:
+        context.evaluate(
+            """() => {
+                for (const node of Array.from(document.querySelectorAll('[data-aone-form-candidate]'))) {
+                    node.removeAttribute('data-aone-form-candidate');
+                }
+                const visible = el => {
+                    const style = window.getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return style.display !== 'none' && style.visibility !== 'hidden' &&
+                        rect.width > 0 && rect.height > 0;
+                };
+                const anchors = Array.from(document.querySelectorAll(
+                    'textarea, input[type="email"], input[name*="message" i], input[placeholder*="message" i]'
+                )).filter(visible);
+                let n = 0;
+                for (const anchor of anchors) {
+                    let node = anchor.parentElement;
+                    for (let depth = 0; node && depth < 8; depth++, node = node.parentElement) {
+                        const controls = Array.from(node.querySelectorAll(
+                            'input:not([type="hidden"]), textarea, select, [role="combobox"]'
+                        )).filter(visible);
+                        const submits = Array.from(node.querySelectorAll(
+                            'button, input[type="submit"], [role="button"]'
+                        )).filter(el => visible(el) && /submit|send|contact|get in touch|request|demo|送信|お問い合わせ/i.test(
+                            (el.innerText || el.value || el.getAttribute('aria-label') || '')
+                        ));
+                        if (controls.length >= 2 && submits.length >= 1) {
+                            node.setAttribute('data-aone-form-candidate', String(n++));
+                            break;
+                        }
+                    }
+                }
+            }"""
+        )
+    except Exception:
+        return
+
+
 def _choose_form(contexts):
     best = None
     best_score = -1
     for context in contexts:
         try:
-            forms = context.locator("form")
+            forms = context.locator("form, [role='form']")
             for index in range(forms.count()):
                 form = forms.nth(index)
                 score = _form_score(form)
                 if score > best_score:
                     best = (context, form)
+                    best_score = score
+        except Exception:
+            continue
+    if best is not None and best_score > 0:
+        return best
+
+    # Fallback for JS/SPAs whose inputs are not wrapped in a literal form element.
+    for context in contexts:
+        try:
+            _mark_synthetic_form_candidates(context)
+            candidates = context.locator("[data-aone-form-candidate]")
+            for index in range(candidates.count()):
+                candidate = candidates.nth(index)
+                score = _form_score(candidate)
+                if score > best_score:
+                    best = (context, candidate)
                     best_score = score
         except Exception:
             continue
@@ -918,6 +1000,141 @@ def _visible_step_signature(form) -> tuple:
         return tuple(signature)
     except Exception:
         return ()
+
+
+CONTACT_LINK_RE = re.compile(
+    r"contact(?:-us)?|get[-_ ]?in[-_ ]?touch|sales|request[-_ ]?(?:a[-_ ]?)?demo|"
+    r"book[-_ ]?(?:a[-_ ]?)?demo|request[-_ ]?quote|inquir|enquir|"
+    r"kontakt|contatti|contacto|お問い合わせ|問合せ|partners?",
+    re.I,
+)
+NEGATIVE_CONTACT_LINK_RE = re.compile(
+    r"career|jobs?|privacy|legal|terms|support[-_ ]?portal|login|sign[-_ ]?in|"
+    r"newsletter|press|media|investor",
+    re.I,
+)
+
+
+def _contact_link_score(text: str, href: str) -> int:
+    haystack = f"{text or ''} {href or ''}".strip()
+    if not CONTACT_LINK_RE.search(haystack):
+        return 0
+    score = 20
+    lower = haystack.casefold()
+    for token, weight in (
+        ("contact", 50), ("get in touch", 45), ("kontakt", 45),
+        ("sales", 35), ("request demo", 32), ("book demo", 30),
+        ("request quote", 28), ("partner", 20),
+    ):
+        if token in lower:
+            score += weight
+    if NEGATIVE_CONTACT_LINK_RE.search(haystack):
+        score -= 60
+    return max(score, 0)
+
+
+def _new_browser_context(browser):
+    """Stable browser context; compatibility settings only, no anti-bot bypass."""
+    return browser.new_context(
+        locale="en-US",
+        timezone_id="Asia/Tokyo",
+        viewport={"width": 1440, "height": 1000},
+        extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
+    )
+
+
+def discover_official_contact_urls(website: str, seed_url: str = "", limit: int = 8) -> list[str]:
+    """Discover current first-party contact/form pages using GET-only browsing.
+
+    Used only after a stored form URL fails before submission. Candidates remain
+    first-party and are scored from user-visible anchor text/hrefs.
+    """
+    root = str(website or "").strip()
+    if not root:
+        return []
+    if "://" not in root:
+        root = "https://" + root
+    root_parsed = urlparse(root)
+    if not root_parsed.hostname:
+        return []
+    root = f"{root_parsed.scheme or 'https'}://{root_parsed.netloc}/"
+    candidates: dict[str, int] = {}
+
+    def add(url: str, score: int):
+        clean = urldefrag(urljoin(root, str(url or "").strip()))[0]
+        if not clean or not _same_host_or_subdomain(clean, root):
+            return
+        parsed = urlparse(clean)
+        if parsed.scheme not in {"http", "https"}:
+            return
+        candidates[clean] = max(score, candidates.get(clean, 0))
+
+    if seed_url:
+        add(seed_url, 15)
+    for path, score in (
+        ("/contact", 80), ("/contact/", 80), ("/contact-us", 80), ("/contact-us/", 80),
+        ("/kontakt", 75), ("/kontakt/", 75), ("/get-in-touch", 70), ("/get-in-touch/", 70),
+        ("/sales", 55), ("/sales/", 55), ("/request-demo", 50), ("/request-demo/", 50),
+    ):
+        add(path, score)
+
+    browser = None
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True)
+            context = _new_browser_context(browser)
+            page = context.new_page()
+            sources = [root]
+            if seed_url and _same_host_or_subdomain(seed_url, root):
+                sources.append(seed_url)
+            for source in list(dict.fromkeys(sources))[:2]:
+                try:
+                    response = page.goto(source, wait_until="domcontentloaded", timeout=20000)
+                    if response is not None and response.status >= 500:
+                        continue
+                    page.wait_for_timeout(750)
+                    links = page.locator("a[href]")
+                    for index in range(min(links.count(), 500)):
+                        link = links.nth(index)
+                        href = str(link.get_attribute("href") or "").strip()
+                        if not href or href.startswith(("mailto:", "tel:", "javascript:")):
+                            continue
+                        try:
+                            text = str(link.inner_text(timeout=250) or "").strip()
+                        except Exception:
+                            text = ""
+                        score = _contact_link_score(text, href)
+                        if score:
+                            add(href, score)
+                except Exception:
+                    continue
+
+            ranked = sorted(candidates.items(), key=lambda item: (-item[1], item[0]))
+            live = []
+            for url, _score in ranked[: max(limit * 2, 12)]:
+                try:
+                    response = page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                    if response is not None and response.status >= 400:
+                        continue
+                    page.wait_for_timeout(350)
+                    live.append(page.url if _same_host_or_subdomain(page.url, root) else url)
+                    if len(live) >= limit:
+                        break
+                except Exception:
+                    continue
+            try:
+                context.close()
+            except Exception:
+                pass
+            return list(dict.fromkeys(live))
+    except Exception:
+        return []
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception:
+                pass
 
 
 def _execution_log_sheet() -> str:
@@ -1126,7 +1343,8 @@ class PublicContactFormExecutor:
         try:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=True)
-                page = browser.new_page()
+                browser_context = _new_browser_context(browser)
+                page = browser_context.new_page()
                 preview_filling_started = False
                 if preview_only:
                     # Multi-step forms can transmit partial data on Next. The
@@ -1158,6 +1376,7 @@ class PublicContactFormExecutor:
                     return result_payload(
                         "FORM_FAILED",
                         reason=f"FORM_HTTP_{response.status}",
+                        http_status=response.status,
                     )
                 try:
                     page.wait_for_load_state("networkidle", timeout=5000)
@@ -1596,12 +1815,6 @@ class PublicContactFormExecutor:
                     except Exception:
                         continue
                 final_html = "\n".join(final_html_parts)
-                if _captcha_present([page] + list(page.frames[1:])):
-                    return result_payload(
-                        "FORM_FAILED",
-                        reason="CAPTCHA_PRESENT_AFTER_SUBMIT",
-                        form_url=final_url,
-                    )
                 visible_parts = []
                 for frame in [page, form_context]:
                     try:
@@ -1611,6 +1824,28 @@ class PublicContactFormExecutor:
                 visible_text = "\n".join(dict.fromkeys(part for part in visible_parts if part))
                 success_match = next((m for m in SUCCESS_RE.finditer(visible_text or "") if m.group(0).casefold() not in initial_success_texts), None)
                 thank_you_url = final_url != form_url and _is_first_party_thank_you_url(final_url, website)
+
+                # Explicit negative evidence is a confirmed failure, not an
+                # ambiguous submission. This keeps recoverable validation errors
+                # out of FORM_UNCONFIRMED and lets ChatGPT repair the field packet.
+                negative_match = VALIDATION_ERROR_RE.search(visible_text or "")
+                captcha_failure = CAPTCHA_FAILURE_RE.search(visible_text or "")
+                if not success_match and not thank_you_url and (captcha_failure or negative_match):
+                    return result_payload(
+                        "FORM_FAILED",
+                        reason="CAPTCHA_VALIDATION_FAILED" if captcha_failure else "FORM_VALIDATION_FAILED",
+                        form_url=final_url,
+                        confirmation_text=(visible_text or "")[:4000],
+                        explicit_negative_confirmation=True,
+                    )
+                if not success_match and not thank_you_url and _captcha_present([page] + list(page.frames[1:])):
+                    return result_payload(
+                        "FORM_FAILED",
+                        reason="CAPTCHA_PRESENT_AFTER_SUBMIT",
+                        form_url=final_url,
+                        confirmation_text=(visible_text or "")[:4000],
+                        explicit_negative_confirmation=True,
+                    )
                 if not success_match and not thank_you_url:
                     return result_payload(
                         "FORM_UNCONFIRMED",
