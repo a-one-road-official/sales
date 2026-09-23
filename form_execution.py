@@ -272,7 +272,35 @@ def _required(el) -> bool:
     return False
 
 
-def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | None:
+def _normalise_override_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+
+
+def _field_override(marker: str, overrides: dict | None) -> dict | None:
+    if not isinstance(overrides, dict):
+        return None
+    normalised_marker = _normalise_override_key(marker)
+    for raw_key, raw_value in overrides.items():
+        key = _normalise_override_key(raw_key)
+        if not key or key not in normalised_marker:
+            continue
+        if isinstance(raw_value, dict):
+            value = str(raw_value.get("value") or raw_value.get("choice") or "").strip()
+            choices = raw_value.get("choices")
+            if isinstance(choices, list):
+                tokens = [str(item).strip() for item in choices if str(item).strip()]
+            else:
+                tokens = [value] if value else []
+            return {"value": value, "choices": tokens}
+        value = str(raw_value or "").strip()
+        return {"value": value, "choices": [value] if value else []}
+    return None
+
+
+def _value_for(key: str, marker: str, *, subject: str, message: str, overrides: dict | None = None) -> str | None:
+    override = _field_override(marker, overrides)
+    if override and override.get("value"):
+        return str(override["value"])
     if key == "email":
         return "admin@a1-road.com"
     if key == "company":
@@ -291,7 +319,7 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
         return "Other"
     if key == "revenue":
         return os.getenv("OUTREACH_FORM_ANNUAL_REVENUE") or None
-    if key == "monthly_traffic":
+    if key == "monthly_traffic" and not override_tokens:
         return os.getenv("OUTREACH_FORM_MONTHLY_TRAFFIC") or None
     if key == "platform":
         return os.getenv("OUTREACH_FORM_ECOMMERCE_PLATFORM") or "Other"
@@ -316,7 +344,7 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
     if key == "address":
         return "〒220-0072 神奈川県横浜市西区浅間町1丁目4-3 ウィザードビル402"
     if key == "website":
-        return "https://a-oneroad.com"
+        return "https://a1-road.com"
     if key == "subject":
         return subject
     if key == "message":
@@ -324,8 +352,10 @@ def _value_for(key: str, marker: str, *, subject: str, message: str) -> str | No
     return None
 
 
-def _select_option(el, key: str) -> tuple[bool, str]:
-    wanted = {
+def _select_option(el, key: str, override_tokens=()) -> tuple[bool, str]:
+    wanted = tuple(str(token).strip().casefold() for token in (override_tokens or ()) if str(token).strip())
+    if not wanted:
+        wanted = {
         "company_type": ("other", "consulting", "service provider", "professional services"),
         "country": ("japan", "日本", "jp"),
         "region": ("apac", "asia pacific", "asia-pacific", "asia"),
@@ -414,9 +444,11 @@ def _dom_click_matching_option(el, wanted_tokens) -> str:
         return ""
 
 
-def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
+def _select_custom_option(el, key: str, context=None, override_tokens=()) -> tuple[bool, str]:
     """Select a visible option from a HubSpot-style custom dropdown."""
-    wanted = {
+    wanted = tuple(str(token).strip().casefold() for token in (override_tokens or ()) if str(token).strip())
+    if not wanted:
+        wanted = {
         "company_type": ("other", "consulting", "service provider", "professional services"),
         "country": ("japan", "日本"),
         "region": ("apac", "asia pacific", "asia-pacific", "asia"),
@@ -428,7 +460,7 @@ def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
         "category": ("other",),
         "platform": ("other",),
     }.get(key, ())
-    if key == "revenue":
+    if key == "revenue" and not override_tokens:
         configured = str(os.getenv("OUTREACH_FORM_ANNUAL_REVENUE") or "").strip().lower()
         wanted = tuple(part.strip() for part in configured.split("|") if part.strip()) if configured else ()
         if wanted:
@@ -445,7 +477,7 @@ def _select_custom_option(el, key: str, context=None) -> tuple[bool, str]:
         "platform": "OUTREACH_FORM_ECOMMERCE_PLATFORM",
     }
     config_name = configured_by_key.get(key)
-    if config_name:
+    if config_name and not override_tokens:
         configured = str(os.getenv(config_name) or "").strip().lower()
         if configured:
             # Permit site-specific labels in one deployment configuration.
@@ -1003,6 +1035,7 @@ class PublicContactFormExecutor:
         draft_id: str = "",
         source_row: str = "",
         preview_only: bool = False,
+        field_overrides: dict | None = None,
     ) -> dict:
         started = datetime.now(timezone.utc).isoformat()
         field_audit = []
@@ -1206,7 +1239,8 @@ class PublicContactFormExecutor:
                         }
                         if key:
                             present_keys.add(key)
-                        value = _value_for(key, marker, subject=subject, message=message)
+                        override = _field_override(marker, field_overrides)
+                        value = _value_for(key, marker, subject=subject, message=message, overrides=field_overrides)
                         if value is None:
                             item["action"] = "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
                             if required:
@@ -1217,7 +1251,10 @@ class PublicContactFormExecutor:
                         try:
                             tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
                             if is_custom_dropdown:
-                                selected, selected_text = _select_custom_option(el, key, form_context)
+                                selected, selected_text = _select_custom_option(
+                                    el, key, form_context,
+                                    override_tokens=(override or {}).get("choices", ()),
+                                )
                                 if not selected:
                                     item["action"] = (
                                         "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
@@ -1228,7 +1265,10 @@ class PublicContactFormExecutor:
                                     item["action"] = "SELECTED"
                                     item["final_value"] = selected_text or _current_value(el) or value
                             elif typ in {"select-one", "select-multiple"} or tag == "select":
-                                selected, selected_text = _select_option(el, key)
+                                selected, selected_text = _select_option(
+                                    el, key,
+                                    override_tokens=(override or {}).get("choices", ()),
+                                )
                                 if not selected:
                                     item["action"] = "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
                                     if required:
@@ -1312,7 +1352,8 @@ class PublicContactFormExecutor:
                                 "action": "NOT_FILLED",
                                 "final_value": "",
                             }
-                            value = _value_for(key, marker, subject=subject, message=message)
+                            override = _field_override(marker, field_overrides)
+                            value = _value_for(key, marker, subject=subject, message=message, overrides=field_overrides)
                             if value is None:
                                 item["action"] = (
                                     "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
@@ -1321,7 +1362,10 @@ class PublicContactFormExecutor:
                                     missing_required.append(key or marker or f"custom_field_{custom_index}")
                                 field_audit.append(item)
                                 continue
-                            selected, selected_text = _select_custom_option(el, key, form_context)
+                            selected, selected_text = _select_custom_option(
+                                el, key, form_context,
+                                override_tokens=(override or {}).get("choices", ()),
+                            )
                             if not selected:
                                 item["action"] = (
                                     "REQUIRED_UNMAPPED" if required else "OPTIONAL_UNMAPPED"
