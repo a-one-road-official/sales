@@ -1,6 +1,6 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-23T19:58:49+09:00
+requested_at=2026-09-23T20:02:34+09:00
 claims=0
 source=chatgpt-form-production
-reason=resilience-selftest-and-sharded-runtime-smoke
+reason=latest-resilience-shard-provider-smoke
 code=form_production_v1
