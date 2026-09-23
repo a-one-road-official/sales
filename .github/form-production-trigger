@@ -1,4 +1,6 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-23T19:41:00+09:00
-claims=0
-reason=latest-code-smoke-after-router-suppression-patch
+requested_at=2026-09-23T19:47:00+09:00
+claims=3
+source=chatgpt-form-production
+reason=execute_verified_email-failure-form-recovery
+code=form_production_v1
