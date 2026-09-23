@@ -65,7 +65,7 @@ def canonical_domain(value: str) -> str:
 def get_config(svc) -> dict:
     values = svc.spreadsheets().values().get(
         spreadsheetId=SSOT_ID,
-        range=f"'{CONFIG_TAB}'!A1:C250",
+        range=f"'{CONFIG_TAB}'!A1:C12015",
     ).execute().get("values", [])
     out = {}
     for row in values[1:]:
