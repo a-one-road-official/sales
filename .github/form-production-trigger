@@ -1,6 +1,7 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-23T20:06:34+09:00
-claims=0
+requested_at=2026-09-23T20:10:35+09:00
+claims=5
 source=chatgpt-form-production
-reason=post-identity-url-recovery-resilience-smoke
+reason=quality-benchmark-after-resilience-fixes
+rows=573,982,1634,3624,3814
 code=form_production_v1
