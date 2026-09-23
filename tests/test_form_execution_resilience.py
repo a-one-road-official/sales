@@ -8,6 +8,7 @@ from form_execution import (
     _contact_link_score,
     VALIDATION_ERROR_RE,
     CAPTCHA_FAILURE_RE,
+    _form_page_allowed,
 )
 
 
@@ -49,6 +50,7 @@ def test_custom_dropdown_wrapper_text_does_not_become_message_field():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
+        page.set_content(html)
         el = page.locator("[role=combobox]")
         key = _field_key(el, _label_for(el))
         assert key != "message"
@@ -64,3 +66,10 @@ def test_contact_link_scoring_prefers_real_contact_links():
 def test_explicit_negative_submission_evidence_is_detected():
     assert VALIDATION_ERROR_RE.search("Please complete this required field.")
     assert CAPTCHA_FAILURE_RE.search("The Google reCAPTCHA failed to validate your submission.")
+
+
+def test_verified_external_form_provider_is_allowed_but_arbitrary_external_is_blocked():
+    website = "https://example-industrial.com"
+    assert _form_page_allowed("https://share.hsforms.com/abc123", website)
+    assert _form_page_allowed("https://tally.so/r/xyz987", website)
+    assert not _form_page_allowed("https://evil.example/form", website)
