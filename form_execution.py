@@ -1220,17 +1220,45 @@ def _execution_log_sheet() -> str:
     ).strip() or "LeadFactory_ExecutionLog"
 
 
-def _verify_identity_dom(form):
-    """Read actual person/company values, including values changed by page JS."""
-    observed = []
+def _verify_identity_dom(form, field_audit=None):
+    """Verify only identity controls that this executor actually filled.
+
+    Contact pages often contain a second newsletter/email widget inside the same
+    visual container. Validating every visible email control creates false identity
+    mismatches. The field audit gives us the exact control indexes we touched while
+    still reading the live DOM after page JavaScript has had a chance to mutate them.
+    """
     controls = form.locator("input:not([type=hidden]), textarea, select")
-    for index in range(controls.count()):
-        el = controls.nth(index)
-        if not el.is_visible() or not el.is_enabled():
-            continue
-        key = _field_key(el, _label_for(el))
-        if key in {"name", "first_name", "last_name", "company", "email", "ambiguous_person_name"}:
-            observed.append({"key": key, "final_value": _current_value(el)})
+    observed = []
+    identity_keys = {"name", "first_name", "last_name", "company", "email", "ambiguous_person_name"}
+    if isinstance(field_audit, list):
+        for item in field_audit:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key") or "")
+            if key not in identity_keys or item.get("action") not in {"FILLED", "SELECTED"}:
+                continue
+            try:
+                index = int(item.get("index"))
+            except Exception:
+                continue
+            if index < 0 or index >= controls.count():
+                continue
+            el = controls.nth(index)
+            try:
+                if not el.is_visible() or not el.is_enabled():
+                    continue
+                observed.append({"key": key, "final_value": _current_value(el)})
+            except Exception:
+                continue
+    else:
+        for index in range(controls.count()):
+            el = controls.nth(index)
+            if not el.is_visible() or not el.is_enabled():
+                continue
+            key = _field_key(el, _label_for(el))
+            if key in identity_keys:
+                observed.append({"key": key, "final_value": _current_value(el)})
     validate_identity_fields(observed)
 
 
@@ -1836,7 +1864,7 @@ class PublicContactFormExecutor:
                     submit = _submit_control(form_context, form)
                     if submit is None:
                         return result_payload("FORM_FAILED", reason="SUBMIT_CONTROL_NOT_FOUND")
-                    _verify_identity_dom(form)
+                    _verify_identity_dom(form, field_audit)
                     control_label = _control_label(submit)
                     if re.search(r"\bnext\b", control_label, re.I):
                         before_click_signature = _visible_step_signature(form)
@@ -1887,7 +1915,7 @@ class PublicContactFormExecutor:
                                           actual_message_lengths=[len(value) for value in actual_messages])
                 if contact_policy_blocked(page.locator("body").inner_text()):
                     return result_payload("BLOCKED", reason="CONTACT_POLICY_RESTRICTS_OUTREACH")
-                _verify_identity_dom(form)
+                _verify_identity_dom(form, field_audit)
                 if preview_only:
                     return result_payload("FORM_PREVIEW_READY", reason="PREVIEW_NO_SUBMISSION", submitted_message=matching_messages[0])
                 capture("before-submit")
