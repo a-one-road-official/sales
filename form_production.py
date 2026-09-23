@@ -380,6 +380,7 @@ def main() -> None:
             draft_id=claim_id,
             source_row=str(row_number),
             preview_only=False,
+            field_overrides=packet.get("field_overrides") if isinstance(packet.get("field_overrides"), dict) else None,
         )
 
         if result.get("status") == "FORM_SENT":
