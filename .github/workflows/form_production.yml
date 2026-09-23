@@ -17,6 +17,10 @@ concurrency:
 
 jobs:
   form-production:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -25,6 +29,9 @@ jobs:
       LEAD_FACTORY_SHEETS_READ_MIN_INTERVAL_SECONDS: "0.25"
       LEAD_FACTORY_SHEETS_WRITE_MIN_INTERVAL_SECONDS: "0.25"
       OUTREACH_FORM_ACTION_TIMEOUT_MS: "12000"
+      FORM_PRODUCTION_SHARD_COUNT: "4"
+      FORM_PRODUCTION_SHARD_INDEX: "${{ matrix.shard }}"
+      OUTREACH_EVIDENCE_DIR: "form-production-evidence-${{ matrix.shard }}"
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -52,5 +59,19 @@ jobs:
           python -m pip install --disable-pip-version-check -r requirements.txt
           python -m playwright install --with-deps chromium
 
+      - name: Form resilience tests
+        run: |
+          python -m compileall form_execution.py form_production.py
+          pytest -q tests/test_form_execution_resilience.py
+
       - name: Execute ChatGPT-claimed form jobs
         run: python form_production.py
+
+      - name: Preserve browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: form-production-evidence-${{ github.run_id }}-${{ matrix.shard }}
+          path: form-production-evidence-${{ matrix.shard }}/
+          if-no-files-found: ignore
+          retention-days: 7
