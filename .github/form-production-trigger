@@ -1,7 +1,7 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-24T05:22:00+09:00
+requested_at=2026-09-24T05:27:00+09:00
 claims=1
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r7211-repair1-20260924T0522JST
-reason=BOUNCED-recovery-bounded-field-repair
+claim_ids=chatgpt-form-r635-20260924T0527JST
+reason=FORM_ONLY-current-batch
 code=form_runtime_entrypoint_v1
