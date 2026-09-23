@@ -505,11 +505,33 @@ def main() -> None:
                     result["recovered_form_url"] = recovered_url
                 elif preview.get("attempts"):
                     # Persist the most informative read-only failure so ChatGPT can
-                    # repair the next claim instead of seeing only the stale URL.
-                    last_attempt = dict(preview["attempts"][-1])
-                    last_attempt["discovery_candidates"] = candidates
-                    last_attempt["reason"] = str(last_attempt.get("reason") or "FORM_DISCOVERY_PREVIEW_FAILED")
-                    result = last_attempt
+                    # repair the next claim instead of seeing only the last/weakest
+                    # candidate (for example a bare homepage FORM_NOT_FOUND).
+                    reason_rank = {
+                        "REQUIRED_FIELD_MAPPING_UNCERTAIN": 100,
+                        "FORM_VALIDATION_FAILED": 95,
+                        "MESSAGE_FIELD_MISSING": 90,
+                        "REQUIRED_MARKETING_OPT_IN": 85,
+                        "CAPTCHA_PRESENT": 80,
+                        "FORM_ACTION_HOST_UNVERIFIED": 70,
+                        "FORM_HOST_UNVERIFIED": 65,
+                        "FORM_HTTP_403": 60,
+                        "FORM_HTTP_404": 55,
+                        "FORM_NAVIGATION_FAILED": 50,
+                        "FORM_NOT_FOUND": 10,
+                    }
+                    attempts = [dict(item) for item in preview["attempts"] if isinstance(item, dict)]
+                    best_attempt = max(
+                        attempts,
+                        key=lambda item: (
+                            reason_rank.get(str(item.get("reason") or ""), 40),
+                            len(item.get("field_audit") or []),
+                            len(item.get("missing_required") or []),
+                        ),
+                    )
+                    best_attempt["discovery_candidates"] = candidates
+                    best_attempt["reason"] = str(best_attempt.get("reason") or "FORM_DISCOVERY_PREVIEW_FAILED")
+                    result = best_attempt
 
         result_status = str(result.get("status") or "")
         if result_status == "FORM_SENT":
