@@ -198,3 +198,18 @@ def test_reveal_contact_form_opens_hidden_modal():
         assert chosen is not None
         assert _form_score(chosen[1]) > 0
         browser.close()
+
+
+def test_security_question_marker_is_not_treated_as_business_field():
+    html = """
+    <html><body><form>
+      <input name="security" placeholder="Security ?" />
+    </form></body></html>
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content(html)
+        field = page.locator("input")
+        assert _field_key(field, _label_for(field)) == ""
+        browser.close()
