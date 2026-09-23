@@ -1,0 +1,56 @@
+name: Form production executor
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/form-production-trigger"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: form-production-executor
+  cancel-in-progress: false
+
+jobs:
+  form-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+      LEAD_FACTORY_SHEETS_READ_MIN_INTERVAL_SECONDS: "0.25"
+      LEAD_FACTORY_SHEETS_WRITE_MIN_INTERVAL_SECONDS: "0.25"
+      OUTREACH_FORM_ACTION_TIMEOUT_MS: "12000"
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard — deterministic form only
+        run: |
+          set -euo pipefail
+          ! grep -q "messages().send" form_production.py
+          ! grep -q "gmail.send" form_production.py
+          ! grep -q "openai" form_production.py
+          ! grep -q "vertex" form_production.py
+          ! grep -q "gemini" form_production.py
+          echo "Production form executor contains no email/model send path."
+
+      - name: Authenticate Google Sheets
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Install deterministic browser runtime
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Execute ChatGPT-claimed form jobs
+        run: python form_production.py
