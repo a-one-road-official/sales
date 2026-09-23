@@ -1,4 +1,6 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-23T19:45:00+09:00
-claims=0
-reason=adaptive-field-overrides-smoke
+requested_at=2026-09-23T19:52:00+09:00
+claims=2
+source=chatgpt-form-production
+reason=adaptive-field-retry-after-pre-submit-mapping-failure
+code=form_production_v1
