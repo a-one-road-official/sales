@@ -1106,6 +1106,72 @@ def _choose_form(contexts):
     return best
 
 
+def _reveal_contact_form(page, website: str) -> bool:
+    """Open one contact/demo modal or first-party contact subpage when no form is visible.
+
+    This is a discovery interaction only. Submit/send controls and controls inside an
+    existing form are excluded. Preview mode still blocks non-GET network traffic.
+    """
+    reveal_re = re.compile(
+        r"contact\s*(?:us|sales)?|get\s+in\s+touch|talk\s+to\s+sales|"
+        r"request\s+(?:a\s+)?demo|book\s+(?:a\s+)?demo|request\s+(?:a\s+)?quote|"
+        r"kontakt|contatti|contacto|お問い合わせ",
+        re.I,
+    )
+    try:
+        controls = page.locator("a[href], button, [role=button]")
+        candidates = []
+        for index in range(min(controls.count(), 180)):
+            control = controls.nth(index)
+            try:
+                if not control.is_visible() or not control.is_enabled():
+                    continue
+                typ = str(control.get_attribute("type") or "").lower()
+                if typ == "submit":
+                    continue
+                if control.locator("xpath=ancestor::form[1]").count() > 0:
+                    continue
+                label = _control_label(control)
+                if not reveal_re.search(label):
+                    continue
+                href = str(control.get_attribute("href") or "").strip()
+                score = 20
+                if re.search(r"contact\s+sales|talk\s+to\s+sales", label, re.I):
+                    score += 30
+                if re.search(r"get\s+in\s+touch|contact\s+us", label, re.I):
+                    score += 20
+                if href:
+                    target = urljoin(page.url or website, href)
+                    if not _form_page_allowed(target, website):
+                        continue
+                    score += 10
+                candidates.append((score, index, control, href))
+            except Exception:
+                continue
+        if not candidates:
+            return False
+        candidates.sort(key=lambda item: (-item[0], item[1]))
+        _score, _index, control, href = candidates[0]
+        if href:
+            target = urljoin(page.url or website, href)
+            try:
+                page.goto(target, wait_until="domcontentloaded", timeout=20000)
+            except Exception:
+                return False
+        else:
+            try:
+                control.click(timeout=4000)
+            except Exception:
+                return False
+        try:
+            page.wait_for_timeout(1200)
+        except Exception:
+            pass
+        return True
+    except Exception:
+        return False
+
+
 def _visible_step_signature(form) -> tuple:
     """Return a stable signature of the visible multi-step form state."""
     try:
@@ -1569,6 +1635,20 @@ class PublicContactFormExecutor:
                         break
                     page.wait_for_timeout(750)
                     contexts = [page] + list(page.frames[1:])
+                if not chosen:
+                    # Some SPA pages keep the form behind a contact/demo CTA or
+                    # render it in a modal only after interaction.
+                    revealed = _reveal_contact_form(page, website)
+                    if revealed and _form_page_allowed(page.url, website):
+                        contexts = [page] + list(page.frames[1:])
+                        _dismiss_cookie_banner(contexts)
+                        for _ in range(8):
+                            candidate = _choose_form(contexts)
+                            if candidate and _form_score(candidate[1]) > 0:
+                                chosen = candidate
+                                break
+                            page.wait_for_timeout(500)
+                            contexts = [page] + list(page.frames[1:])
                 if not chosen:
                     return result_payload("FORM_FAILED", reason="FORM_NOT_FOUND")
                 form_context, form = chosen
