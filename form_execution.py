@@ -319,7 +319,7 @@ def _value_for(key: str, marker: str, *, subject: str, message: str, overrides: 
         return "Other"
     if key == "revenue":
         return os.getenv("OUTREACH_FORM_ANNUAL_REVENUE") or None
-    if key == "monthly_traffic" and not override_tokens:
+    if key == "monthly_traffic":
         return os.getenv("OUTREACH_FORM_MONTHLY_TRAFFIC") or None
     if key == "platform":
         return os.getenv("OUTREACH_FORM_ECOMMERCE_PLATFORM") or "Other"
@@ -465,7 +465,7 @@ def _select_custom_option(el, key: str, context=None, override_tokens=()) -> tup
         wanted = tuple(part.strip() for part in configured.split("|") if part.strip()) if configured else ()
         if wanted:
             wanted += ("less than $1m", "less than €1m", "less than €1 million")
-    if key == "monthly_traffic":
+    if key == "monthly_traffic" and not override_tokens:
         configured = str(os.getenv("OUTREACH_FORM_MONTHLY_TRAFFIC") or "").strip().lower()
         wanted = tuple(part.strip() for part in configured.split("|") if part.strip()) if configured else ()
         if wanted:
