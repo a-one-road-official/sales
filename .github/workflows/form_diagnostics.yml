@@ -22,10 +22,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Cache Playwright Chromium
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: form-playwright-${{ runner.os }}-1.49.1-chromium
       - name: Install browser runtime
         run: |
-          python -m pip install --disable-pip-version-check -r requirements.txt
-          python -m playwright install --with-deps chromium
+          python -m pip install --disable-pip-version-check -r requirements-form.txt
+          python -m playwright install-deps chromium
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" != "true" ]; then
+            python -m playwright install chromium
+          fi
       - name: Compile + resilience tests
         run: |
           python -m compileall form_execution.py form_production.py tools/form_probe.py
