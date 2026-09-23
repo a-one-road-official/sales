@@ -124,6 +124,27 @@ APPROVED_FORM_ACTION_HOSTS = {
     "forms-eu1.hsforms.com",
     "forms-na2.hsforms.com",
 }
+
+APPROVED_PUBLIC_FORM_PAGE_HOSTS = {
+    "share.hsforms.com",
+    "forms.hsforms.com",
+    "forms-eu1.hsforms.com",
+    "forms-na2.hsforms.com",
+    "tally.so",
+    "www.tally.so",
+}
+
+
+def _approved_public_form_page(url: str) -> bool:
+    parsed = urlparse(str(url or ""))
+    if parsed.scheme != "https":
+        return False
+    return _host(url) in APPROVED_PUBLIC_FORM_PAGE_HOSTS
+
+
+def _form_page_allowed(url: str, website: str) -> bool:
+    return _same_host_or_subdomain(url, website) or _approved_public_form_page(url)
+
 APPROVED_FORM_ACTION_PATH_PREFIXES = (
     "/submissions/v3/public/submit/formsnext/",
 )
@@ -1117,7 +1138,7 @@ def discover_official_contact_urls(website: str, seed_url: str = "", limit: int 
 
     def add(url: str, score: int):
         clean = urldefrag(urljoin(root, str(url or "").strip()))[0]
-        if not clean or not _same_host_or_subdomain(clean, root):
+        if not clean or not _form_page_allowed(clean, root):
             return
         parsed = urlparse(clean)
         if parsed.scheme not in {"http", "https"}:
@@ -1172,7 +1193,7 @@ def discover_official_contact_urls(website: str, seed_url: str = "", limit: int 
                     if response is not None and response.status >= 400:
                         continue
                     page.wait_for_timeout(350)
-                    live.append(page.url if _same_host_or_subdomain(page.url, root) else url)
+                    live.append(page.url if _form_page_allowed(page.url, root) else url)
                     if len(live) >= limit:
                         break
                 except Exception:
@@ -1233,7 +1254,7 @@ class PublicContactFormExecutor:
         """
         from urllib.parse import urldefrag
         pages = list(dict.fromkeys(urldefrag(url)[0] for url in form_urls
-                                  if _same_host_or_subdomain(url, website)))[:3]
+                                  if _form_page_allowed(url, website)))[:5]
         attempts = []
         for url in pages:
             result = self.execute(form_url=url, website=website, company_name=company_name,
@@ -1379,7 +1400,7 @@ class PublicContactFormExecutor:
             and not authorized(self.authorization, self.sheets, company_name, website)
         ):
             return result_payload("BLOCKED", reason="workbook_authorization_required")
-        if not form_url or not _same_host_or_subdomain(form_url, website):
+        if not form_url or not _form_page_allowed(form_url, website):
             return result_payload("FORM_FAILED", reason="FORM_HOST_UNVERIFIED")
         duplicate = None if preview_only else self._existing(
             idempotency_key,
@@ -1422,7 +1443,7 @@ class PublicContactFormExecutor:
                     # Some large marketing pages continue loading after the form DOM is
                     # available. Let form discovery decide whether the page is usable.
                     response = None
-                    if not _same_host_or_subdomain(page.url, website):
+                    if not _form_page_allowed(page.url, website):
                         return result_payload(
                             "FORM_FAILED",
                             reason="FORM_NAVIGATION_FAILED",
