@@ -9,6 +9,7 @@ from form_execution import (
     VALIDATION_ERROR_RE,
     CAPTCHA_FAILURE_RE,
     _form_page_allowed,
+    _verify_identity_dom,
 )
 
 
@@ -73,3 +74,24 @@ def test_verified_external_form_provider_is_allowed_but_arbitrary_external_is_bl
     assert _form_page_allowed("https://share.hsforms.com/abc123", website)
     assert _form_page_allowed("https://tally.so/r/xyz987", website)
     assert not _form_page_allowed("https://evil.example/form", website)
+
+
+def test_identity_validation_ignores_unfilled_secondary_email_widget():
+    html = """
+    <html><body><form>
+      <input type="email" name="business_email" value="admin@a1-road.com" />
+      <input type="email" name="newsletter_email" value="" />
+      <textarea name="message">hello</textarea>
+    </form></body></html>
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content(html)
+        form = page.locator("form")
+        audit = [
+            {"index": 0, "key": "email", "action": "FILLED"},
+            {"index": 2, "key": "message", "action": "FILLED"},
+        ]
+        _verify_identity_dom(form, audit)
+        browser.close()
