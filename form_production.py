@@ -263,10 +263,16 @@ def mark_terminal(
     if state == "FORM_SENT":
         meta["form_sent_at"] = at
         meta["email_auto_suppressed_due_to_form_sent"] = True
+        meta["auto_outbound_blocked"] = True
+        meta["suppression_reason"] = "FORM_SENT"
+        meta["suppression_scope"] = "AUTOMATED_OUTBOUND_AFTER_FORM_SENT"
         meta["email_fallback_allowed"] = False
         meta["channel_router_state"] = "FORM_WON"
     elif state == "FORM_UNCONFIRMED":
         meta["email_auto_suppressed_due_to_form_uncertainty"] = True
+        meta["auto_outbound_blocked"] = True
+        meta["suppression_reason"] = "FORM_UNCONFIRMED"
+        meta["suppression_scope"] = "AUTOMATED_OUTBOUND_UNTIL_FORM_RESOLVED"
         meta["email_fallback_allowed"] = False
         meta["channel_router_state"] = "FORM_AMBIGUOUS"
     elif state == "FORM_FAILED":
