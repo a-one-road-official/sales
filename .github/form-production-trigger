@@ -1,6 +1,7 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-23T20:21:20+09:00
-claims=0
+requested_at=2026-09-23T20:21:37+09:00
+claims=2
+claim_ids=chatgpt-form-r982-20260923T202137JST,chatgpt-form-r1634-20260923T202137JST
 source=chatgpt-form-production
-reason=latest-resilience-tests-before-retry
+reason=adaptive-required-field-and-stale-url-recovery
 code=form_production_v1
