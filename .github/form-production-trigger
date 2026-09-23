@@ -2,8 +2,8 @@ FORM_PRODUCTION_TRIGGER
 requested_at=2026-09-24T08:20:53+09:00
 claims=2
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r4309-20260924T0820JST,chatgpt-form-r3477-20260924T0820JST
-source_rows=4309,3477
-canonical_domains=weyumachine.com,cmz.com
-reason=FORM_ONLY-current-batch
+claim_ids=chatgpt-form-r5313-20260924T0820JST,chatgpt-form-r5333-20260924T0820JST
+source_rows=5313,5333
+canonical_domains=aubertduval.com,cms.it
+reason=FORM_ONLY-current-batch-2
 code=form_runtime_entrypoint_v1
