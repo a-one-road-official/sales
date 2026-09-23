@@ -1708,6 +1708,22 @@ class PublicContactFormExecutor:
                         }
                         if key:
                             present_keys.add(key)
+                        if (
+                            not key
+                            and typ in {"text", "number", ""}
+                            and re.search(
+                                r"(?:^|\b)(?:captcha|anti[-_ ]?spam|human[-_ ]?(?:check|verification)|security)(?:\b|[_-])",
+                                marker,
+                                re.I,
+                            )
+                            and ("?" in marker or re.search(r"captcha|anti[-_ ]?spam|human", marker, re.I))
+                        ):
+                            item["action"] = "ANTI_BOT_CHALLENGE"
+                            field_audit.append(item)
+                            return result_payload(
+                                "FORM_FAILED",
+                                reason="ANTI_BOT_CHALLENGE_PRESENT",
+                            )
                         override = _field_override(marker, field_overrides)
                         value = _value_for(key, marker, subject=subject, message=message, overrides=field_overrides)
                         if value is None:
