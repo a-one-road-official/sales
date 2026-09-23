@@ -178,22 +178,62 @@ def _label_for(el) -> str:
         return str(
             el.evaluate(
                 """el => {
+                    const clean = value => String(value || '').replace(/\s+/g, ' ').trim();
                     const id = el.getAttribute('id') || '';
                     if (id) {
                         for (const label of Array.from(document.labels || [])) {
-                            if (label.htmlFor === id) return (label.innerText || '').trim();
+                            if (label.htmlFor === id) {
+                                const text = clean(label.innerText);
+                                if (text) return text;
+                            }
                         }
                     }
                     const labelledBy = (el.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
                     if (labelledBy.length) {
                         const labelled = labelledBy.map(id => document.getElementById(id)).filter(Boolean);
-                        if (labelled.length) return labelled.map(node => (node.innerText || '').trim()).join(' ').trim();
+                        const text = clean(labelled.map(node => node.innerText || '').join(' '));
+                        if (text) return text;
                     }
-                    const parent = el.closest('label');
-                    if (parent) return (parent.innerText || '').trim();
+                    const aria = clean(el.getAttribute('aria-label'));
+                    if (aria) return aria;
+                    const placeholder = clean(el.getAttribute('placeholder'));
+                    if (placeholder && !/^select|choose|please select/i.test(placeholder)) return placeholder;
+
+                    const parentLabel = el.closest('label');
+                    if (parentLabel) {
+                        const text = clean(parentLabel.innerText);
+                        if (text) return text;
+                    }
+
+                    // Common form frameworks put the text label beside/above a
+                    // wrapper rather than using htmlFor. Walk only a few local
+                    // ancestors so an entire page cannot become a field label.
+                    let node = el;
+                    for (let depth = 0; node && depth < 4; depth++, node = node.parentElement) {
+                        const parent = node.parentElement;
+                        if (!parent) break;
+                        const direct = Array.from(parent.children || []);
+                        const idx = direct.indexOf(node);
+                        if (idx > 0) {
+                            for (let i = idx - 1; i >= Math.max(0, idx - 3); i--) {
+                                const sibling = direct[i];
+                                if (!sibling) continue;
+                                if (sibling.matches?.('label,.label,.field-label,.form-label,legend,strong,b,span,p')) {
+                                    const text = clean(sibling.innerText || sibling.textContent);
+                                    if (text && text.length <= 180) return text;
+                                }
+                            }
+                        }
+                        const localLabel = parent.querySelector?.(':scope > label, :scope > .label, :scope > .field-label, :scope > .form-label');
+                        if (localLabel) {
+                            const text = clean(localLabel.innerText || localLabel.textContent);
+                            if (text && text.length <= 180) return text;
+                        }
+                    }
+
                     const wrapper = el.parentElement;
                     if (!wrapper || wrapper.tagName === 'FORM' || wrapper.querySelectorAll('input,textarea,select').length > 1) return '';
-                    return (wrapper.innerText || '').trim().slice(0, 300);
+                    return clean(wrapper.innerText).slice(0, 300);
                 }"""
             )
             or ""
@@ -227,6 +267,32 @@ def _field_key(el, label: str) -> str:
         identity_key = identity_field_key(marker, el.get_attribute("autocomplete") or "")
         if identity_key:
             return identity_key
+
+    # Legacy/European forms often expose terse field IDs with little or no
+    # accessible label text. Keep this bounded to distinctive tokens.
+    compact = re.sub(r"[^a-z0-9äöüßéèêáíóúàçñ]+", "", marker.casefold())
+    if any(token in compact for token in ("txtemail", "mailadresse", "emailadresse")):
+        return "email"
+    if any(token in compact for token in ("txtfirma", "firmenname", "unternehmen", "societe", "société", "azienda", "empresa")):
+        return "company"
+    if any(token in compact for token in ("txttelefon", "telefonnummer", "telephone", "téléphone", "telefono", "teléfono")):
+        return "phone"
+    if any(token in compact for token in ("txtnachricht", "nachricht", "anfrage", "messaggio", "mensaje", "mensagem")):
+        return "message"
+    if any(token in compact for token in ("txtstrasse", "straße", "strasse", "adresse", "indirizzo", "direccion", "dirección")):
+        return "address"
+    if any(token in compact for token in ("txtplz", "postleitzahl", "postcode", "codicepostale", "codigopostal", "códigopostal")):
+        return "postal_code"
+    if any(token in compact for token in ("txtort", "wohnort", "stadt", "ville", "citta", "città", "ciudad")):
+        return "city"
+    if any(token in compact for token in ("txtland", "landauswahl", "pays", "paese", "pais", "país")):
+        return "country"
+    if any(token in compact for token in ("txtvorname", "vorname", "prenom", "prénom", "nome")):
+        return "first_name"
+    if any(token in compact for token in ("txtnachname", "nachname", "surname", "cognome", "apellido")):
+        return "last_name"
+    if compact in {"txtname", "name", "fullname", "kontaktname"}:
+        return "name"
     if tag == "textarea":
         return "message"
     if typ == "email" or re.search(r"\b(e[- ]?mail|email)\b", marker):
@@ -282,17 +348,17 @@ def _field_key(el, label: str) -> str:
         return "city"
     if re.search(r"\b(address|street|所在地|住所|addr)\b", marker):
         return "address"
-    if typ in {"tel", "phone"} or re.search(r"\b(phone|telephone|tel|mobile|電話)\b", marker):
+    if typ in {"tel", "phone"} or re.search(r"\b(phone|telephone|tel|mobile|telefon|téléphone|telefono|teléfono|電話)\b", marker):
         return "phone"
     if re.search(r"\b(website|web site|url|サイト|ウェブ)\b", marker):
         return "website"
     if re.search(r"\b(company|organization|organisation)[ _-]*(?:type|kind|category)\b|\b(?:type|kind|category)[ _-]*(?:of[ _-]*)?(?:company|organization|organisation)\b", marker):
         return "company_type"
-    if re.search(r"\b(company|organization|organisation|法人|会社|企業)\b", marker):
+    if re.search(r"\b(company|organization|organisation|firma|unternehmen|société|societe|entreprise|azienda|empresa|法人|会社|企業)\b", marker):
         return "company"
     if re.search(r"\b(job title|title|role|position|職種|役職|代表|founder|ceo)\b", marker):
         return "role"
-    if re.search(r"\b(full[- _]?name|your[- _]?name|contact[- _]?name|name|氏名|お名前)\b", marker):
+    if re.search(r"\b(full[- _]?name|your[- _]?name|contact[- _]?name|name|kontaktname|氏名|お名前)\b", marker):
         return "name"
     return ""
 
