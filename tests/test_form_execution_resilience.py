@@ -95,3 +95,46 @@ def test_identity_validation_ignores_unfilled_secondary_email_widget():
         ]
         _verify_identity_dom(form, audit)
         browser.close()
+
+
+def test_legacy_german_ids_map_without_labels():
+    html = """
+    <html><body><form>
+      <input id="txtName" />
+      <input id="txtFirma" />
+      <input id="txtEmail" />
+      <input id="txtTelefon" />
+      <input id="txtLand" />
+      <input id="txtOrt" />
+      <input id="txtPLZ" />
+      <input id="txtNachricht" />
+    </form></body></html>
+    """
+    expected = ["name", "company", "email", "phone", "country", "city", "postal_code", "message"]
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content(html)
+        fields = page.locator("input")
+        observed = [_field_key(fields.nth(i), _label_for(fields.nth(i))) for i in range(fields.count())]
+        assert observed == expected
+        browser.close()
+
+
+def test_label_for_reads_local_preceding_sibling():
+    html = """
+    <html><body><form>
+      <div class="field">
+        <span class="field-label">Company</span>
+        <div><input id="opaque123" /></div>
+      </div>
+    </form></body></html>
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content(html)
+        field = page.locator("input")
+        assert _label_for(field) == "Company"
+        assert _field_key(field, _label_for(field)) == "company"
+        browser.close()
