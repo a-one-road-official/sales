@@ -51,11 +51,13 @@ jobs:
       - name: Guard — deterministic form only
         run: |
           set -euo pipefail
-          ! grep -q "messages().send" form_production.py
-          ! grep -q "gmail.send" form_production.py
-          ! grep -q "openai" form_production.py
-          ! grep -q "vertex" form_production.py
-          ! grep -q "gemini" form_production.py
+          for f in form_production.py form_runtime_entrypoint.py; do
+            ! grep -q "messages().send" "$f"
+            ! grep -q "gmail.send" "$f"
+            ! grep -q "openai" "$f"
+            ! grep -q "vertex" "$f"
+            ! grep -q "gemini" "$f"
+          done
           echo "Production form executor contains no email/model send path."
 
       - name: Authenticate Google Sheets
@@ -75,11 +77,11 @@ jobs:
 
       - name: Form resilience tests
         run: |
-          python -m compileall form_execution.py form_production.py
-          pytest -q tests/test_form_execution_resilience.py
+          python -m compileall form_execution.py form_production.py form_runtime_entrypoint.py
+          pytest -q tests/test_form_execution_resilience.py tests/test_form_runtime_entrypoint.py
 
       - name: Execute ChatGPT-claimed form jobs
-        run: python form_production.py
+        run: python form_runtime_entrypoint.py
 
       - name: Preserve browser evidence
         if: always()
