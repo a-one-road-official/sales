@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-25T00:34:00+09:00
+requested_at=2026-09-25T00:38:00+09:00
 claims=2
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r6933-repair1-20260925T003200JST,chatgpt-form-r6930-20260925T003300JST
-source_rows=6933,6930
-canonical_domains=elisaindustriq.com,umh.app
-reason=REPAIR_AND_FORM_ONLY_PRIORITY_BATCH
+claim_ids=chatgpt-form-r6930-repair1-20260925T003700JST,chatgpt-form-r6944-20260925T003500JST
+source_rows=6930,6944
+canonical_domains=umh.app,exein.io
+reason=REPAIR_AND_FORM_ONLY_CHANNEL_FOCUS_BATCH
 code=form_runtime_entrypoint_v1
