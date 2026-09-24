@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-24T11:19:45+09:00
-claims=3
+requested_at=2026-09-24T12:26:00+09:00
+claims=1
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r5533-20260924T111945JST,chatgpt-form-r5694-20260924T111945JST,chatgpt-form-r5695-20260924T111945JST
-source_rows=5533,5694,5695
-canonical_domains=apollobv.com,daf.global,vanbeest.com
-reason=RECIPIENT_QUALITY_V2_FORM_ONLY_PRODUCTION
+claim_ids=chatgpt-form-r5397-repair1-20260924T1226JST
+source_rows=5397
+canonical_domains=orbitalindustries.com
+reason=BOUNDED_REQUIRED_FIELD_REPAIR_NEXT_GENERATION_COOLING
 code=form_runtime_entrypoint_v1
