@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-24T12:26:00+09:00
+requested_at=2026-09-24T13:20:00+09:00
 claims=1
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r5397-repair1-20260924T1226JST
-source_rows=5397
-canonical_domains=orbitalindustries.com
-reason=BOUNDED_REQUIRED_FIELD_REPAIR_NEXT_GENERATION_COOLING
+claim_ids=chatgpt-form-r718-discovery1-20260924T1318JST
+source_rows=718
+canonical_domains=trove.com
+reason=DISCOVERY_RECOVERY_MESSAGE_FIELD_AVAILABLE
 code=form_runtime_entrypoint_v1
