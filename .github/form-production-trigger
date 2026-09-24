@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-24T16:17:00+09:00
+requested_at=2026-09-24T17:29:00+09:00
 claims=1
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r6753-20260924T1617JST
-source_rows=6753
-canonical_domains=hsdmechatronics.com
-reason=FORM_ONLY_CURRENT_OFFICIAL_CONTACT
+claim_ids=chatgpt-form-r6730-20260924T1729JST
+source_rows=6730
+canonical_domains=cemsa.it
+reason=PERMANENT_EMAIL_FAILURE_WITH_VERIFIED_OFFICIAL_FORM
 code=form_runtime_entrypoint_v1
