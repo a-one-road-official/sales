@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-24T20:32:00+09:00
+requested_at=2026-09-24T21:19:30+09:00
 claims=2
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r5567-repair1-20260924T2032JST,chatgpt-form-r6736-repair1-20260924T2032JST
-source_rows=5567,6736
-canonical_domains=hittech.com,selfgroupcomi.it
-reason=BOUNDED_FORM_REPAIR_1
+claim_ids=chatgpt-form-r6851-20260924T2118JST,chatgpt-form-r6853-20260924T2119JST
+source_rows=6851,6853
+canonical_domains=hekro.de,heru-werkzeugbau.de
+reason=RECIPIENT_ROUTER_V2_FORM_ONLY
 code=form_runtime_entrypoint_v1
