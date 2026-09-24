@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-24T22:30:00+09:00
-claims=3
+requested_at=2026-09-24T22:34:30+09:00
+claims=1
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r6902-20260924T2227JST,chatgpt-form-r6869-20260924T2230JST,chatgpt-form-r6904-20260924T2230JST
-source_rows=6902,6869,6904
-canonical_domains=invirtus.io,kg-werkzeugbau.de,synaos.com
-reason=RECIPIENT_ROUTER_V2_FORM_ONLY
+claim_ids=chatgpt-form-r6902-repair1-20260924T223357JST
+source_rows=6902
+canonical_domains=invirtus.io
+reason=BOUNDED_REQUIRED_FIELD_REPAIR_1_OF_1
 code=form_runtime_entrypoint_v1
