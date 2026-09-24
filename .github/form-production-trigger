@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-24T22:34:30+09:00
+requested_at=2026-09-24T23:25:26+09:00
 claims=1
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r6902-repair1-20260924T223357JST
-source_rows=6902
-canonical_domains=invirtus.io
-reason=BOUNDED_REQUIRED_FIELD_REPAIR_1_OF_1
+claim_ids=chatgpt-form-r6904-discovery1-20260924T232526JST
+source_rows=6904
+canonical_domains=synaos.com
+reason=BOUNDED_FORM_DISCOVERY_REPAIR_1_OF_1
 code=form_runtime_entrypoint_v1
