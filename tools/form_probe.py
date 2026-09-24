@@ -17,6 +17,7 @@ PROBES = [
     ("Ermaksan", "https://www.ermaksan.com.tr/", "https://www.ermaksan.com.tr/tr-TR/Contact"),
     ("Fox Robotics", "https://www.foxrobotics.com/", "https://www.foxrobotics.com/contact-sales/"),
     ("Kroeplin", "https://www.kroeplin.com/", "https://kroeplin.com/kontakt/"),
+    ("HSD", "https://www.hsdmechatronics.com/en/", "https://www.hsdmechatronics.com/en/contacts/"),
 ]
 
 
