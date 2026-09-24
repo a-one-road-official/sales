@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-24T20:26:00+09:00
-claims=4
+requested_at=2026-09-24T20:32:00+09:00
+claims=2
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r740-20260924T2026JST,chatgpt-form-r5278-20260924T2026JST,chatgpt-form-r5567-20260924T2026JST,chatgpt-form-r6736-20260924T2026JST
-source_rows=740,5278,5567,6736
-canonical_domains=toolpath.com,zarges.com,hittech.com,selfgroupcomi.it
-reason=RECIPIENT_QUALITY_V2_PERMANENT_EMAIL_FAILURE_RECOVERY
+claim_ids=chatgpt-form-r5567-repair1-20260924T2032JST,chatgpt-form-r6736-repair1-20260924T2032JST
+source_rows=5567,6736
+canonical_domains=hittech.com,selfgroupcomi.it
+reason=BOUNDED_FORM_REPAIR_1
 code=form_runtime_entrypoint_v1
