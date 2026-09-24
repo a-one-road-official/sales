@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-25T00:24:20+09:00
-claims=1
+requested_at=2026-09-25T00:29:20+09:00
+claims=2
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r6924-repair1-20260925T002400JST
-source_rows=6924
-canonical_domains=asystom.com
-reason=BOUNDED_REQUIRED_FIELD_REPAIR_1_OF_1
+claim_ids=chatgpt-form-r6929-20260925T002700JST,chatgpt-form-r6933-20260925T002800JST
+source_rows=6929,6933
+canonical_domains=dockflow.com,elisaindustriq.com
+reason=FORM_ONLY_PRIORITY_BATCH
 code=form_runtime_entrypoint_v1
