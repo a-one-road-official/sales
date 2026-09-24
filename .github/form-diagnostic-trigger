@@ -1,4 +1,4 @@
 FORM_DIAGNOSTIC_TRIGGER
-sequence=2
+sequence=3
 mode=read-only
-reason=difficult-form-resilience-after-import-fix
+reason=hsd-identity-required-field-diagnostic-20260924T1719JST
