@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-24T08:20:53+09:00
-claims=2
+requested_at=2026-09-24T09:19:41+09:00
+claims=4
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r5313-20260924T0820JST,chatgpt-form-r5333-20260924T0820JST
-source_rows=5313,5333
-canonical_domains=aubertduval.com,cms.it
-reason=FORM_ONLY-current-batch-2
+claim_ids=chatgpt-form-r5404-20260924T0919JST,chatgpt-form-r5414-20260924T0919JST,chatgpt-form-r5415-20260924T0919JST,chatgpt-form-r5423-20260924T0919JST
+source_rows=5404,5414,5415,5423
+canonical_domains=momentenergy.com,twelve.co,redwoodmaterials.com,antora.com
+reason=FORM_ONLY-current-batch-4
 code=form_runtime_entrypoint_v1
