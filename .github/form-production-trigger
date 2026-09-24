@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-24T18:24:00+09:00
+requested_at=2026-09-24T19:20:00+09:00
 claims=1
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r7059-20260924T1818JST
-source_rows=7059
-canonical_domains=rasreducer.com
-reason=EXPLICIT_CROSS_CHANNEL_FORM_STRATEGY_AFTER_PRIOR_EMAIL
+claim_ids=chatgpt-form-r6841-20260924T1920JST
+source_rows=6841
+canonical_domains=gedia.com
+reason=RECIPIENT_QUALITY_V2_FORM_ONLY
 code=form_runtime_entrypoint_v1
