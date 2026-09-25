@@ -1,7 +1,0 @@
-OUTBOUND_PERSISTENCE_CANARY
-requested_at=2026-09-26T04:45:00+09:00
-mode=CANARY
-customer_actions=0
-gmail_sends=0
-form_submits=0
-reason=ROOT_CAUSE_PHASE_2_ATOMIC_BATCH
