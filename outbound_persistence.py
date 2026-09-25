@@ -188,6 +188,7 @@ def upsert_config(svc, key: str, value: str, note: str = "") -> None:
 
 
 def run_canary(svc) -> dict:
+    """Exercise both Values API and the same atomic batchUpdate/appendCells shape used by claims."""
     at = now_iso()
     payload = {
         "writer": "PYTHON_GITHUB_SHEETS_API",
@@ -199,7 +200,7 @@ def run_canary(svc) -> dict:
     upsert_config(
         svc,
         "OUTBOUND_PERSISTENCE_BACKEND_HEALTH",
-        "PASS",
+        "PASS:VALUES_API",
         "Deterministic Python/Google Sheets write path. No customer action.",
     )
     upsert_config(svc, "OUTBOUND_PERSISTENCE_BACKEND_CHECKED_AT", at, "")
@@ -209,6 +210,69 @@ def run_canary(svc) -> dict:
         json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
         "",
     )
+
+    config_rows = svc.spreadsheets().values().get(
+        spreadsheetId=SSOT_ID,
+        range=f"'{CONFIG_TAB}'!A1:C12010",
+    ).execute().get("values", [])
+    health_row = None
+    for i, row in enumerate(config_rows, start=1):
+        if row and str(row[0] or "").strip() == "OUTBOUND_PERSISTENCE_BACKEND_HEALTH":
+            health_row = i
+            break
+    if health_row is None:
+        raise RuntimeError("CANARY_HEALTH_ROW_NOT_FOUND")
+
+    sheet_ids = get_sheet_ids(svc)
+    event_headers = get_event_headers(svc)
+    event_id_value = f"outbound-persistence-canary:{at}"
+    event = {
+        "event_id": event_id_value,
+        "occurred_at": at,
+        "date": at[:10],
+        "action_type": "PERSISTENCE_CANARY",
+        "source": "PYTHON_OUTBOUND_PERSISTENCE",
+        "recorded_at": at,
+        "writer": "outbound_persistence.py",
+        "reason": "Atomic updateCells + appendCells canary. No customer action.",
+        "evidence": json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        "timestamp": at,
+        "code_version": "OUTBOUND_PERSISTENCE_V1",
+        "idempotency_key": event_id_value,
+        "canonical_action_id": event_id_value,
+    }
+    event_values = [
+        {"userEnteredValue": {"stringValue": str(event.get(name, ""))}}
+        for name in event_headers
+    ]
+    svc.spreadsheets().batchUpdate(
+        spreadsheetId=SSOT_ID,
+        body={
+            "requests": [
+                {
+                    "updateCells": {
+                        "range": {
+                            "sheetId": sheet_ids[CONFIG_TAB],
+                            "startRowIndex": health_row - 1,
+                            "endRowIndex": health_row,
+                            "startColumnIndex": 1,
+                            "endColumnIndex": 2,
+                        },
+                        "rows": [{"values": [{"userEnteredValue": {"stringValue": "PASS:ATOMIC_BATCH"}}]}],
+                        "fields": "userEnteredValue",
+                    }
+                },
+                {
+                    "appendCells": {
+                        "sheetId": sheet_ids[EVENT_TAB],
+                        "rows": [{"values": event_values}],
+                        "fields": "userEnteredValue",
+                    }
+                },
+            ]
+        },
+    ).execute()
+
     readback = svc.spreadsheets().values().get(
         spreadsheetId=SSOT_ID,
         range=f"'{CONFIG_TAB}'!A1:C12010",
@@ -221,9 +285,17 @@ def run_canary(svc) -> dict:
             "OUTBOUND_PERSISTENCE_BACKEND_EVIDENCE",
         }:
             found[row[0]] = row[1] if len(row) > 1 else ""
-    if found.get("OUTBOUND_PERSISTENCE_BACKEND_HEALTH") != "PASS":
-        raise RuntimeError("CANARY_READBACK_FAILED")
-    return {"status": "PASS", "checked_at": at, "readback": found}
+    if found.get("OUTBOUND_PERSISTENCE_BACKEND_HEALTH") != "PASS:ATOMIC_BATCH":
+        raise RuntimeError("CANARY_ATOMIC_READBACK_FAILED")
+
+    tail = svc.spreadsheets().values().get(
+        spreadsheetId=SSOT_ID,
+        range=f"'{EVENT_TAB}'!A10800:Z11050",
+    ).execute().get("values", [])
+    if not any(row and row[0] == event_id_value for row in tail):
+        raise RuntimeError("CANARY_EVENT_READBACK_FAILED")
+
+    return {"status": "PASS", "checked_at": at, "atomic_batch": True, "readback": found}
 
 
 def persist_claim(svc, row_number: int, claim_id: str) -> dict:
