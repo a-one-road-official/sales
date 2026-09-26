@@ -214,3 +214,27 @@ def test_security_question_marker_is_not_treated_as_business_field():
         field = page.locator("input")
         assert _field_key(field, _label_for(field)) == ""
         browser.close()
+
+
+def test_wix_style_topic_and_country_dropdown_markers_are_classified():
+    html = """
+    <html><body><form>
+      <button role="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Country">Select</button>
+      <button role="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Topic">Select</button>
+    </form></body></html>
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        country = page.locator("button").nth(0)
+        topic = page.locator("button").nth(1)
+        page.set_content(html)
+        country = page.locator("button").nth(0)
+        topic = page.locator("button").nth(1)
+        assert _field_key(country, _label_for(country)) == "country"
+        assert _field_key(topic, _label_for(topic)) == "reason"
+        browser.close()
+
+
+def test_this_field_is_required_is_explicit_validation_error():
+    assert VALIDATION_ERROR_RE.search("This field is required.")
