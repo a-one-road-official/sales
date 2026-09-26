@@ -1,10 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-27T03:56:00+09:00
+requested_at=2026-09-27T04:22:00+09:00
 claims=1
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r6952-20260927T0355JST
-source_rows=6952
-canonical_domains=teltonika-networks.com
-reason=RETRY_AFTER_REQUIRED_DROPDOWN_FIX
+claim_ids=chatgpt-form-r7006-20260927T0422JST
+source_rows=7006
+canonical_domains=eddyworks.co.kr
+reason=FORM_CLAIM_READBACK_SUCCEEDED
 code=form_runtime_entrypoint_v1
-executor_fix_commit=d3dba5645711b6e30e56392fe1be992b31544584
