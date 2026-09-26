@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-27T06:20:59+09:00
+requested_at=2026-09-27T07:23:19+09:00
 claims=1
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r7144-repair1-20260927T062059JST
-source_rows=7144
-canonical_domains=ute.com
-reason=BOUNDED_REQUIRED_FIELD_REPAIR_READBACK_SUCCEEDED
+claim_ids=chatgpt-form-r982-repair1-20260927T072319JST
+source_rows=982
+canonical_domains=robotiq.com
+reason=BOUNDED_DISCOVERY_REPAIR_READBACK_SUCCEEDED
 code=form_runtime_entrypoint_v1
