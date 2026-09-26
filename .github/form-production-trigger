@@ -1,9 +1,10 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-27T03:23:13+09:00
-claims=4
+requested_at=2026-09-27T03:56:00+09:00
+claims=1
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r6952-20260927T032038JST,chatgpt-form-r6954-20260927T032132JST,chatgpt-form-r6956-20260927T032228JST,chatgpt-form-r6960-20260927T032313JST
-source_rows=6952,6954,6956,6960
-canonical_domains=teltonika-networks.com,inuse.eu,nanolike.com,akenza.io
-reason=NORMAL_FORM_PRODUCTION
+claim_ids=chatgpt-form-r6952-20260927T0355JST
+source_rows=6952
+canonical_domains=teltonika-networks.com
+reason=RETRY_AFTER_REQUIRED_DROPDOWN_FIX
 code=form_runtime_entrypoint_v1
+executor_fix_commit=d3dba5645711b6e30e56392fe1be992b31544584
