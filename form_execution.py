@@ -28,7 +28,7 @@ SUCCESS_RE = re.compile(
     re.I,
 )
 VALIDATION_ERROR_RE = re.compile(
-    r"please\s+complete\s+(?:this|the)\s+required\s+field|required\s+field(?:s)?|"
+    r"please\s+complete\s+(?:this|the)\s+required\s+field|this\s+field\s+is\s+required|required\s+field(?:s)?|"
     r"please\s+(?:complete|fill|select|choose).{0,80}(?:required|field|option)|"
     r"invalid\s+form|submission\s+failed|could\s+not\s+be\s+sent|"
     r"there\s+was\s+an\s+error|something\s+went\s+wrong|"
@@ -305,7 +305,7 @@ def _field_key(el, label: str) -> str:
         return "monthly_traffic"
     if re.search(r"ecommerce[_ -]?platform|e-commerce\s+platform|\bplatform\b", marker):
         return "platform"
-    if re.search(r"(?:contact[_ -]?reason|reason[_ -]?for[_ -]?contact)|(?:type[_ -]?of[_ -]?(?:enquiry|inquiry))|(?:inquiry|enquiry|service)[_ -]?type|looking\s+to\s+talk|interested\s+in|interest[_ -]?area|相談先|問い合わせ先", marker):
+    if re.search(r"(?:contact[_ -]?reason|reason[_ -]?for[_ -]?contact)|(?:type[_ -]?of[_ -]?(?:enquiry|inquiry))|(?:inquiry|enquiry|service)[_ -]?type|\btopic\b|looking\s+to\s+talk|interested\s+in|interest[_ -]?area|相談先|問い合わせ先", marker):
         return "reason"
     if re.search(r"how[_ -]?did[_ -]?you[_ -]?(?:learn|hear)|流入元|知ったきっかけ", marker):
         return "discovery_source"
@@ -1794,7 +1794,12 @@ class PublicContactFormExecutor:
 
 
                     custom_fields = form.locator(
-                        "input[role=combobox], div[role=combobox], [role=button][aria-haspopup='listbox']"
+                        "input[role=combobox], div[role=combobox], "
+                        "[role=button][aria-haspopup='listbox'], "
+                        "button[aria-haspopup='listbox'], "
+                        "[aria-haspopup='listbox'][aria-expanded], "
+                        "[data-hook*='dropdown' i], "
+                        "[data-testid*='dropdown' i]"
                     )
                     custom_seen = set()
                     for custom_index in range(custom_fields.count()):
