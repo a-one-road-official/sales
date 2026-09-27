@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-27T11:17:45.873+09:00
+requested_at=2026-09-27T12:20:52+09:00
 claims=1
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r7407-20260927T111745.873JST
-source_rows=7407
-canonical_domains=industrial-ia.com
+claim_ids=FORM_CLAIM_7411_20260927T1220520900
+source_rows=7411
+canonical_domains=novineer.com
 reason=FORM_ONLY_CLAIM_READBACK_SUCCEEDED
 code=form_runtime_entrypoint_v1
