@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-27T13:22:55+09:00
-claims=1
+requested_at=2026-09-27T14:22:57+09:00
+claims=2
 source=chatgpt-form-production
-claim_ids=FORM_REPAIR_7413_20260927T1322550900
-source_rows=7413
-canonical_domains=nslanalytical.com
-reason=FORM_BOUNDED_TRUTHFUL_FIELD_REPAIR_1_OF_1
+claim_ids=FORM_CLAIM_7258_20260927T1422570900,FORM_CLAIM_7262_20260927T1422570900
+source_rows=7258,7262
+canonical_domains=innoark.com,motionsolution.com.sg
+reason=FORM_PRODUCTION_CLAIMS_READY
 code=form_runtime_entrypoint_v1
