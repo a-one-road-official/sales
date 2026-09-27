@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-27T08:23:18.347+09:00
-claims=1
+requested_at=2026-09-27T09:21:18.176+09:00
+claims=2
 source=chatgpt-form-production
-claim_ids=chatgpt-form-r3576-discovery1-20260927T082318.347+0900
-source_rows=3576
-canonical_domains=ermaksan.com.tr
-reason=STALE_FORM_URL_DISCOVERY_RECOVERY_READBACK_SUCCEEDED
+claim_ids=chatgpt-form-r1124-repair1-20260927T092118.176+0900,chatgpt-form-r3814-repair1-20260927T092118.176+0900
+source_rows=1124,3814
+canonical_domains=pickit3d.com,kroeplin.com
+reason=BOUNDED_PRE_SUBMIT_REPAIR_READBACK_SUCCEEDED
 code=form_runtime_entrypoint_v1
