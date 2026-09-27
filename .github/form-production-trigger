@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-27T12:20:52+09:00
+requested_at=2026-09-27T12:23:31+09:00
 claims=1
 source=chatgpt-form-production
-claim_ids=FORM_CLAIM_7411_20260927T1220520900
+claim_ids=FORM_REPAIR_7411_20260927T1223310900
 source_rows=7411
 canonical_domains=novineer.com
-reason=FORM_ONLY_CLAIM_READBACK_SUCCEEDED
+reason=FORM_BOUNDED_TRUTHFUL_FIELD_REPAIR_1_OF_1
 code=form_runtime_entrypoint_v1
