@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-27T15:21:40+09:00
-claims=2
+requested_at=2026-09-27T17:21:06+09:00
+claims=1
 source=chatgpt-form-production
-claim_ids=FORM_CLAIM_7400_20260927T1521400900,FORM_CLAIM_7433_20260927T1521400900
-source_rows=7400,7433
-canonical_domains=3deusdynamics.com,pometon.com
+claim_ids=FORM_CLAIM_7424_20260927T1721060900
+source_rows=7424
+canonical_domains=imr-metalle.com
 reason=FORM_PRODUCTION_CLAIMS_READY
 code=form_runtime_entrypoint_v1
