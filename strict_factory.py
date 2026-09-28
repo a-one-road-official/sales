@@ -482,6 +482,18 @@ A useful source is a repeatable page/feed/directory that exposes MANY company re
 official trade-fair exhibitor indexes, industrial cluster/exporter directories, official startup/portfolio directories, or recurring
 funding feeds. Prefer sources with 100+ company records and direct company profile/website links. Search globally inside the regions
 and verticals defined by the live policy. Follow adjacent associations/events/directories suggested by already-known sources.
+
+STRATEGIC DISCOVERY PRIORITY — search these verticals aggressively because they become reusable A-one Factory Capability:
+- continuous-fiber / CFRP / carbon-composite manufacturing, CFIP/CFFP and composite AM
+- PEEK / PEKK / PEI / ULTEM / PPSU and other high-performance polymer AM
+- LPBF, DED, WAAM, wire-fed / molten-metal deposition, LFAM / pellet extrusion
+- hybrid additive + CNC, 5-axis / adaptive machining, toolpath optimization
+- laser / TIG / friction-stir / CFRP / adhesive / hybrid joining
+- DfAM, generative design, topology optimization, scan-to-CAD and manufacturing software
+- metal-powder / swarf / chip recycling, re-atomization and material qualification
+Favor technologies that reduce BOM, process count, weight, lead time, or enable high-performance low-volume automotive / shipbuilding parts.
+JEC World, Formnext, SAMPE/CAMX-like composite and advanced-manufacturing ecosystems are especially relevant source frontiers.
+
 Do not return a single company page, generic search-results page, Wikipedia, LinkedIn, a generic news homepage, or a duplicate below.
 
 Allowed source_type values: {allowed_types}
