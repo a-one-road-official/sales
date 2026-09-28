@@ -204,6 +204,12 @@ def qualification(record, now=None):
     sector = classify(product_text)
     if sector["score"]:
         signals.append("industrial_capability")
+    # Strategic Factory Capability can justify a bounded US exception.
+    # Keep China/Japan excluded; US leads still require the same Japan-presence
+    # checks and all other evidence gates.
+    if sector["sector"] == "high_performance_low_volume" and country == "United States":
+        reject = [reason for reason in reject if reason != "excluded_hq_geography"]
+        signals.append("strategic_capability_geography_exception")
     if record.get("ip_signal"):
         signals.append("technical_moat_signal")
     if record.get("commercial_signal"):
