@@ -16,7 +16,7 @@ import tldextract
 
 _EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
 
-VERSION = "2026-09-18-recall-v3"
+VERSION = "2026-09-28-high-performance-low-volume-v4"
 FIRST_MILESTONE = 500
 FINAL_TARGET = 2000
 
@@ -48,6 +48,23 @@ PACKAGES = {
     "07": "Customer Success", "08": "Japan Operations",
 }
 SECTORS = {
+    "high_performance_low_volume": (115, (
+        "high-performance low-volume", "high performance low volume",
+        "continuous fiber", "continuous fibre", "carbon fiber", "carbon fibre", "cfrp",
+        "continuous fiber am", "continuous fibre am", "composite am", "composite additive",
+        "cfip", "continuous fiber injection", "cffp", "continuous fiber printing",
+        "peek", "pekk", "pei", "ultem", "ppsu", "high-performance polymer", "high performance polymer",
+        "lfam", "large format additive", "pellet extrusion", "pellet 3d printing", "fgf",
+        "hybrid additive", "hybrid machining", "additive subtractive", "additive and subtractive",
+        "wire additive", "wire-fed additive", "wire fed additive", "molten metal deposition", "mmd",
+        "waam", "directed energy deposition", "ded", "laser cladding",
+        "friction stir", "laser welding", "titanium welding", "cfrp joining",
+        "structural adhesive", "hybrid joining",
+        "5-axis", "five-axis", "adaptive machining", "toolpath optimization", "tool path optimization",
+        "dfam", "design for additive", "generative design", "topology optimization", "scan-to-cad",
+        "metal powder recycling", "powder recycling", "re-atomization", "reatomization",
+        "swarf recycling", "chip recycling", "near-net shape", "near net shape",
+    ), ("01", "02", "04", "05", "06")),
     "warehouse_logistics": (100, (
         "warehouse automation", "intralogistics", "sortation", "autonomous forklift", "material handling",
         "warehouse management", "logistics software", "fleet management", "amr", "agv", "倉儲", "物流自動化", "물류",
