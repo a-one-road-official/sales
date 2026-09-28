@@ -56,6 +56,17 @@ def _target_scope_decision(rec: dict, source) -> tuple[bool, str]:
         "automation", "robot", "engineering", "production", "fertigung",
         "maschinen", "industrie", "produzione", "fabrication", "metrology",
         "cnc", "machining", "intralogistics", "additive manufacturing",
+        "continuous fiber", "continuous fibre", "carbon fiber", "carbon fibre", "cfrp",
+        "composite am", "composite additive", "cfip", "cffp",
+        "peek", "pekk", "ultem", "ppsu", "high-performance polymer", "high performance polymer",
+        "lfam", "large format additive", "pellet extrusion", "fgf",
+        "hybrid additive", "hybrid machining", "additive subtractive",
+        "wire additive", "wire-fed additive", "molten metal deposition", "waam", "ded",
+        "friction stir", "laser welding", "cfrp joining", "hybrid joining",
+        "5-axis", "five-axis", "adaptive machining", "toolpath optimization",
+        "dfam", "generative design", "topology optimization", "scan-to-cad",
+        "powder recycling", "re-atomization", "reatomization", "swarf recycling",
+        "near-net shape", "near net shape",
     )
     hard_block_tokens = (
         "food delivery", "foodservice", "restaurant", "grocery", "meal kit",
@@ -75,6 +86,7 @@ def _target_scope_decision(rec: dict, source) -> tuple[bool, str]:
         "vdw", "vdma", "ucimu", "swissmem", "fme", "technology industries",
         "manufacturing", "machinery", "industrial automation", "robotics",
         "engineering association", "formnext", "amb stuttgart", "grindinghub",
+        "jec world", "composites", "advanced materials", "sampe", "camx",
     )
     source_is_industrial = any(token in source_text for token in source_industrial_tokens)
     if source_type.startswith("MITTELSTAND_"):
