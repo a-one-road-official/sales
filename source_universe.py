@@ -209,6 +209,14 @@ BOOTSTRAP_SOURCES: tuple[dict, ...] = (
         "exhibitor_directory_url": "https://formnext.mesago.com/frankfurt/en/exhibitor-search.html",
     },
     {
+        "source_type": "MITTELSTAND_EXHIBITION",
+        "source_name": "JEC World Composites Exhibitor List",
+        "source_url": "https://www.jec-world.events/exhibit/exhibitor-list-interactive-map",
+        "country": "Europe",
+        "event_year": "2027",
+        "exhibitor_directory_url": "https://www.jec-world.events/exhibit/exhibitor-list-interactive-map",
+    },
+    {
         "source_type": "GROWTH_EXHIBITION",
         "source_name": "Factory Automation Expo Exhibitors",
         "source_url": "https://www.factoryautomationexpo.com/list-of-exhibitors/",
