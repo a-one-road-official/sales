@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from gate_loader import GateLoader
 from gate_rules import evaluate_gate, research_gate_facts
+from nagano_litmus import evaluate_nagano_litmus
 from observability import failure_code, record_event
 
 
@@ -21,6 +22,9 @@ class GateWorker:
         self.drive = drive_repo
         self.llm = llm
         self.loader = GateLoader(sheets_repo, drive_repo)
+        ensure_nagano_schema = getattr(self.sheets, "ensure_nagano_schema", None)
+        if callable(ensure_nagano_schema):
+            ensure_nagano_schema()
 
     @staticmethod
     def _gate(result: dict, key: str) -> dict:
@@ -42,6 +46,8 @@ class GateWorker:
         # The live Doc contract is binary: all six PASS => GO; any FAIL => NO-GO.
         gate_states = [str(self._gate(result, f"G{i}").get("result", "FAIL")).upper() for i in range(1, 7)]
         result["final_result"] = "GO" if all(state == "PASS" for state in gate_states) else "NO-GO"
+        nagano = evaluate_nagano_litmus(company_context, facts, result)
+        result.update(nagano)
 
         now = datetime.now(timezone.utc).isoformat()
         row = {
@@ -68,6 +74,23 @@ class GateWorker:
         row["most_important_reason"] = str(result.get("most_important_reason", ""))
         row["first_failed_gate"] = str(result.get("first_failed_gate", ""))
         row["missing_evidence"] = self._evidence(result.get("missing_evidence", []))
+        row["employee_count"] = str(facts.get("employee_count", "") or "")
+        row["annual_revenue_amount"] = str(facts.get("annual_revenue_amount", "") or "")
+        row["annual_revenue_currency"] = str(facts.get("annual_revenue_currency", "") or "")
+        row["founded_year"] = str(facts.get("founded_year", "") or "")
+        row["industries_served"] = self._evidence(facts.get("industries_served", []))
+        row["exhibition_history"] = self._evidence(facts.get("exhibition_history", []))
+        row["product_portfolio"] = self._evidence(facts.get("product_portfolio", []))
+        for key in (
+            "nagano_litmus",
+            "nagano_priority",
+            "nagano_manufacturing_fit",
+            "nagano_commercial_maturity",
+            "nagano_industry_breadth",
+            "nagano_reason",
+            "nagano_version",
+        ):
+            row[key] = str(result.get(key, "") or "")
         self.sheets.append_dict("LeadFactory_GateResults", row)
 
         lead_id = str(company_context.get("lead_id", "")).strip()

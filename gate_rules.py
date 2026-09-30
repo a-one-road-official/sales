@@ -107,6 +107,13 @@ Return ONLY JSON in this shape:
   "vertical_terms": ["short factual product/technology terms"],
   "commercial_proof_terms": ["short phrases evidencing customers, deployments, orders, revenue or commercial availability"],
   "employee_count": 0,
+  "annual_revenue_amount": 0,
+  "annual_revenue_currency": "",
+  "founded_year": 0,
+  "industries_served": ["explicitly evidenced industry/market names"],
+  "product_portfolio": ["short factual product/family names"],
+  "exhibition_history": [{{"event":"", "year":"", "evidence":"https://..."}}],
+  "single_industry_restriction": "TRUE|FALSE|UNKNOWN",
   "major_currency_amount": 0,
   "major_currency_code": "",
   "funding_stage": "",
@@ -118,6 +125,13 @@ Return ONLY JSON in this shape:
 
 Rules:
 - employee_count=0 when no reliable figure is found.
+- annual_revenue_amount / annual_revenue_currency are annual company revenue only. Use 0/empty when reliable revenue is not public.
+- founded_year=0 when not reliably evidenced.
+- industries_served must contain only markets/industries explicitly evidenced by the company, customers, or official event/association profiles.
+- exhibition_history must contain verified exhibitor participation only; prefer official exhibition directories or the company's own announcement.
+- single_industry_restriction=TRUE only when public evidence explicitly shows the product/capability is confined to one industry.
+  Missing breadth evidence is UNKNOWN, never TRUE.
+- product_portfolio is factual public product/family names only.
 - major_currency_amount is a single numeric amount in a major currency (EUR/USD/GBP/CHF etc.) only when directly evidenced
   as revenue, funding, order value, or another company-scale commercial amount. Otherwise 0.
 - funding_stage must be an explicitly evidenced round/stage; otherwise empty.
