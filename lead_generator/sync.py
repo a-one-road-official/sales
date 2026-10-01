@@ -7,7 +7,7 @@ import json
 import re
 import time
 from urllib.parse import quote
-from .policy import domain, name_key, qualification
+from .policy import domain, name_key, qualification, require_admission
 from .store import now
 
 
@@ -118,35 +118,53 @@ def _first_proof_url(record):
 
 
 def make_row(dest, record, result, marker):
+    result = require_admission(record)
     timestamp = now()
     src = marker + ' ' + _first_proof_url(record)
-    japan = record.get('japan', {}) or {}
-    bounded = japan.get('bounded_check', {}) or {}
-    evidence = json.dumps({
-        'policy': result['policy_version'],
-        'qualifying_signals': result.get('qualifying_signals', []),
-        'payment': result['payment_capacity_level'],
-        'payment_capacity_evidence': record.get('payment_capacity', {}),
-        'offer': record.get('initial_offer', {}),
-        'japan': japan,
-        'proofs': {k: v for k, v in record.items() if k.endswith('_proof')},
-    }, ensure_ascii=False)
+    cap = record['capability']
+    evidence = json.dumps({'admission_packet': record, 'admission_result': result}, ensure_ascii=False)
     if len(evidence) > 45000:
         raise ValueError('evidence_cell_too_large')
-    japan_note = '代理店のみ' if japan.get('distributor_only') else '確認範囲で直接拠点なし'
-    japan_url = bounded.get('url') or (record.get('identity_proof') or {}).get('url', '')
-    selection_note = '選定条件確認済・商用/資金シグナルは取得済み範囲で記録'
-    product_text = str(record.get('product_text') or '')[:2000]
+    japan_note = '確認した拠点・販売網・日本語英語検索の範囲で日本商流を確認せず'
+    japan_url = record['japan']['checks']['official_channels']['url']
+    selection_note = ' | '.join([cap['own_use'], cap['accumulation'], cap['transfer_route']])
+    product_text = cap['product'] + ' | ' + cap['material'] + ' | ' + cap['output']
 
     if dest == 'ssot':
         return [record['company_name'], '未接触', 'Factory', selection_note, result['country'], '', record['website'],
                 product_text, result['japan_status'], src, timestamp, japan_note, japan_url, timestamp,
                 domain(record['website']), result['sector'], result['priority_score'], 'evidence_checked',
-                '初回:有効リード・顧客/パートナー商談開拓', marker, evidence, timestamp,
-                '確認範囲内の判定。営業前に日本拠点・担当者を再確認。', result['country']]
+                selection_note, marker, evidence, timestamp,
+                '調査時点・確認範囲の記録。契約上の日本権利は別途確認。', result['country']]
     return ['', record['company_name'], result['sector'], result['country'], '', record['website'], '',
             '未接触', product_text, result['japan_status'], src, timestamp, japan_note, japan_url, timestamp,
             '確認済', '', '', timestamp]
+
+
+def verify_admission_row(row, dest, record, marker):
+    """Require identity, HQ, capability and current common-gate evidence after write."""
+    result = require_admission(record)
+    cols = layout(dest)
+    hq_col, japan_col = (4, 8) if dest == 'ssot' else (3, 9)
+    if (cell(row, cols['name']) != record['company_name'] or
+            cell(row, cols['website']) != record['website'] or
+            cell(row, hq_col) != result['country'] or
+            cell(row, japan_col) != result['japan_status'] or
+            marker not in cell(row, cols['marker'])):
+        raise AmbiguousWrite('admission_readback_identity_or_country_mismatch:' + dest)
+    if dest == 'ssot':
+        try:
+            receipt = json.loads(cell(row, 20))
+            saved = require_admission(receipt['admission_packet'])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise AmbiguousWrite('admission_readback_packet_invalid') from exc
+        if saved['packet_sha256'] != result['packet_sha256'] or receipt['admission_result']['policy_version'] != result['policy_version']:
+            raise AmbiguousWrite('admission_readback_packet_changed')
+        cap = record['capability']
+        expected_product = cap['product'] + ' | ' + cap['material'] + ' | ' + cap['output']
+        if cell(row, 7) != expected_product or cell(row, 15) != result['sector']:
+            raise AmbiguousWrite('admission_readback_capability_mismatch')
+    return True
 
 
 class Mirror:
@@ -180,6 +198,7 @@ class Mirror:
                 if not marked or duplicates:
                     self.store.mark(k, dest, 'RECONCILIATION_FAILED')
                     raise AmbiguousWrite('reconciliation_identity_or_duplicate_conflict')
+                verify_admission_row(rows[marked[0] - 1], dest, record, marker)
                 self.store.mark(k, dest, 'VERIFIED_NEW', marked[0])
         return len(keys)
 
@@ -201,6 +220,7 @@ class Mirror:
         for d in ('ssot', 'sacrifice'):
             marked, _ = found[d]
             if marked:
+                verify_admission_row(snapshots[d][marked[0] - 1], d, record, marker)
                 self.store.mark(k, d, 'VERIFIED_NEW', marked[0]); continue
             if self.store.get('command') != 'START':
                 return 'STOPPED'
@@ -224,6 +244,7 @@ class Mirror:
                 self.store.set('command', 'STOP')
                 self.store.mark(k, d, 'RECONCILIATION_FAILED')
                 raise AmbiguousWrite('append_readback_missing_or_duplicate:' + d)
+            verify_admission_row(fresh_rows[marked[0] - 1], d, record, marker)
             self.store.mark(k, d, 'VERIFIED_NEW', marked[0])
         self.store.event('BOTH_VERIFIED', {'company_key': k})
         return 'BOTH_VERIFIED'
