@@ -1,9 +1,12 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-10-01T20:19:02.812+09:00
-claims=1
+requested_at=2026-10-01T23:24:17.627+09:00
+claims=3
 source=chatgpt-form-production
-claim_ids=FORM_CLAIM_7414_20261001T201902.812+0900
-source_rows=7414
-canonical_domains=perseusmaterials.com
+claim_ids=form-7298-20261001232415954-6bcaf7,form-7384-20261001232415954-5cbbfe,form-7396-20261001232415954-8e3afd
+source_rows=7298,7384,7396
+canonical_domains=mkpsemi.com,3dspark.de,rpamerica.us
 reason=FORM_PRODUCTION_CLAIMS_READY
+run_id=form-production-20261001232114354-scheduled
+pipeline_revision=ANLCKQkZ3BU0JoAi7C-U45x1HHOC58rQg7IPX0R1blKI7xRIr6wfsqZFgAvyKNQo36LVmTmZ4zjjXCvoGH8IxLosNHv2CZJbP7t4sJBbU0E
+copy_revision=ANLCKQkhZLZRm5I3vhiwRzeRV7BAaMcIzEnZMzmRfQRYLYNU_bEiTk5xcMZcPr_KgcW-5hLPLQd9ToqRLqmjPivBODnUFEBYU1BF0-l1LZI
 code=form_runtime_entrypoint_v1
