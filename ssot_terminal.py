@@ -133,17 +133,31 @@ def matched_row(candidate, rows):
 
 
 def promotion(candidate, rows, now):
-    """First-stage screened firms enter SSOT before copy production. Unknowns stay."""
-    if candidate.get('screening') not in ('GO', 'UNKNOWN') or candidate.get('real_company') is not True:
-        raise ValueError('first_stage_screening_required')
-    if text(candidate.get('hq_country')).casefold() in {'japan', '日本', 'jp', 'jpn'}:
-        raise ValueError('japan_hq_excluded')
-    if candidate.get('ceased') is True or not candidate.get('evidence_url'):
-        raise ValueError('active_company_evidence_required')
+    """Plan new-company admission only; existing company history is preserved."""
     existing = matched_row(candidate, rows)
     if existing:
         return {'mode': 'EXISTING', 'company_id': identity(existing)[0],
                 'row_number': existing['row_number'], 'new_companies': 0}
+    from lead_generator.policy import require_admission, domain as canonical_domain, name_key
+    packet = candidate.get('admission_packet')
+    if not isinstance(packet, dict):
+        raise ValueError('admission_packet_required')
+    if (name_key(packet.get('company_name')) != name_key(candidate.get('company_name')) or
+            canonical_domain(packet.get('website')) != canonical_domain(candidate.get('website'))):
+        raise ValueError('admission_identity_mismatch')
+    decision = require_admission(packet)
+    if candidate.get('ceased') is True:
+        raise ValueError('active_company_evidence_required')
+    # Check canonical registrable domains in addition to the legacy identity lookup.
+    if any(name_key(r.get('company_name')) == name_key(packet['company_name']) or
+           (canonical_domain(r.get('website')) and canonical_domain(r.get('website')) == canonical_domain(packet['website']))
+           for r in rows):
+        raise ValueError('canonical_duplicate_requires_reconciliation')
+    cap = packet['capability']
+    receipt = {'admission_packet': packet, 'admission_result': decision}
+    evidence = dump(receipt)
+    if len(evidence) > 45000:
+        raise ValueError('admission_evidence_too_large')
     key = 'company:' + digest(host(candidate['website']))[:24]
     m = {'company_id': key, 'campaign': candidate.get('campaign', ''),
          'maturity': candidate.get('maturity', 'UNKNOWN'),
@@ -151,14 +165,25 @@ def promotion(candidate, rows, now):
          'japan_branch': candidate.get('japan_branch', 'UNKNOWN'),
          'japan_subsidiary': candidate.get('japan_subsidiary', 'UNKNOWN'),
          'japan_direct_sales': candidate.get('japan_direct_sales', 'UNKNOWN'),
-         'source_raw_id': candidate.get('raw_id', ''), 'screening_evidence': candidate['evidence_url']}
-    row = {'company_name': candidate['company_name'], 'website': candidate['website'],
-           'hq_country': candidate.get('hq_country', 'UNKNOWN'), 'Status': '未接触',
-           'Category': candidate.get('industry', '要分類'), 'added_at': iso(now),
-           'record_origin': VERSION, 'LF_lead_id': key, 'research_sources': candidate['evidence_url'],
-           '営業判定': candidate['screening'], STATE: 'RESEARCH_PENDING', OWNER: 'AI',
+         'source_raw_id': candidate.get('raw_id', ''),
+         'screening_evidence': evidence,
+         'admission_policy_version': decision['policy_version'],
+         'admission_packet_sha256': decision['packet_sha256']}
+    row = {'company_name': packet['company_name'], 'website': packet['website'],
+           'hq_country': decision['country'], 'Status': '未接触',
+           'Category': 'Factory', 'added_at': iso(now),
+           'record_origin': VERSION, 'LF_lead_id': key, 'research_sources': evidence,
+           'what_it_solves': cap['product'] + ' | ' + cap['output'],
+           'subcategory': cap['family'], 'japan_status': decision['japan_status'],
+           'japan_checked_at': iso(now), 'reviewed_at': iso(now),
+           'selection_reason': ' | '.join([cap['own_use'], cap['accumulation'], cap['transfer_route']]),
+           '営業判定': 'GO', STATE: 'RESEARCH_PENDING', OWNER: 'AI',
            'AI次アクション': '営業精査・宛先確認・個別文面作成', META: dump(m), HISTORY: '[]'}
-    return {'mode': 'APPEND', 'company_id': key, 'row': row, 'new_companies': 1}
+    return {'mode': 'APPEND', 'company_id': key, 'row': row, 'new_companies': 1,
+            'admission_result': decision, 'readback_required': True,
+            'readback_fields': ['company_name', 'website', 'hq_country', 'japan_status',
+                                'what_it_solves', 'research_sources', 'record_origin'],
+            'readback_validator': 'lead_generator.policy.require_admission'}
 
 
 def verify_draft(row, packet, now):
