@@ -1,9 +1,9 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-09-27T17:21:06+09:00
+requested_at=2026-10-01T20:19:02.812+09:00
 claims=1
 source=chatgpt-form-production
-claim_ids=FORM_CLAIM_7424_20260927T1721060900
-source_rows=7424
-canonical_domains=imr-metalle.com
+claim_ids=FORM_CLAIM_7414_20261001T201902.812+0900
+source_rows=7414
+canonical_domains=perseusmaterials.com
 reason=FORM_PRODUCTION_CLAIMS_READY
 code=form_runtime_entrypoint_v1
