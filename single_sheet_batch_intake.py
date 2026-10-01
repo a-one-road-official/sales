@@ -1,365 +1,178 @@
+"""Evidence-gated intake using the same predicate as the scheduled Lead Factory.
+
+Unresolved discoveries are retained in the EXISTING raw tab, with no copy and
+NOT_AUTHORIZED. This adapter never rewrites an existing company or sales status.
+"""
 from __future__ import annotations
 
 import hashlib
 import json
-import re
-import time
 from datetime import datetime, timezone
-
+from lead_generator.policy import VERSION, domain, name_key, qualification, require_admission
 
 SSOT = "営業リスト＿Factory/BPO"
+RAW = "原料_raw_material"
 
 
-def _is_valid_company_name(value: object, source_type: object = "", source_name: object = "") -> bool:
-    """Reject directory UI metadata and non-company association labels at intake."""
+def _is_valid_company_name(value, source_type="", source_name=""):
     name = " ".join(str(value or "").strip().split())
-    lower = name.casefold()
-    if len(name) < 2 or len(name) > 240:
+    if not 2 <= len(name) <= 240 or not any(c.isalpha() for c in name):
         return False
-    exact_noise = {
-        "name", "provider", "privacy policy", "cookie", "purpose",
-        "expires after", "brands", "representatives", "review in detail",
-    }
-    if lower in exact_noise:
-        return False
-    if any(token in lower for token in ("privacy policy", "cookie policy", "expires after")):
-        return False
-    source_kind = str(source_type or "").upper()
-    if source_kind.startswith("MITTELSTAND_") and (
-        lower.startswith(("association ", "federation ", "working group:", "metal is cool"))
-        or "campaign for apprentices" in lower
-    ):
-        return False
-    return any(ch.isalpha() for ch in name)
+    return name.casefold() not in {"name", "provider", "privacy policy", "cookie", "purpose",
+                                  "expires after", "brands", "representatives", "review in detail"}
 
 
-def _emit(metrics: dict) -> None:
-    print(
-        "LEAD_FACTORY_INTAKE_METRICS "
-        + json.dumps(metrics, ensure_ascii=False, sort_keys=True, default=str),
-        flush=True,
-    )
+def _emit(metrics):
+    print("LEAD_FACTORY_INTAKE_METRICS " + json.dumps(metrics, ensure_ascii=False, sort_keys=True), flush=True)
 
 
-def _target_scope_decision(rec: dict, source) -> tuple[bool, str]:
-    """Keep new intake limited to industrial manufacturing and filter consumer noise."""
-    source_type = str(getattr(source, "source_type", "") or "").upper()
-    source_text = " ".join(
-        str(rec.get(key) or "") for key in (
-            "industry", "sector", "category", "description", "business_description",
-            "tags", "manufacturing", "company_type", "source_name",
-            "signal_type", "headline", "notes",
-        )
-    ).casefold()
-    manufacturing_tokens = (
-        "manufactur", "machinery", "machine tool", "industrial", "factory",
-        "automation", "robot", "engineering", "production", "fertigung",
-        "maschinen", "industrie", "produzione", "fabrication", "metrology",
-        "cnc", "machining", "intralogistics", "additive manufacturing",
-        "continuous fiber", "continuous fibre", "carbon fiber", "carbon fibre", "cfrp",
-        "composite am", "composite additive", "cfip", "cffp",
-        "peek", "pekk", "ultem", "ppsu", "high-performance polymer", "high performance polymer",
-        "lfam", "large format additive", "pellet extrusion", "fgf",
-        "hybrid additive", "hybrid machining", "additive subtractive",
-        "wire additive", "wire-fed additive", "molten metal deposition", "waam", "ded",
-        "friction stir", "laser welding", "cfrp joining", "hybrid joining",
-        "5-axis", "five-axis", "adaptive machining", "toolpath optimization",
-        "dfam", "generative design", "topology optimization", "scan-to-cad",
-        "powder recycling", "re-atomization", "reatomization", "swarf recycling",
-        "near-net shape", "near net shape",
-    )
-    hard_block_tokens = (
-        "food delivery", "foodservice", "restaurant", "grocery", "meal kit",
-        "e-commerce", "ecommerce", "online marketplace", "retail",
-        "apparel", "fashion", "clothing", "cosmetic", "beauty",
-        "fintech", "insurance", "consumer lending", "payment platform",
-        "education", "edtech", "school", "university", "sports",
-        "football", "soccer", "gaming", "travel", "hotel", "hospitality",
-        "real estate", "property marketplace", "healthcare", "telemedicine",
-        "pharmacy", "pet care", "music streaming", "social network",
-    )
-    if any(token in source_text for token in hard_block_tokens):
-        return False, "BLOCKED_NON_INDUSTRIAL"
-    is_manufacturing = any(token in source_text for token in manufacturing_tokens)
-    source_industrial_tokens = (
-        "machine tool", "machinetool", "metaltechnology", "metal technology",
-        "vdw", "vdma", "ucimu", "swissmem", "fme", "technology industries",
-        "manufacturing", "machinery", "industrial automation", "robotics",
-        "engineering association", "formnext", "amb stuttgart", "grindinghub",
-        "jec world", "composites", "advanced materials", "sampe", "camx",
-    )
-    source_is_industrial = any(token in source_text for token in source_industrial_tokens)
-    if source_type.startswith("MITTELSTAND_"):
-        if is_manufacturing or source_is_industrial:
-            return True, "MANUFACTURING_MITTELSTAND_SOURCE"
-        return False, "NON_MANUFACTURING"
-    if source_type.startswith(("GROWTH", "EXHIBITION")):
-        stage_text = " ".join(
-            str(rec.get(key) or "") for key in (
-                "funding_stage", "stage", "series", "latest_funding_round",
-                "signal_type", "investment_stage", "funding", "round",
-            )
-        ).casefold()
-        series_match = re.search(r"series\s*([b-z])\b", stage_text)
-        if not series_match:
-            series_match = re.search(r"\b([b-z])\s*round\b", stage_text)
-        if series_match and series_match.group(1) >= "b" and is_manufacturing:
-            return True, "MANUFACTURING_SERIES_B_PLUS"
-        if not is_manufacturing:
-            return False, "NON_MANUFACTURING"
-        return False, "FUNDING_STAGE_NOT_SERIES_B_PLUS"
-    return False, "SOURCE_NOT_IN_TARGET_SCOPE"
+def _target_scope_decision(rec, source):
+    result = qualification(rec)
+    return result["decision"] == "PASS", ";".join(result["reasons"]) or VERSION
+
+
+def _retain_raw(repo, source, waiting, timestamp):
+    """Append only missing HOLD/REVIEW records to the existing row-6 raw table.
+
+    A failed/ambiguous write raises; it is never retried blindly. Existing records,
+    headers, prompt IDs, email bodies and send flags are not changed.
+    """
+    if not waiting:
+        return 0
+    svc = repo.svc.spreadsheets().values()
+    existing = svc.get(spreadsheetId=repo.spreadsheet_id, range=f"'{RAW}'!A6:Z").execute().get("values", [])
+    if not existing or existing[0][0] != "raw_id" or len(existing[0]) < 26:
+        raise ValueError("RAW_SCHEMA_MISMATCH")
+    ids = {str(r[0]) for r in existing[1:] if r}
+    rows = []
+    for rec, result in waiting:
+        origin = str(getattr(source, "source_url", "") or "")
+        rid = "raw:capability:" + hashlib.sha256((origin + "|" + (domain(rec.get("website")) or name_key(rec.get("company_name")))).encode()).hexdigest()[:24]
+        if rid in ids:
+            continue
+        ids.add(rid)
+        payload = json.dumps({"admission_packet": rec, "admission_result": result}, ensure_ascii=False, default=str)
+        if len(payload) > 45000:
+            raise ValueError("RAW_EVIDENCE_TOO_LARGE")
+        rows.append([rid, rec.get("company_name", ""), rec.get("website", ""),
+                     rec.get("country") or rec.get("hq_country") or "", getattr(source, "source_name", ""),
+                     rec.get("source_record_url", ""), origin, str(rec.get("product_text") or "")[:1500],
+                     timestamp, "HOLD", "NO_GO" if result["decision"] == "REJECT" else "REVIEW",
+                     ";".join(result["reasons"]), "", payload, "", "", "", "", "", "", "", "",
+                     VERSION, "ADMISSION_RESEARCH_PENDING", "NOT_AUTHORIZED", ""])
+    if not rows:
+        return 0
+    response = svc.append(spreadsheetId=repo.spreadsheet_id, range=f"'{RAW}'!A6:Z",
+                          valueInputOption="RAW", insertDataOption="INSERT_ROWS", body={"values": rows}).execute()
+    written_range = response.get("updates", {}).get("updatedRange")
+    if not written_range:
+        raise RuntimeError("RAW_APPEND_AMBIGUOUS_NO_RANGE")
+    readback = svc.get(spreadsheetId=repo.spreadsheet_id, range=written_range).execute().get("values", [])
+    normalize = lambda rs: [["" if v is None else str(v) for v in (list(r) + [""] * 26)[:26]] for r in rs]
+    if normalize(readback) != normalize(rows):
+        raise RuntimeError("RAW_READBACK_MISMATCH_NO_BLIND_RETRY")
+    return len(rows)
 
 
 def append_raw_records_batched(repo, source, records):
     records = list(records or [])
     existing = repo._single_ssot_rows()
-    existing_name_rows = {}
-    existing_domain_rows = {}
-    names = set()
-    domains = set()
-    for row in existing:
-        name = repo._normalize_name(
-            row.get("company_name") or row.get("LF_company_name") or ""
-        )
-        domain = repo._normalize_domain(
-            row.get("LF_normalized_domain")
-            or row.get("LF_domain")
-            or row.get("website")
-            or ""
-        )
-        row_number = int(row.get("row_number") or 0)
-        if name:
-            names.add(name)
-            existing_name_rows.setdefault(name, []).append(row_number)
-        if domain:
-            domains.add(domain)
-            existing_domain_rows.setdefault(domain, []).append(row_number)
-
-    names.discard("")
-    domains.discard("")
-    now = datetime.now(timezone.utc).isoformat()
-    pending = []
-    duplicates = 0
-    candidate_count = 0
-    dropped_missing_name = 0
-    dropped_invalid_name = 0
-    dropped_out_of_scope = 0
-    out_of_scope_reasons = {}
-    duplicate_examples = []
-    decision_examples = []
-
-    for rec in records:
-        name = str(rec.get("company_name") or "").strip()
-        if not name:
-            dropped_missing_name += 1
+    names = {name_key(r.get("company_name") or r.get("LF_company_name")) for r in existing}
+    domains = {domain(r.get("website") or r.get("LF_website")) for r in existing}
+    names.discard(""); domains.discard("")
+    timestamp = datetime.now(timezone.utc).isoformat()
+    accepted, waiting = [], []
+    duplicates = invalid = 0
+    for item in records:
+        rec = item.get("admission_packet") if isinstance(item.get("admission_packet"), dict) else item
+        if not _is_valid_company_name(rec.get("company_name")):
+            invalid += 1
             continue
-        if not _is_valid_company_name(name, source.source_type, source.source_name):
-            dropped_invalid_name += 1
-            continue
-        in_scope, scope_reason = _target_scope_decision(rec, source)
-        if not in_scope:
-            dropped_out_of_scope += 1
-            out_of_scope_reasons[scope_reason] = out_of_scope_reasons.get(scope_reason, 0) + 1
-            continue
-        candidate_count += 1
-        name_key = repo._normalize_name(name)
-        domain = repo._normalize_domain(rec.get("domain") or rec.get("website") or "")
-        reason = ""
-        matched_rows = []
-        if name_key in names:
-            if name_key in existing_name_rows:
-                reason = "EXISTING_COMPANY_NAME"
-                matched_rows = existing_name_rows[name_key]
-            else:
-                reason = "IN_BATCH_COMPANY_NAME"
-        elif domain and domain in domains:
-            reason = "EXISTING_DOMAIN"
-            matched_rows = existing_domain_rows.get(domain, [])
-        if len(decision_examples) < 20:
-            decision_examples.append({
-                "company_name": name,
-                "normalized_name": name_key,
-                "domain": domain,
-                "decision": "DUPLICATE" if reason else "NEW",
-                "reason": reason or "NO_EXISTING_NAME_OR_DOMAIN",
-                "matched_rows": matched_rows[:5],
-                "source_record_url": rec.get("source_record_url") or "",
-            })
-        if reason:
+        nk, dk = name_key(rec.get("company_name")), domain(rec.get("website"))
+        if nk in names or (dk and dk in domains):
             duplicates += 1
-            if len(duplicate_examples) < 20:
-                duplicate_examples.append({
-                    "company_name": name,
-                    "normalized_name": name_key,
-                    "domain": domain,
-                    "reason": reason,
-                    "matched_rows": matched_rows[:5],
-                    "source_record_url": rec.get("source_record_url") or "",
-                })
             continue
-
-        website = str(rec.get("website") or "").strip() or (
-            f"https://{domain}" if domain else ""
-        )
-        intake = "NEEDS_DOMAIN" if not domain else (
-            "READY_FOR_MITTELSTAND_GATE"
-            if str(source.source_type).upper().startswith("MITTELSTAND_")
-            else "READY_FOR_GATE"
-        )
-        pending.append({
-            "company_name": name,
-            "Status": "判定中",
-            "Category": "Factory",
-            "hq_country": rec.get("hq_country") or source.country or "",
-            "website": website,
-            "source": source.source_name or source.source_url or "LeadFactory",
-            "record_origin": "LeadFactory",
-            "LF_lead_id": "lead-" + hashlib.sha256(
-                f"{source.source_id}|{domain or name_key}".encode()
-            ).hexdigest()[:24],
-            "LF_company_name": name,
-            "LF_domain": domain,
-            "LF_website": website,
-            "LF_hq_country": rec.get("hq_country") or source.country or "",
-            "LF_source_type": source.source_type,
-            "LF_source_name": source.source_name,
-            "LF_source_url": source.source_url,
-            "LF_source_record_url": rec.get(
-                "source_record_url", source.crawl_url
-            ),
-            "LF_discovered_at": now,
-            "LF_last_seen_at": now,
-            "LF_screening_status": "PENDING",
-            "LF_normalized_domain": domain,
-            "LF_duplicate_state": "NEW",
-            "LF_intake_status": intake,
-            "LF_history": f"{now}|DISCOVERED|{intake}",
-        })
-        names.add(name_key)
-        if domain:
-            domains.add(domain)
-
-    metrics = {
-        "scraped_company_count": len(records),
-        "normalized_company_count": len(records),
-        "candidate_count": candidate_count,
-        "duplicate_count": duplicates,
-        "pending_append_count": len(pending),
-        "written_row_count": 0,
-        "error_count": 0,
-        "dropped_missing_name": dropped_missing_name,
-        "dropped_invalid_name": dropped_invalid_name,
-        "dropped_out_of_scope": dropped_out_of_scope,
-        "out_of_scope_reasons": out_of_scope_reasons,
-        "target_scope": "MANUFACTURING_SERIES_B_PLUS_OR_MANUFACTURING_MITTELSTAND",
-        "duplicate_examples": duplicate_examples,
-        "decision_examples": decision_examples,
-        "readback_match": False,
-        "zero_yield_reason": None,
-    }
-
-    if pending:
-        used_rows = [
-            int(row.get("row_number") or 0)
-            for row in existing
-            if any(
-                str(row.get(key) or "").strip()
-                for key in (
-                    "company_name",
-                    "LF_company_name",
-                    "LF_lead_id",
-                    "LF_domain",
-                    "LF_source_url",
-                )
-            )
-        ]
-        start_row = max([1] + used_rows) + 1
-        try:
-            start, end = repo.append_rows_preserving_previous_row_structure(
-                SSOT, pending, start_row
-            )
-            metrics.update({
-                "target_start_row": start,
-                "target_end_row": end,
-                "target_range": (
-                    f"'{SSOT}'!A{start}:"
-                    f"{repo._column_letter(len(repo._single_ssot_headers()))}{end}"
-                ),
-            })
-            write_meta = dict(getattr(repo, "_last_append_metrics", {}) or {})
-            if write_meta:
-                metrics["write_api_response"] = write_meta.get("api_responses", [])
-                metrics["write_api_response_count"] = len(
-                    write_meta.get("api_responses", [])
-                )
-
-            headers = repo._single_ssot_headers()
-            header_index = {str(h): i for i, h in enumerate(headers) if h}
-            lead_index = header_index.get("LF_lead_id")
-            name_index = header_index.get("company_name", 0)
-            expected_ids = {
-                str(row.get("LF_lead_id") or "").strip()
-                for row in pending
-                if str(row.get("LF_lead_id") or "").strip()
-            }
-            written = 0
-            readback_rows = []
-            actual_ids = set()
-            actual_names = set()
-            for attempt in range(3):
-                with repo._read_lock:
-                    repo._read_cache.clear()
-                readback_rows = repo.read(metrics["target_range"])
-                actual_ids = set()
-                actual_names = set()
-                for row in readback_rows:
-                    padded = list(row) + [""] * max(0, len(headers) - len(row))
-                    if lead_index is not None:
-                        value = str(padded[lead_index] or "").strip()
-                        if value:
-                            actual_ids.add(value)
-                    value = str(padded[name_index] or "").strip()
-                    if value:
-                        actual_names.add(value)
-                written = (
-                    len(expected_ids & actual_ids)
-                    if lead_index is not None
-                    else sum(
-                        1 for row in pending
-                        if row.get("company_name") in actual_names
-                    )
-                )
-                if written == len(pending):
-                    break
-                if attempt < 2:
-                    time.sleep(1.0)
-            metrics["written_row_count"] = written
-            metrics["readback_row_count"] = len(readback_rows)
-            metrics["readback_attempts"] = attempt + 1
-            metrics["readback_match"] = written == len(pending)
-            if not metrics["readback_match"]:
-                metrics["error_count"] = 1
-                metrics["zero_yield_reason"] = "READBACK_MISMATCH"
-                raise RuntimeError(
-                    f"READBACK_MISMATCH:expected={len(pending)}:actual={written}"
-                )
-        except Exception as exc:
-            metrics["error_count"] = max(1, int(metrics.get("error_count") or 0))
-            metrics["write_error"] = f"{type(exc).__name__}:{exc}"
-            if not metrics.get("zero_yield_reason"):
-                metrics["zero_yield_reason"] = "WRITE_FAILED"
-            repo._last_intake_metrics = metrics
-            _emit(metrics)
-            raise
-    else:
-        if candidate_count == 0:
-            metrics["zero_yield_reason"] = "NO_CANDIDATES"
-        elif duplicates >= candidate_count:
-            metrics["zero_yield_reason"] = "ALL_DUPLICATES"
-        else:
-            metrics["zero_yield_reason"] = "WRITE_SKIPPED"
-
+        result = qualification(rec)
+        if result["decision"] != "PASS":
+            waiting.append((rec, result))
+            continue
+        cap = rec["capability"]
+        evidence = json.dumps({"admission_packet": rec, "admission_result": result}, ensure_ascii=False, default=str)
+        if len(evidence) > 45000:
+            raise ValueError("ADMISSION_EVIDENCE_TOO_LARGE")
+        marker = "lead-" + hashlib.sha256((str(getattr(source, "source_id", "")) + "|" + dk).encode()).hexdigest()[:24]
+        row = {
+            "company_name": rec["company_name"], "Status": "未接触", "Category": "Factory",
+            "hq_country": result["country"], "website": rec["website"],
+            "what_it_solves": cap["product"] + " | " + cap["output"],
+            "source": getattr(source, "source_name", "") or getattr(source, "source_url", ""),
+            "added_at": timestamp, "original_domain": dk, "subcategory": cap["family"],
+            "priority": result["priority_score"], "classification_confidence": "EVIDENCE_CHECKED",
+            "selection_reason": " | ".join([cap["own_use"], cap["accumulation"], cap["transfer_route"]]),
+            "japan_status": result["japan_status"], "japan_distributor_status": "CHECKED_NOT_FOUND",
+            "japan_evidence_url": rec["japan"]["checks"]["official_channels"]["url"],
+            "japan_checked_at": timestamp, "reviewed_at": timestamp,
+            "japan_opportunity_note": "Bounded evidence check; channel absence is not a contractual warranty.",
+            "record_origin": "LeadFactory:" + VERSION, "research_sources": evidence,
+            "LF_lead_id": marker, "LF_company_name": rec["company_name"], "LF_domain": dk,
+            "LF_website": rec["website"], "LF_hq_country": result["country"],
+            "LF_source_type": getattr(source, "source_type", ""),
+            "LF_source_name": getattr(source, "source_name", ""),
+            "LF_source_url": getattr(source, "source_url", ""),
+            "LF_source_record_url": rec.get("source_record_url", ""),
+            "LF_discovered_at": timestamp, "LF_last_seen_at": timestamp,
+            "LF_screening_status": "PASS", "LF_gate_version": VERSION,
+            "LF_last_screened_at": timestamp, "LF_normalized_domain": dk,
+            "LF_duplicate_state": "NEW", "LF_intake_status": "ADMISSION_VERIFIED",
+            "LF_history": timestamp + "|ADMISSION_VERIFIED|" + VERSION,
+        }
+        accepted.append((rec, row, result))
+        names.add(nk); domains.add(dk)
+    metrics = {"scraped_company_count": len(records), "candidate_count": len(accepted),
+               "duplicate_count": duplicates, "dropped_invalid_name": invalid,
+               "review_count": sum(x[1]["decision"] == "REVIEW" for x in waiting),
+               "rejected_count": sum(x[1]["decision"] == "REJECT" for x in waiting),
+               "written_row_count": 0, "raw_retained": 0, "policy_version": VERSION,
+               "readback_match": False, "error_count": 0}
     repo._last_intake_metrics = metrics
+    try:
+        metrics["raw_retained"] = _retain_raw(repo, source, waiting, timestamp)
+        if accepted:
+            # A writer cannot rely solely on a discovery-time decision.
+            for rec, _, previous in accepted:
+                fresh = require_admission(rec)
+                if fresh["packet_sha256"] != previous["packet_sha256"]:
+                    raise ValueError("ADMISSION_PACKET_CHANGED")
+            used = [int(r.get("row_number") or 0) for r in existing
+                    if any(r.get(k) for k in ("company_name", "LF_company_name", "LF_lead_id", "LF_domain"))]
+            start = max([1] + used) + 1
+            rows = [r for _, r, _ in accepted]
+            headers = repo._single_ssot_headers()
+            fields = {str(h): i for i, h in enumerate(headers) if h}
+            critical = ("company_name", "website", "Status", "hq_country", "japan_status", "record_origin", "research_sources")
+            if any(k not in fields for k in critical):
+                raise RuntimeError("TARGET_SCHEMA_MISSING_CRITICAL_FIELD")
+            start, end = repo.append_rows_preserving_previous_row_structure(SSOT, rows, start)
+            target_range = f"'{SSOT}'!A{start}:{repo._column_letter(len(headers))}{end}"
+            with repo._read_lock:
+                repo._read_cache.clear()
+            actual = repo.read(target_range)
+            if len(actual) != len(rows):
+                raise RuntimeError("TARGET_READBACK_ROW_COUNT_MISMATCH")
+            for expected, observed in zip(rows, actual):
+                for key in critical:
+                    j = fields[key]
+                    if j >= len(observed) or str(observed[j]) != str(expected[key]):
+                        raise RuntimeError("TARGET_READBACK_FIELD_MISMATCH:" + key)
+                receipt = json.loads(observed[fields["research_sources"]])
+                require_admission(receipt["admission_packet"])
+            metrics.update(written_row_count=len(rows), readback_match=True,
+                           target_start_row=start, target_end_row=end)
+        else:
+            metrics["zero_yield_reason"] = "NO_ADMISSIBLE_NEW_RECORDS"
+    except Exception as exc:
+        metrics.update(error_count=1, write_error=type(exc).__name__ + ":" + str(exc))
+        _emit(metrics)
+        raise
     _emit(metrics)
-    return int(metrics["written_row_count"]), duplicates
+    return metrics["written_row_count"], duplicates
