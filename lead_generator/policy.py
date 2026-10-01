@@ -1,124 +1,95 @@
-"""Evidence-first qualification for high-recall industrial lead production.
+"""Shared admission contract for NEW manufacturing-capability acquisition leads.
 
-The hard gate is intentionally small: verified identity, allowed geography,
-industrial/technology relevance, and no verified direct Japan GTM presence.
-Commercial proof, funding, exhibitions, IP and other signals rank leads and
-prepare outreach; they are not AND-gates that can starve production.
+Discovery terms identify research candidates; only qualification() admits a lead.
+This module performs no network, spreadsheet, CRM, email or calendar action.
+The researcher must supply actual retrieved evidence. A negative bounded search
+is recorded as NO_PRESENCE_FOUND_IN_CHECKED_SOURCES, never universal absence.
+Existing sales history and manual opportunity decisions are outside this gate.
 """
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import unicodedata
 from datetime import datetime, timezone
 from urllib.parse import urlparse
-import tldextract
 
-_EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
+try:
+    import tldextract
+    _EXTRACT = tldextract.TLDExtract(suffix_list_urls=())
+except ImportError:
+    # Conservative offline fallback keeps the entire host; never invent an eTLD.
+    _EXTRACT = None
 
-VERSION = "2026-09-28-high-performance-low-volume-v4"
+VERSION = "CAPABILITY_JAPAN_V3_20261001"
 FIRST_MILESTONE = 500
 FINAL_TARGET = 2000
-
-PRIORITY_COUNTRIES = {
-    "Taiwan", "South Korea", "India", "Israel", "Poland", "Czechia", "Croatia",
-    "Slovakia", "Slovenia", "Estonia", "Latvia", "Lithuania", "Hungary", "Romania",
-    "Bulgaria", "Portugal", "Austria", "Belgium", "Netherlands", "Denmark", "Finland",
-    "Sweden", "Norway", "Switzerland", "Luxembourg", "Malta", "Cyprus", "Greece", "Serbia",
-}
-EXCLUDED_COUNTRIES = {"United States", "China", "Japan"}
+EXCLUDED_COUNTRIES = {"Japan"}
+PRIORITY_COUNTRIES = set()
 COUNTRY_ALIASES = {
-    "usa": "United States", "u.s.a.": "United States", "united states of america": "United States",
-    "us": "United States", "u.s.": "United States", "deutschland": "Germany",
-    "österreich": "Austria", "osterreich": "Austria", "schweiz": "Switzerland",
+    "jp": "Japan", "jpn": "Japan", "japan": "Japan", "日本": "Japan", "日本国": "Japan",
+    "usa": "United States", "us": "United States", "united states": "United States",
+    "united states of america": "United States", "u.s.a.": "United States",
+    "prc": "China", "china": "China", "中国": "China", "uk": "United Kingdom",
+    "deutschland": "Germany", "österreich": "Austria", "schweiz": "Switzerland",
     "polen": "Poland", "niederlande": "Netherlands", "belgien": "Belgium",
-    "dänemark": "Denmark", "danemark": "Denmark", "finnland": "Finland",
-    "schweden": "Sweden", "norwegen": "Norway", "frankreich": "France",
-    "italien": "Italy", "spanien": "Spain", "tschechien": "Czechia",
-    "slowakei": "Slovakia", "slowenien": "Slovenia", "ungarn": "Hungary",
-    "rumänien": "Romania", "rumanien": "Romania", "bulgarien": "Bulgaria",
-    "griechenland": "Greece", "korea": "South Korea", "republic of korea": "South Korea",
-    "korea, republic of": "South Korea", "czech republic": "Czechia", "台湾": "Taiwan",
-    "韓国": "South Korea", "インド": "India", "イスラエル": "Israel", "polska": "Poland",
+    "dänemark": "Denmark", "finnland": "Finland", "schweden": "Sweden",
+    "norwegen": "Norway", "frankreich": "France", "italien": "Italy",
+    "spanien": "Spain", "tschechien": "Czechia", "czech republic": "Czechia",
+    "korea": "South Korea", "republic of korea": "South Korea", "korea, republic of": "South Korea",
+    "台湾": "Taiwan", "韓国": "South Korea", "インド": "India", "イスラエル": "Israel",
     "türkiye": "Turkey", "turkiye": "Turkey",
 }
-PACKAGES = {
-    "01": "Customer Acquisition", "02": "Partner Development", "03": "Localization",
-    "04": "Exhibitions & PR", "05": "FDE & Deployment", "06": "PoC & Validation",
-    "07": "Customer Success", "08": "Japan Operations",
+PACKAGES = {"01": "Customer Acquisition", "02": "Partner Development", "03": "Localization",
+            "04": "Exhibitions & PR", "05": "FDE & Deployment", "06": "PoC & Validation",
+            "07": "Customer Success", "08": "Japan Operations"}
+# Search vocabulary, not an OR-based admission gate. Product-level evidence is mandatory.
+FAMILIES = {
+    "FLEX_ROBOTIC_CELL": (120, "flexible robotic manufacturing cell|robotic additive subtractive|hybrid LFAM milling|robotic pellet extrusion|automatic tool changer"),
+    "LPBF_SLM": (115, "LPBF|L-PBF|SLM|DMLS|PBF-LB/M|laser powder bed fusion|selective laser melting|multi-laser LPBF"),
+    "COMPACT_WAAM": (115, "WAAM|wire arc additive manufacturing|compact WAAM|robotic WAAM|CMT additive"),
+    "DED_HYBRID_CNC": (115, "DED|wire laser deposition|wire-laser DED|laser directed energy deposition|hybrid additive machining|CNC retrofit|molten metal deposition|repair deposition"),
+    "LFAM_COMPOSITE_AM": (112, "LFAM|FGF|large format additive manufacturing|pellet extrusion|composite additive manufacturing|additive subtractive composite"),
+    "CONTINUOUS_FIBER_AM": (115, "continuous fiber printing|continuous fibre printing|continuous fiber additive|CFIP|CFFP|continuous fiber injection|CFRP 3D printing"),
+    "HIGH_TEMP_POLYMER_AM": (112, "PEEK printing|PEKK printing|PEI printing|high temperature 3D printing|high-performance polymer AM|thermal radiation heating"),
+    "CNT_PRINTING": (115, "CNT 3D printing|carbon nanotube printing|SWCNT resin|MWCNT filament|CNT filament|CNT pellet|CNT ink|nanotube photopolymer|CNT direct ink writing"),
+    "GRAPHENE_PRINTING": (112, "graphene 3D printing|graphene ink|graphene filament|graphene photopolymer|graphene direct ink writing"),
+    "NANOCARBON_MATERIALS": (110, "CNT|SWCNT|MWCNT|carbon nanotube|graphene|graphene nanoplatelet|functionalized nanotube|nanocarbon masterbatch|CNT reactor|CNT dispersion"),
+    "METAL_FEEDSTOCK": (110, "metal powder|tool steel powder|stainless steel powder|titanium powder|aluminium powder|nickel alloy powder|copper powder|special alloy|refractory alloy|wire feedstock|atomization|atomisation"),
+    "POLYMER_COMPOSITE_MATERIALS": (108, "PEEK|PEKK|PEI|PAEK|PPS|PPSU|CFRP|prepreg|thermoplastic tape|carbon fiber|carbon fibre|composite resin|reinforced polymer|functional masterbatch"),
+    "CASTING_COMPOSITE_FORMING": (108, "digital casting|sand binder jet|investment casting|rapid tooling|RTM|HP-RTM|AFP|ATL|filament winding|pultrusion|compression molding|out of autoclave|incremental forming|die-less forming"),
+    "JOINING_WELDING": (110, "robotic TIG|argon welding|laser welding|friction stir welding|CFRP metal joining|structural adhesive|hybrid joining|adhesive dispensing"),
+    "MACHINING_TOOLING": (108, "5-axis|five-axis|adaptive machining|machining controller|toolpath optimization|robotic trimming|robotic drilling|workholding|jig manufacturing|tooling automation"),
+    "DFAM_MANUFACTURING_SOFTWARE": (110, "DfAM|generative design|topology optimization|scan-to-CAD|AI CAD|build processor|robotic CAM|hybrid CAM|AM workflow orchestration|AM process control"),
+    "AM_POSTPROCESS_CIRCULARITY": (108, "depowdering|powder handling|powder sieving|HIP|debinding|sintering|AM surface finishing|powder recycling|re-atomization|swarf recycling|chip recycling|scrap qualification|AM qualification|melt pool monitoring|recoater"),
 }
-SECTORS = {
-    "high_performance_low_volume": (115, (
-        "high-performance low-volume", "high performance low volume",
-        "continuous fiber", "continuous fibre", "carbon fiber", "carbon fibre", "cfrp",
-        "continuous fiber am", "continuous fibre am", "composite am", "composite additive",
-        "cfip", "continuous fiber injection", "cffp", "continuous fiber printing",
-        "peek", "pekk", "pei", "ultem", "ppsu", "high-performance polymer", "high performance polymer",
-        "lfam", "large format additive", "pellet extrusion", "pellet 3d printing", "fgf",
-        "hybrid additive", "hybrid machining", "additive subtractive", "additive and subtractive",
-        "wire additive", "wire-fed additive", "wire fed additive", "molten metal deposition", "mmd",
-        "waam", "directed energy deposition", "ded", "laser cladding",
-        "friction stir", "laser welding", "titanium welding", "cfrp joining",
-        "structural adhesive", "hybrid joining",
-        "5-axis", "five-axis", "adaptive machining", "toolpath optimization", "tool path optimization",
-        "dfam", "design for additive", "generative design", "topology optimization", "scan-to-cad",
-        "metal powder recycling", "powder recycling", "re-atomization", "reatomization",
-        "swarf recycling", "chip recycling", "near-net shape", "near net shape",
-    ), ("01", "02", "04", "05", "06")),
-    "warehouse_logistics": (100, (
-        "warehouse automation", "intralogistics", "sortation", "autonomous forklift", "material handling",
-        "warehouse management", "logistics software", "fleet management", "amr", "agv", "倉儲", "物流自動化", "물류",
-    ), ("01", "02", "03")),
-    "industrial_vision": (98, (
-        "machine vision", "visual inspection", "defect detection", "quality inspection", "metrology",
-        "industrial camera", "video analytics", "ppe detection", "機器視覺", "檢測", "머신비전",
-    ), ("01", "02", "03")),
-    "advanced_manufacturing": (97, (
-        "additive manufacturing", "3d printing", "metal additive", "laser cladding", "cnc", "machine tool",
-        "machining", "injection molding", "mould", "mold", "welding", "forming", "casting", "tooling",
-        "production equipment", "manufacturing equipment", "factory equipment",
-    ), ("01", "02", "04", "05")),
-    "robotics_automation": (96, (
-        "industrial robot", "collaborative robot", "robotic arm", "robotics", "robotic", "factory automation",
-        "industrial automation", "motion control", "servo", "automation system",
-    ), ("01", "02", "03", "05")),
-    "rfid_tracking": (95, ("rfid", "asset tracking", "rtls", "real-time location", "track and trace"), ("01", "02")),
-    "maintenance_iot": (92, (
-        "predictive maintenance", "condition monitoring", "industrial iot", "iiot", "vibration sensor", "retrofit",
-        "equipment monitoring", "machine monitoring",
-    ), ("01", "02", "03")),
-    "industrial_data": (92, (
-        "manufacturing execution", "mes", "production monitoring", "industrial data", "oee", "digital work instructions",
-        "digital twin", "scada", "process control", "manufacturing software",
-    ), ("01", "02", "03")),
-    "ot_supply_security": (88, ("ot security", "industrial cybersecurity", "supply chain risk", "ics security"), ("01", "02", "03")),
-    "advanced_materials": (86, (
-        "metal powder", "atomization", "advanced materials", "nanomaterial", "composite", "ceramic", "alloy",
-        "surface treatment", "coating", "semiconductor", "electronics manufacturing", "photonics",
-    ), ("01", "02", "04")),
-    "industrial_safety": (84, (
-        "industrial safety", "worker safety", "safety monitoring", "machine safety", "collision avoidance",
-    ), ("01", "02", "03")),
-}
-SOURCE_QUALIFIERS = {
-    "vdma_members": 72,
-    "vdma_robotics": 88,
-    "robotics_tomorrow": 58,
-}
+SECTORS = {key: (score, tuple(terms.split("|")), ("01", "02", "05", "06"))
+           for key, (score, terms) in FAMILIES.items()}
+SOURCE_QUALIFIERS = {}  # A directory's reputation never substitutes for product evidence.
+VENDOR_ROLES = {"equipment_manufacturer", "material_manufacturer", "manufacturing_software",
+                "process_licensor", "technology_integrator"}
+TRANSFER_ROUTES = {"equipment_sale", "material_supply", "software_license", "process_license", "integrated_cell"}
+JAPAN_CHECKS = ("official_locations", "official_channels", "public_japan_search")
+JAPAN_NEGATIVE_OUTCOMES = {"no_presence_found_in_checked_sources", "manufacturer_confirmed_no_presence"}
 
 
 def normalize_country(value):
-    value = re.sub(r"\s+", " ", str(value or "").strip(" ()\t\r\n"))
+    value = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", str(value or "")).strip())
     return COUNTRY_ALIASES.get(value.casefold(), value)
 
 
 def domain(url):
-    p = urlparse(str(url or ""))
-    h = (p.hostname or "").lower().removeprefix("www.").rstrip(".")
-    if p.scheme not in {"http", "https"} or not h or p.username or p.password:
+    try:
+        p = urlparse(str(url or ""))
+        h = (p.hostname or "").lower().removeprefix("www.").rstrip(".")
+        if p.scheme not in {"http", "https"} or not h or p.username or p.password:
+            return ""
+        if _EXTRACT is not None:
+            return _EXTRACT(h).top_domain_under_public_suffix or h
+        return h
+    except ValueError:
         return ""
-    e = _EXTRACT(h)
-    return e.top_domain_under_public_suffix or h
 
 
 def name_key(name):
@@ -131,152 +102,128 @@ def company_key(row):
     return hashlib.sha256(domain(row.get("website")).encode()).hexdigest()[:24]
 
 
+def _hit(text, term):
+    return re.search(r"(?<![\w])" + re.escape(term.casefold()) + r"(?![\w])", text) is not None
+
+
 def classify(text):
-    lower = str(text or "").casefold()
-    hits = [(key, score, [t for t in terms if t in lower], packages)
-            for key, (score, terms, packages) in SECTORS.items() if any(t in lower for t in terms)]
-    if not hits:
-        return {"sector": "industrial_b2b", "score": 0, "hits": [], "packages": ["01", "02"]}
-    key, score, terms, packages = max(hits, key=lambda x: x[1])
-    return {"sector": key, "score": score, "hits": terms, "packages": list(packages)}
+    text = str(text or "").casefold()
+    matches = [(family, score, [t for t in terms if _hit(text, t)], packages)
+               for family, (score, terms, packages) in SECTORS.items()]
+    matches = [m for m in matches if m[2]]
+    if not matches:
+        return {"sector": "UNCLASSIFIED", "score": 0, "hits": [], "packages": ["01", "02"]}
+    family, score, hits, packages = max(matches, key=lambda m: m[1])
+    return {"sector": family, "score": score, "hits": hits, "packages": list(packages)}
 
 
 def proof_valid(proof):
-    return bool(isinstance(proof, dict) and proof.get("url") and proof.get("excerpt")
-                and proof.get("checked_at") and proof.get("http_status") == 200)
+    if not isinstance(proof, dict) or not domain(proof.get("url")) or not str(proof.get("excerpt") or "").strip():
+        return False
+    if not (proof.get("retrieved") is True or proof.get("http_status") == 200):
+        return False
+    try:
+        dt = datetime.fromisoformat(str(proof.get("checked_at") or "").replace("Z", "+00:00"))
+        return dt.tzinfo is not None
+    except ValueError:
+        return False
 
 
-def _profile_labeled_domain(text):
-    match = re.search(r'\bwebsite\s*:\s*((?:https?://|www\.)[^\s|,;]+)', str(text or ''), re.I)
-    if not match:
-        return ''
-    value = match.group(1).rstrip(').]>')
-    if value.lower().startswith('www.'):
-        value = 'https://' + value
-    return domain(value)
+def _official(proof):
+    return proof_valid(proof) and proof.get("first_party") is True
 
 
-def _payment_signal(record):
-    finance = record.get("payment_capacity", {}) or {}
-    direct = finance.get("basis") in {"reported_revenue", "reported_profit", "funding", "confirmed_budget"} and proof_valid(finance)
-    exhibitions = finance.get("repeat_exhibitions", []) or []
-    distinct_events = {p.get("event_id") for p in exhibitions if proof_valid(p) and p.get("event_id")}
-    proxy = (finance.get("basis") == "commercial_proxy"
-             and proof_valid(finance.get("customer_deployment"))
-             and len(distinct_events) >= 2)
-    return direct, proxy
+def _payload(record):
+    packet = record.get("admission_packet")
+    return packet if isinstance(packet, dict) else record
 
 
 def qualification(record, now=None):
-    """Return an auditable decision using the current high-recall production gate."""
+    """Validate evidence packet; unknown stays REVIEW and cannot enter target SSOT.
+
+    Required packet: company_name, website, country, identity_proof, country_proof,
+    ownership={japanese_control: bool, proof}, japan={checks:{...}, presence flags},
+    capability={family, vendor_role, product, material, output, own_use, accumulation,
+                applications:[], transfer_route, proof}. Evidence claims themselves
+    require researcher review; the validator cannot establish web facts from flags.
+    """
     now = now or datetime.now(timezone.utc)
-    reasons, reject, signals = [], [], []
-
-    if not record.get("company_name") or not domain(record.get("website")):
-        reasons.append("identity_unverified")
-    if not proof_valid(record.get("identity_proof")):
-        reasons.append("official_company_identity_unverified")
-
-    country = normalize_country(record.get("country"))
-    if not country:
-        reasons.append("hq_country_unverified")
-    elif country in EXCLUDED_COUNTRIES:
-        reject.append("excluded_hq_geography")
-    if not proof_valid(record.get("country_proof")):
-        reasons.append("hq_country_evidence_missing")
-
-    source_family = str(record.get("source_family") or "")
-    source_score = SOURCE_QUALIFIERS.get(source_family, 0)
-    product_text = str(record.get("product_text") or "")
-    if source_family == "robotics_tomorrow":
-        labeled_domain = _profile_labeled_domain(product_text)
-        if labeled_domain and labeled_domain != domain(record.get("website")):
-            reject.append("source_identity_domain_mismatch")
-        lower_profile = product_text.casefold()
-        if any(term in lower_profile for term in (
-            "company sector: education", "education / training", "company sector: publication",
-            "company sector: association", "publication / media",
-        )):
-            reject.append("non_vendor_directory_entry")
-    if source_score:
-        signals.append("qualified_industrial_source")
-
-    sector = classify(product_text)
-    if sector["score"]:
-        signals.append("industrial_capability")
-    # Strategic Factory Capability can justify a bounded US exception.
-    # Keep China/Japan excluded; US leads still require the same Japan-presence
-    # checks and all other evidence gates.
-    if sector["sector"] == "high_performance_low_volume" and country == "United States":
-        reject = [reason for reason in reject if reason != "excluded_hq_geography"]
-        signals.append("strategic_capability_geography_exception")
-    if record.get("ip_signal"):
-        signals.append("technical_moat_signal")
-    if record.get("commercial_signal"):
-        signals.append("commercialization_signal")
-    if record.get("manufacturing_signal"):
-        signals.append("manufacturing_process_signal")
-
-    if record.get("consumer_only") or record.get("non_vendor_only"):
-        reject.append("non_industrial_or_pure_consumer")
-    if not signals:
-        reasons.append("no_qualifying_industrial_signal")
-
-    offer = record.get("initial_offer", {}) or {}
-    if offer.get("requires_full_time_fde") or offer.get("requires_joint_research"):
-        reject.append("initial_scope_exceeds_current_capacity")
-
-    japan = record.get("japan", {}) or {}
-    if japan.get("direct_presence") or japan.get("country_manager") or japan.get("formal_gtm_owner"):
-        reject.append("japan_direct_presence_or_country_manager")
-
-    bounded = japan.get("bounded_check")
-    if bounded is None:
-        checks = japan.get("checks", {}) or {}
-        required = ("official_locations", "official_contacts", "linkedin_country_manager", "public_japan_search")
-        if checks:
-            for name in required:
-                check = checks.get(name, {})
-                if not proof_valid(check) or check.get("outcome") not in {"no_direct_presence_found", "distributor_only"}:
-                    reasons.append("japan_check_incomplete:" + name)
-        else:
-            reasons.append("japan_check_incomplete")
-    elif not proof_valid(bounded) or bounded.get("outcome") not in {"no_direct_presence_found", "distributor_only"}:
-        reasons.append("japan_check_incomplete")
-
-    direct_payment, proxy_payment = _payment_signal(record)
-    payment_level = "DOCUMENTED_SIGNAL" if direct_payment else "COMMERCIAL_PROXY" if proxy_payment else "UNVERIFIED_RANKING_SIGNAL"
-
-    score = max(sector["score"], source_score)
-    if country in PRIORITY_COUNTRIES:
-        score += 20
-    if record.get("ip_signal"):
-        score += 10
-    if record.get("commercial_signal"):
-        score += 8
-    if proof_valid(record.get("exhibition_proof")):
-        score += 6
-    if direct_payment or proxy_payment:
-        score += 8
-
-    if reject:
-        decision = "REJECT"
-    elif reasons:
-        decision = "REVIEW"
-    else:
-        decision = "PASS"
-
+    r = _payload(record)
+    reject, missing = [], []
+    country = normalize_country(r.get("country") or r.get("hq_country"))
+    if not r.get("company_name") or not domain(r.get("website")):
+        missing.append("identity_unverified")
+    if not _official(r.get("identity_proof")):
+        missing.append("official_identity_proof_missing")
+    if country == "Japan":
+        reject.append("japan_headquarters")
+    if not country or country.casefold() in {"unknown", "n/a", "global", "europe", "asia"}:
+        missing.append("headquarters_country_unknown")
+    hq_proof = r.get("country_proof") or {}
+    if not _official(hq_proof) or hq_proof.get("scope") != "headquarters":
+        missing.append("official_headquarters_proof_missing")
+    owner = r.get("ownership") or {}
+    if owner.get("japanese_control") is True:
+        reject.append("japanese_controlling_parent")
+    if owner.get("japanese_control") is not False or not _official(owner.get("proof")):
+        missing.append("ownership_unresolved")
+    japan = r.get("japan") or {}
+    presence_keys = ("direct_presence", "country_manager", "formal_gtm_owner", "distributor_only",
+                     "distributor", "reseller", "sier", "commercial_channel", "existing_japan_business")
+    if any(japan.get(k) is True for k in presence_keys):
+        reject.append("japan_commercial_presence")
+    checks = japan.get("checks") or {}
+    for key in JAPAN_CHECKS:
+        check = checks.get(key) or {}
+        if check.get("outcome") in {"presence_found", "direct_presence_found", "distributor_only"}:
+            reject.append("japan_commercial_presence")
+        valid = proof_valid(check) if key == "public_japan_search" else _official(check)
+        if not valid or check.get("complete") is not True or check.get("outcome") not in JAPAN_NEGATIVE_OUTCOMES:
+            missing.append("japan_check_incomplete:" + key)
+    cap = r.get("capability") or {}
+    family = cap.get("family", "")
+    if family not in FAMILIES:
+        missing.append("capability_family_unresolved")
+    if cap.get("vendor_role") not in VENDOR_ROLES:
+        missing.append("technology_vendor_role_unresolved")
+    if cap.get("transfer_route") not in TRANSFER_ROUTES:
+        missing.append("capability_acquisition_route_unresolved")
+    for key in ("product", "material", "output", "own_use", "accumulation"):
+        value = str(cap.get(key) or "").strip()
+        if not value or value.upper() in {"UNKNOWN", "TBD", "N/A", "PASS"}:
+            missing.append("capability_evidence_missing:" + key)
+    if not isinstance(cap.get("applications"), list) or not cap["applications"]:
+        missing.append("industrial_application_missing")
+    if not _official(cap.get("proof")):
+        missing.append("official_product_proof_missing")
+    if any(r.get(k) is True for k in ("consumer_only", "non_vendor_only", "commodity_trader", "out_of_scope")):
+        reject.append("outside_manufacturing_capability_scope")
+    if r.get("is_test") is True:
+        reject.append("synthetic_record_not_admissible")
+    reject = sorted(set(reject))
+    missing = sorted(set(missing))
+    decision = "REJECT" if reject else "REVIEW" if missing else "PASS"
+    base_score = FAMILIES.get(family, (0, ""))[0]
+    recurring = cap.get("recurring", "UNKNOWN")
+    # Commercial budget, company age, Series B and cell size are ranking signals only.
+    score = base_score + (8 if len(cap.get("applications") or []) >= 2 else 0) + (5 if recurring in {"R3", "R4"} else 0)
+    canonical = json.dumps(r, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False, default=str)
     return {
-        "decision": decision,
-        "reasons": reject + reasons,
-        "qualifying_signals": signals,
-        "policy_version": VERSION,
-        "country": country,
-        **sector,
-        "priority_score": score,
-        "japan_status": "DISTRIBUTOR_ONLY" if japan.get("distributor_only") else
-                        "NO_DIRECT_PRESENCE_FOUND_IN_CHECKED_SOURCES" if bounded and bounded.get("outcome") == "no_direct_presence_found" else
-                        "REQUIRES_RECHECK",
-        "payment_capacity_level": payment_level,
+        "decision": decision, "reasons": reject + missing, "policy_version": VERSION,
+        "country": country, "sector": family or "UNCLASSIFIED", "score": base_score,
+        "hits": [], "packages": ["01", "02", "05", "06"], "priority_score": score,
+        "qualifying_signals": ["foreign_manufacturing_capability", "japan_check_complete"] if decision == "PASS" else [],
+        "japan_status": "JAPAN_PRESENT" if reject and any("japan" in x for x in reject) else
+                        "NO_PRESENCE_FOUND_IN_CHECKED_SOURCES" if decision == "PASS" else "REQUIRES_RECHECK",
+        "payment_capacity_level": "UNVERIFIED_RANKING_SIGNAL",
         "prepayment_willingness": "UNCONFIRMED_UNTIL_COMMERCIAL_DISCUSSION",
+        "packet_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
+        "checked_at": now.isoformat(), "recurring": recurring,
     }
+
+
+def require_admission(record):
+    result = qualification(record)
+    if result["decision"] != "PASS":
+        raise ValueError("TARGET_APPEND_BLOCKED:" + ",".join(result["reasons"]))
+    return result
