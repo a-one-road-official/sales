@@ -10,10 +10,10 @@ from observability import failure_code, record_event
 
 
 class GateWorker:
-    """One-company fresh-context worker.
+    """Legacy fresh-context adapter to the shared evidence admission predicate.
 
-    Web/AI is used only to collect factual evidence. PASS/FAIL is calculated by
-    Python from the live Google Doc, so the document remains the business-rule SSOT.
+    Research is supplied by the existing ChatGPT Work. No paid inference is
+    started here. Missing evidence remains REVIEW in the research queue.
     """
 
     def __init__(self, sheets_repo, drive_repo, llm):
@@ -34,14 +34,12 @@ class GateWorker:
         return str(value or "")
 
     def evaluate_and_persist(self, company_context: dict) -> dict:
-        # LIVE_PER_EVALUATION is intentional: a Doc edit changes the next company.
         gate = self.loader.load()
         facts = research_gate_facts(self.llm, company_context)
         result = evaluate_gate(gate.text, company_context, facts)
-
-        # The live Doc contract is binary: all six PASS => GO; any FAIL => NO-GO.
-        gate_states = [str(self._gate(result, f"G{i}").get("result", "FAIL")).upper() for i in range(1, 7)]
-        result["final_result"] = "GO" if all(state == "PASS" for state in gate_states) else "NO-GO"
+        # The shared predicate owns GO/NO-GO/REVIEW. Preserve unresolved evidence.
+        if result.get("final_result") not in {"GO", "NO-GO", "REVIEW"}:
+            raise ValueError("shared_admission_result_invalid")
 
         now = datetime.now(timezone.utc).isoformat()
         row = {
@@ -55,16 +53,16 @@ class GateWorker:
         for gate_no in range(1, 7):
             key = f"G{gate_no}"
             g = self._gate(result, key)
-            row[f"{key}_result"] = str(g.get("result", "FAIL"))
+            row[f"{key}_result"] = str(g.get("result", "REVIEW"))
             row[f"{key}_reason"] = str(g.get("reason", ""))
             row[f"{key}_evidence"] = self._evidence(g.get("evidence", []))
 
-        row["final_result"] = str(result.get("final_result", "NO-GO"))
-        row["model"] = f"facts:{getattr(self.llm, 'model', '')}|decision:python"
+        row["final_result"] = str(result.get("final_result", "REVIEW"))
+        row["model"] = "facts:existing-chatgpt-work|decision:shared-python-admission"
         row["error"] = ""
         row["projectization_risk"] = str(result.get("projectization_risk", "UNKNOWN"))
         row["standard_gtm"] = str(result.get("standard_gtm", "UNKNOWN"))
-        row["routing"] = str(result.get("routing", "NO_GO"))
+        row["routing"] = str(result.get("routing", "RAW_RESEARCH"))
         row["most_important_reason"] = str(result.get("most_important_reason", ""))
         row["first_failed_gate"] = str(result.get("first_failed_gate", ""))
         row["missing_evidence"] = self._evidence(result.get("missing_evidence", []))
@@ -137,6 +135,7 @@ class GateWorker:
             "processed": len(results),
             "GO": sum(1 for r in results if r.get("final_result") == "GO"),
             "NO-GO": sum(1 for r in results if r.get("final_result") == "NO-GO"),
+            "REVIEW": sum(1 for r in results if r.get("final_result") == "REVIEW"),
             "ERROR": sum(1 for r in results if r.get("final_result") == "ERROR"),
             "results": results,
         }
