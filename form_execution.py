@@ -40,6 +40,17 @@ CAPTCHA_FAILURE_RE = re.compile(
     r"suspected\s+as\s+abusive\s+usage|verify\s+(?:that\s+)?you(?:['’]re|\s+are)\s+human",
     re.I,
 )
+EXPLICIT_SUBMISSION_REJECTION_RE = re.compile(
+    r"submission\s+(?:has\s+failed|failed|was\s+rejected)|"
+    r"(?:your\s+)?(?:message|inquiry)\s+(?:could\s+not\s+be\s+sent|was\s+not\s+sent)|"
+    r"送信に失敗しました|送信されませんでした",
+    re.I,
+)
+EXPLICIT_CAPTCHA_REJECTION_RE = re.compile(
+    r"(?:re|h)?captcha\s+(?:(?:validation|verification)\s+)?(?:has\s+)?failed|"
+    r"(?:invalid|incorrect)\s+(?:re|h)?captcha",
+    re.I,
+)
 
 CORE_FIELDS = ("name", "company", "email", "phone", "country", "address", "role", "message")
 
@@ -92,6 +103,36 @@ def final_submit_once(control) -> bool:
         return True
     except Exception:
         return False
+
+
+def next_step_once(control, *, preview_only, before_submit=None):
+    # A Next control may submit partial customer data even if it only appears to
+    # change the visible step. Read-only preview must never activate it.
+    if preview_only:
+        return {"clicked": False, "submission_attempted": False,
+                "reason": "MULTI_STEP_PREVIEW_REQUIRES_SUBMISSION"}
+    if before_submit is not None:
+        before_submit()
+    try:
+        control.click(timeout=15000)
+        return {"clicked": True, "submission_attempted": True}
+    except Exception:
+        return {"clicked": False, "submission_attempted": True,
+                "reason": "STEP_CLICK_OUTCOME_UNKNOWN"}
+
+
+def post_submit_failure(before_text, after_text, *, captcha_present=False, partial_transmission=False):
+    """Only a new explicit rejection can prove this attempted submit failed."""
+    if before_text is not None and not partial_transmission:
+        for pattern, reason in ((EXPLICIT_CAPTCHA_REJECTION_RE, "CAPTCHA_VALIDATION_FAILED"),
+                                (EXPLICIT_SUBMISSION_REJECTION_RE, "FORM_VALIDATION_FAILED")):
+            old = {" ".join(m.group(0).casefold().split()) for m in pattern.finditer(before_text)}
+            if any(" ".join(m.group(0).casefold().split()) not in old
+                   for m in pattern.finditer(after_text or "")):
+                return {"status": "FORM_FAILED", "reason": reason,
+                        "explicit_negative_confirmation": True}
+    return {"status": "FORM_UNCONFIRMED",
+            "reason": "CAPTCHA_PRESENT_AFTER_SUBMIT" if captcha_present else "SUBMISSION_NOT_CONFIRMED"}
 
 
 def _host(url: str) -> str:
@@ -1489,11 +1530,13 @@ class PublicContactFormExecutor:
         source_row: str = "",
         preview_only: bool = False,
         field_overrides: dict | None = None,
+        before_submit=None,
     ) -> dict:
         started = datetime.now(timezone.utc).isoformat()
         field_audit = []
         checkbox_audit = []
         submission_attempted = False
+        partial_transmission = False
         field_status = {key: "NOT_REQUESTED" for key in CORE_FIELDS}
         missing_required = []
         core_unfilled = []
@@ -2042,13 +2085,12 @@ class PublicContactFormExecutor:
                     control_label = _control_label(submit)
                     if re.search(r"\bnext\b", control_label, re.I):
                         before_click_signature = _visible_step_signature(form)
-                        if not preview_only:
-                            submission_attempted = True  # A server-side step can transmit partial data.
-                        try:
-                            submit.click(timeout=15000)
-                        except Exception:
-                            return result_payload("FORM_FAILED" if preview_only else "FORM_UNCONFIRMED",
-                                                  reason="STEP_CLICK_OUTCOME_UNKNOWN")
+                        step_result = next_step_once(submit, preview_only=preview_only, before_submit=before_submit)
+                        submission_attempted = submission_attempted or step_result["submission_attempted"]
+                        partial_transmission = partial_transmission or step_result["submission_attempted"]
+                        if not step_result["clicked"]:
+                            return result_payload("FORM_UNCONFIRMED" if submission_attempted else "FORM_FAILED",
+                                                  reason=step_result["reason"])
                         try:
                             page.wait_for_load_state("domcontentloaded", timeout=5000)
                         except Exception:
@@ -2092,7 +2134,16 @@ class PublicContactFormExecutor:
                 _verify_identity_dom(form, field_audit)
                 if preview_only:
                     return result_payload("FORM_PREVIEW_READY", reason="PREVIEW_NO_SUBMISSION", submitted_message=matching_messages[0])
+                # Capture visible rejection text immediately before this submit.
+                # Missing evidence cannot establish a new negative outcome later.
+                try:
+                    before_submit_text = "\n".join(context.locator("body").inner_text(timeout=5000)
+                                                   for context in (page, form_context))
+                except Exception:
+                    before_submit_text = None
                 capture("before-submit")
+                if before_submit is not None:
+                    before_submit()
                 submission_attempted = True
                 if not final_submit_once(submit):
                     # The request may already have reached the recipient. Never
@@ -2121,34 +2172,12 @@ class PublicContactFormExecutor:
                 success_match = next((m for m in SUCCESS_RE.finditer(visible_text or "") if m.group(0).casefold() not in initial_success_texts), None)
                 thank_you_url = final_url != form_url and _is_first_party_thank_you_url(final_url, website)
 
-                # Explicit negative evidence is a confirmed failure, not an
-                # ambiguous submission. This keeps recoverable validation errors
-                # out of FORM_UNCONFIRMED and lets ChatGPT repair the field packet.
-                negative_match = VALIDATION_ERROR_RE.search(visible_text or "")
-                captcha_failure = CAPTCHA_FAILURE_RE.search(visible_text or "")
-                if not success_match and not thank_you_url and (captcha_failure or negative_match):
-                    return result_payload(
-                        "FORM_FAILED",
-                        reason="CAPTCHA_VALIDATION_FAILED" if captcha_failure else "FORM_VALIDATION_FAILED",
-                        form_url=final_url,
-                        confirmation_text=(visible_text or "")[:4000],
-                        explicit_negative_confirmation=True,
-                    )
-                if not success_match and not thank_you_url and _captcha_present([page] + list(page.frames[1:])):
-                    return result_payload(
-                        "FORM_FAILED",
-                        reason="CAPTCHA_PRESENT_AFTER_SUBMIT",
-                        form_url=final_url,
-                        confirmation_text=(visible_text or "")[:4000],
-                        explicit_negative_confirmation=True,
-                    )
                 if not success_match and not thank_you_url:
-                    return result_payload(
-                        "FORM_UNCONFIRMED",
-                        reason="SUBMISSION_NOT_CONFIRMED",
-                        form_url=final_url,
-                        confirmation_text=(visible_text or "")[:4000],
-                    )
+                    failure = post_submit_failure(before_submit_text, visible_text,
+                        captcha_present=_captcha_present([page] + list(page.frames[1:])),
+                        partial_transmission=partial_transmission)
+                    return result_payload(**failure, form_url=final_url,
+                        confirmation_text=(visible_text or "")[:4000])
                 confirmation = "SUCCESS_TEXT" if success_match else "THANK_YOU_URL"
                 result = result_payload(
                     "FORM_SENT",

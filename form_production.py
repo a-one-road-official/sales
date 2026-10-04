@@ -9,7 +9,8 @@ Hard invariants:
 - no LLM/model/API copy generation;
 - verified human reply / opt-out / advanced sales stage suppresses every automated channel;
 - confirmed FORM_SENT suppresses later automated email to the canonical company/domain;
-- email BOUNCED/REJECTED/UNKNOWN may fall back to a verified form;
+- positively verified permanent email failures may follow the approved form router;
+- UNKNOWN email outcomes remain blocked for both channels;
 - ambiguous form submission is never retried automatically and blocks email until resolved.
 """
 from __future__ import annotations
@@ -17,13 +18,17 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 
 from google.auth import default
 from googleapiclient.discovery import build
 
 from form_execution import PublicContactFormExecutor, discover_official_contact_urls
 from sheets_repo import SheetsRepo
+from form_persistence import (FormPersistence, discover, read_controls, policy_from_drive,
+    require_form_start, execution_pending, strict_json, column_label, classify_form_result,
+    canonical_domain, execution_payload, packet_digest)
+
+_RUNTIME = None
 
 SSOT_ID = "1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo"
 SALES_TAB = "営業リスト＿Factory/BPO"
@@ -50,46 +55,28 @@ def parse_json(value) -> dict:
         return {}
 
 
-def canonical_domain(value: str) -> str:
-    raw = str(value or "").strip().lower()
-    if not raw:
-        return ""
-    if "://" not in raw:
-        raw = "https://" + raw
-    host = (urlparse(raw).hostname or "").lower().rstrip(".")
-    if host.startswith("www."):
-        host = host[4:]
-    return host
-
-
 def get_config(svc) -> dict:
-    values = svc.spreadsheets().values().get(
-        spreadsheetId=SSOT_ID,
-        range=f"'{CONFIG_TAB}'!A1:C12015",
-    ).execute().get("values", [])
-    out = {}
-    for row in values[1:]:
-        if not row:
-            continue
-        key = str(row[0] or "").strip()
-        if key:
-            out[key] = str(row[1] if len(row) > 1 else "").strip()
-    return out
+    return read_controls(svc)[0]
 
 
 def load_index(svc) -> dict[int, dict]:
-    ranges = [
-        f"'{SALES_TAB}'!A2:B8184",
-        f"'{SALES_TAB}'!G2:G8184",
-        f"'{SALES_TAB}'!EC2:EC8184",
-    ]
+    tabs = discover(svc)
+    end = tabs[SALES_TAB]["gridProperties"]["rowCount"]
+    fields = ("company_name", "Status", "website", "AI実行JSON")
+    ranges = []
+    for field in fields:
+        col = column_label(_RUNTIME.header[field])
+        ranges.append(f"'{SALES_TAB}'!{col}2:{col}{end}")
+    # Discover current grid and header positions; preserve source row numbers.
     payload = svc.spreadsheets().values().batchGet(
-        spreadsheetId=SSOT_ID,
-        ranges=ranges,
+        spreadsheetId=SSOT_ID, ranges=ranges,
     ).execute().get("valueRanges", [])
-    ab = payload[0].get("values", []) if len(payload) > 0 else []
-    g = payload[1].get("values", []) if len(payload) > 1 else []
-    ec = payload[2].get("values", []) if len(payload) > 2 else []
+    if len(payload) != len(ranges):
+        raise ValueError("FORM_INDEX_READ_INCOMPLETE")
+    names, statuses, g, ec = [block.get("values", []) for block in payload]
+    ab = [[(names[i][0] if i < len(names) and names[i] else ""),
+           (statuses[i][0] if i < len(statuses) and statuses[i] else "")]
+          for i in range(max(len(names), len(statuses)))]
     n = max(len(ab), len(g), len(ec))
     index = {}
     for offset in range(n):
@@ -97,7 +84,11 @@ def load_index(svc) -> dict[int, dict]:
         ab_row = ab[offset] if offset < len(ab) else []
         g_row = g[offset] if offset < len(g) else []
         ec_row = ec[offset] if offset < len(ec) else []
-        meta = parse_json(ec_row[0] if ec_row else "")
+        try:
+            meta = strict_json(ec_row[0] if ec_row else "")
+        except (ValueError, TypeError) as exc:
+            meta = {"auto_outbound_blocked": True, "suppression_reason": "FORM_META_INVALID",
+                    "form_meta_read_error": str(exc)}
         website = str(g_row[0] if g_row else "").strip()
         domain = canonical_domain(
             meta.get("canonical_domain")
@@ -162,85 +153,35 @@ def queued_rows(
         packet = meta.get("form_submission_packet_v1")
         if not isinstance(packet, dict):
             continue
+        if execution_pending(meta):
+            # An interrupted browser run may have submitted. Reconcile its actual
+            # evidence; a fresh process must never replay this claim.
+            continue
         out.append(row_number)
     out.sort()
     return out[:limit]
 
 
 def read_full_row(svc, row_number: int) -> dict:
-    values = svc.spreadsheets().values().get(
-        spreadsheetId=SSOT_ID,
-        range=f"'{SALES_TAB}'!A{row_number}:EC{row_number}",
-    ).execute().get("values", [[]])[0]
-    values = list(values) + [""] * max(0, 133 - len(values))
-    return {
-        "company": str(values[0] or "").strip(),
-        "status": str(values[1] or "").strip(),
-        "website": str(values[6] or "").strip(),
-        "meta": parse_json(values[132]),
-    }
+    if _RUNTIME is None:
+        raise RuntimeError("FORM_RUNTIME_NOT_INITIALIZED")
+    return _RUNTIME.row(row_number)
 
 
-def write_meta(svc, row_number: int, meta: dict) -> None:
-    svc.spreadsheets().values().update(
-        spreadsheetId=SSOT_ID,
-        range=f"'{SALES_TAB}'!EC{row_number}",
-        valueInputOption="RAW",
-        body={"values": [[json.dumps(meta, ensure_ascii=False, separators=(",", ":"))]]},
-    ).execute()
+def write_meta(svc, row_number: int, meta: dict, *, expected_row: dict, reason: str) -> dict:
+    claim_id = str((expected_row["meta"].get("form_submission_packet_v1") or {}).get("claim_id") or "")
+    event = _RUNTIME.event(row_number, expected_row, "FORM_CLAIM_URL_RECOVERED", reason,
+        {"claim_id": claim_id, "form_url": (meta.get("form_submission_packet_v1") or {}).get("form_url"),
+         "packet_sha256": packet_digest(meta.get("form_submission_packet_v1"))}, claim_id)
+    changes = {key: value for key, value in meta.items() if value != expected_row["meta"].get(key)}
+    return _RUNTIME.commit(row_number, expected_row, changes, event)
 
 
-def append_event(
-    svc,
-    *,
-    row_number: int,
-    company: str,
-    domain: str,
-    action: str,
-    reason: str,
-    evidence: dict,
-    claim_id: str,
-) -> None:
-    at = now_iso()
-    headers = svc.spreadsheets().values().get(
-        spreadsheetId=SSOT_ID,
-        range=f"'{EVENT_TAB}'!A1:X1",
-    ).execute().get("values", [[]])[0]
-    event_id = f"form-production:{domain or row_number}:{action}:{claim_id or at}"
-    data = {
-        "event_id": event_id,
-        "occurred_at": at,
-        "date": at[:10],
-        "source_row": str(row_number),
-        "company_key": domain or f"ssot-row:{row_number}",
-        "company_name": company,
-        "from_status": "",
-        "to_status": "",
-        "action_type": action,
-        "source": "FORM_PRODUCTION_PLAYWRIGHT",
-        "recorded_at": at,
-        "lead_id": f"ssot-row:{row_number}",
-        "previous_status": "",
-        "new_status": "",
-        "writer": "form_production",
-        "reason": reason,
-        "evidence": json.dumps(evidence, ensure_ascii=False, separators=(",", ":")),
-        "timestamp": at,
-        "code_version": "FORM_PRODUCTION_V1_20260923",
-        "idempotency_key": f"form-domain:{domain}" if domain else f"form-row:{row_number}",
-        "canonical_action_id": event_id,
-        "source_origins": "chatgpt_form_production|public_form|ssot",
-        "business_segment": "Factory/BPO",
-        "industry": "",
-    }
-    ordered = [data.get(h, "") for h in headers]
-    svc.spreadsheets().values().append(
-        spreadsheetId=SSOT_ID,
-        range=f"'{EVENT_TAB}'!A:X",
-        valueInputOption="RAW",
-        insertDataOption="INSERT_ROWS",
-        body={"values": [ordered]},
-    ).execute()
+def execute_claimed_form(executor, row_number, row, peers=()):
+    """Bind every actual browser argument to the admitted, freshly saved packet."""
+    payload = execution_payload(row_number, row)
+    guard = _RUNTIME.submission_guard(row_number, row, payload, peers=peers)
+    return executor.execute(**payload, before_submit=guard)
 
 
 def compact_form_result(result: dict | None) -> dict:
@@ -340,32 +281,42 @@ def mark_terminal(
         meta["email_fallback_allowed"] = False
         meta["channel_router_state"] = "GLOBAL_SUPPRESSED"
 
-    write_meta(svc, row_number, meta)
-    append_event(
-        svc,
-        row_number=row_number,
-        company=row["company"],
-        domain=domain,
-        action=state,
-        reason=reason,
-        evidence={
-            "claim_id": claim_id,
-            "form_url": packet.get("form_url"),
-            "result": meta.get("form_result"),
-            "email_fallback_allowed": meta.get("email_fallback_allowed"),
-            "channel_router_state": meta.get("channel_router_state"),
-        },
-        claim_id=claim_id,
-    )
+    if meta.get("form_executor_attempt"):
+        meta["form_executor_attempt"] = dict(meta["form_executor_attempt"], status=state,
+            outcome=state, finished_at=at,
+            submission_attempted=(result or {}).get("submission_attempted"),
+            explicit_negative_confirmation=(result or {}).get("explicit_negative_confirmation") is True)
+    event = _RUNTIME.event(row_number, row, state, reason, {
+        "claim_id": claim_id, "form_url": packet.get("form_url"),
+        "result": meta.get("form_result"),
+        "email_fallback_allowed": meta.get("email_fallback_allowed"),
+        "channel_router_state": meta.get("channel_router_state")}, claim_id)
+    changes = {key: value for key, value in meta.items() if value != row["meta"].get(key)}
+    _RUNTIME.commit(row_number, row, changes, event)
+
 
 
 def main() -> None:
-    creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets"])
+    global _RUNTIME
+    if os.getenv("GITHUB_ACTIONS") != "true" or ".github/workflows/form_production.yml@" not in os.getenv("GITHUB_WORKFLOW_REF", ""):
+        raise RuntimeError("EXISTING_GITHUB_FORM_WORKFLOW_CONTEXT_REQUIRED")
+    creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.readonly"])
     svc = build("sheets", "v4", credentials=creds, cache_discovery=False)
+    drive = build("drive", "v3", credentials=creds, cache_discovery=False)
     config = get_config(svc)
-    if config.get("FORM_EXECUTOR_RUN_STATE", "STOP").upper() != "START":
-        print(json.dumps({"status": "STOPPED", "reason": "FORM_EXECUTOR_RUN_STATE"}, ensure_ascii=False))
+    try:
+        require_form_start(config)
+    except ValueError as exc:
+        print(json.dumps({"status": "DEFERRED", "phase": "CONTROL_READ",
+            "reason": str(exc), "customer_actions": 0}, ensure_ascii=False))
         return
+    drift = {key: config.get(key) for key in ("CHATGPT_FORM_RUN_STATE", "FORM_EXECUTOR_RUN_STATE")
+             if config.get(key) != config["AUMS_MASTER_RUN_STATE"]}
+    if drift:
+        print(json.dumps({"phase": "COMPATIBILITY_MIRROR_DRIFT", "values": drift,
+            "master": config["AUMS_MASTER_RUN_STATE"], "legacy_values_are_not_operator_commands": True}))
+    _RUNTIME = FormPersistence(svc, lambda: policy_from_drive(drive))
 
     try:
         global_batch = max(1, min(200, int(config.get("FORM_PRODUCTION_BATCH_SIZE", "40") or 40)))
@@ -427,31 +378,31 @@ def main() -> None:
             results.append({"row": row_number, "status": "FORM_SUPPRESSED", "reason": "FORM_ALREADY_SENT_CANONICAL_DOMAIN"})
             continue
 
-        form_url = str(packet.get("form_url") or "").strip()
-        website = str(packet.get("website") or row["website"] or "").strip()
-        company = str(packet.get("company_name") or row["company"] or "").strip()
-        subject = str(packet.get("subject") or "").strip()
-        message = str(packet.get("form_message") or "").strip()
-        claim_id = str(packet.get("claim_id") or "").strip()
-
-        if not (form_url and website and company and message and claim_id):
+        try:
+            execution_payload(row_number, row)
+        except ValueError:
             mark_terminal(svc, row_number, row, state="FORM_FAILED", reason="INCOMPLETE_FORM_SUBMISSION_PACKET")
             results.append({"row": row_number, "status": "FORM_FAILED", "reason": "INCOMPLETE_FORM_SUBMISSION_PACKET"})
             continue
 
-        field_overrides = packet.get("field_overrides") if isinstance(packet.get("field_overrides"), dict) else None
-        result = executor.execute(
-            form_url=form_url,
-            website=website,
-            company_name=company,
-            subject=subject,
-            message=message,
-            idempotency_key=f"form-domain:{domain}",
-            draft_id=claim_id,
-            source_row=str(row_number),
-            preview_only=False,
-            field_overrides=field_overrides,
-        )
+        peers = [n for n, item in index.items() if n != row_number and item["domain"] == domain]
+        try:
+            row = _RUNTIME.begin(row_number, row, peers=peers)
+            payload = execution_payload(row_number, row)
+        except Exception as exc:
+            # No browser action after a failed admission or write. Keep the same
+            # claim for evidence-based recovery; expose the original error.
+            results.append({"row": row_number, "status": "DEFERRED", "phase": "FORM_ADMISSION",
+                "reason": str(exc), "external_action_attempted": False})
+            continue
+        meta = row["meta"]
+        packet = meta["form_submission_packet_v1"]
+        claim_id = payload["draft_id"]
+        domain = canonical_domain(packet.get("canonical_domain") or row["website"])
+        peers = [n for n, item in index.items() if n != row_number and item["domain"] == domain]
+        form_url, website, company, subject, message = (payload[key]
+            for key in ("form_url", "website", "company_name", "subject", "message"))
+        result = execute_claimed_form(executor, row_number, row, peers)
 
         # Stored URLs go stale. Recover only when the first attempt provably made
         # no customer submission, then use GET-only discovery + read-only preview
@@ -475,32 +426,22 @@ def main() -> None:
                     company_name=company,
                     subject=subject,
                     message=message,
-                    compact_message=message[:450],
+                    compact_message=str(packet.get("approved_compact_form_message") or ""),
                 )
                 if preview.get("ready") and preview.get("form_url"):
                     recovered_url = str(preview["form_url"])
                     recovered_message = str(preview.get("message") or message)
                     packet = dict(packet)
                     packet["form_url"] = recovered_url
+                    packet["form_message"] = recovered_message
                     packet["recovered_from_form_url"] = form_url
                     packet["form_url_recovered_at"] = now_iso()
                     meta = dict(row["meta"])
                     meta["form_submission_packet_v1"] = packet
                     meta["form_url"] = recovered_url
-                    write_meta(svc, row_number, meta)
-                    row["meta"] = meta
-                    result = executor.execute(
-                        form_url=recovered_url,
-                        website=website,
-                        company_name=company,
-                        subject=subject,
-                        message=recovered_message,
-                        idempotency_key=f"form-domain:{domain}",
-                        draft_id=claim_id,
-                        source_row=str(row_number),
-                        preview_only=False,
-                        field_overrides=field_overrides,
-                    )
+                    row["meta"] = write_meta(svc, row_number, meta, expected_row=row,
+                        reason="Verified GET-only official contact page recovery")
+                    result = execute_claimed_form(executor, row_number, row, peers)
                     result["discovery_candidates"] = candidates
                     result["recovered_form_url"] = recovered_url
                 elif preview.get("attempts"):
@@ -533,28 +474,19 @@ def main() -> None:
                     best_attempt["reason"] = str(best_attempt.get("reason") or "FORM_DISCOVERY_PREVIEW_FAILED")
                     result = best_attempt
 
-        result_status = str(result.get("status") or "")
-        if result_status == "FORM_SENT":
-            state = "FORM_SENT"
-            reason = str(result.get("confirmation") or "FORM_SENT")
+        state, reason = classify_form_result(result)
+        if state == "FORM_SENT":
             sent_domains.add(domain)
-        elif result_status == "FORM_FAILED":
-            state = "FORM_FAILED"
-            reason = str(result.get("reason") or "FORM_FAILED")
-        elif result_status == "BLOCKED":
-            state = "FORM_SUPPRESSED"
-            reason = str(result.get("reason") or "FORM_BLOCKED")
-        elif result_status == "DUPLICATE_BLOCKED":
-            state = "FORM_SUPPRESSED"
-            reason = str(result.get("reason") or "FORM_DUPLICATE_BLOCKED")
-        elif result_status == "FORM_UNCONFIRMED" or result.get("submission_attempted"):
-            state = "FORM_UNCONFIRMED"
-            reason = str(result.get("reason") or "SUBMISSION_NOT_CONFIRMED")
-        else:
-            state = "FORM_FAILED"
-            reason = str(result.get("reason") or result_status or "FORM_FAILED")
 
-        mark_terminal(svc, row_number, row, state=state, reason=reason, result=result)
+        try:
+            mark_terminal(svc, row_number, row, state=state, reason=reason, result=result)
+        except Exception as exc:
+            # Durable STARTED remains replay-blocked if terminal commit is denied.
+            print(json.dumps({"row": row_number, "phase": "FORM_RESULT_COMMIT",
+                "original_error": str(exc), "claim_id": claim_id, "result": compact_form_result(result),
+                "external_action_may_have_occurred": bool(result.get("submission_attempted")),
+                "retry_external_action": False}, ensure_ascii=False))
+            raise
         results.append({
             "row": row_number,
             "company": company,
