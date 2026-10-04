@@ -55,7 +55,7 @@ def native_guard_rejection(error):
         if not isinstance(detail, dict):
             return None
         rejection = GuardAcquireRejection(error.resp.status, detail.get("code"),
-            detail.get("status", "INVALID_ARGUMENT"), detail.get("message"))
+            detail.get("status"), detail.get("message"))
         return rejection if rejection.is_exact_contention() else None
     except (AttributeError, TypeError, ValueError, KeyError):
         return None

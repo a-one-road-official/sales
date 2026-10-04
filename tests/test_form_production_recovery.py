@@ -382,6 +382,20 @@ class FormRecoveryTests(unittest.TestCase):
                 self.assertEqual(self.delays,[]);self.assertEqual(len(self.acquire_batches()),1)
                 self.assertFalse(fp.execution_pending(self.svc.get_meta()));self.assertFalse(self.svc.named)
 
+    def test_native_duplicate_without_status_never_retries(self):
+        error=NativeHttpError(400,fp.GUARD_CONTENTION_MESSAGE)
+        payload=json.loads(error.content)
+        del payload['error']['status']
+        error.content=json.dumps(payload).encode()
+        self.assertIsNone(fp.native_guard_rejection(error))
+        self.svc.acquire_error=error
+        with self.assertRaises(NativeHttpError) as raised:
+            self.runtime.begin(8972,self.runtime.row(8972))
+        self.assertIs(raised.exception,error)
+        self.assertEqual(self.delays,[]);self.assertEqual(len(self.acquire_batches()),1)
+        self.assertFalse(fp.execution_pending(self.svc.get_meta()));self.assertFalse(self.svc.named)
+        self.assertFalse(any('appendCells' in r for batch in self.svc.requests for r in batch))
+
     def test_ambiguous_acquire_never_retries_or_clears_unknown_result(self):
         self.svc.ambiguous_acquire=True
         with self.assertRaisesRegex(OSError,'AMBIGUOUS_RESPONSE_AFTER_ACQUIRE'):
