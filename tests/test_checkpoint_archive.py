@@ -260,5 +260,257 @@ class CheckpointArchiveTests(unittest.TestCase):
         self.assertEqual(value, original)
 
 
+def bounded_state():
+    value = {"version": "AUMS_UNIFIED_V10_CONTINUOUS", "policy_sha256": "e" * 64,
+        "policy_source_document": "original-gate", "target_policy_version": "V11_REQUESTED_ONLY",
+        "reviewed_source_rows": [42, 44], "verified_final_source_rows": [44],
+        "overall_verified_rows": [10, 42, 44], "reviewed_current_version": 2,
+        "overall_verified_count": 3, "pass": 1, "fail": 0, "needs_review": 1,
+        "next_source_row": 47, "remaining_unique_companies": None,
+        "dual_lane": {"lane_a": {"verified_completed_rows": [42],
+            "current_policy_verified_rows": [42], "scan_cursor": 47, "verified_count": 1},
+            "lane_b": {"verified_completed_rows": [10, 44],
+            "current_policy_verified_rows": [44], "scan_cursor": 81, "verified_count": 2}},
+        "calibration": {"id": "calibration-one", "selected_rows": [42, 46, 44],
+            "completed_rows": [42, 44], "pending_rows": [46], "reviewed": 2,
+            "seed_candidate_rows": [46], "protected_rows": [7]},
+        "retry": [{"row": 42, "status": "REVIEW", "reason": "still unknown"}],
+        "unknown_active": {"future": [None, False, {"keep": "🙂"}]},
+        "transactions": {"verified": transaction(), "other_lane_pending": {
+            "status": "PENDING_READBACK", "lane": "B", "rows": [46],
+            "decision_id": ["d" * 64], "identity": [{"domain": "pending.test"}],
+            "packet_sha": ["e" * 64], "unknown_pending": {"keep": None}}}}
+    return value
+
+
+def prepare_bounded(value=None, **overrides):
+    raw = value if isinstance(value, str) else ca.dumps(value or bounded_state())
+    args = dict(source_state_key="AUMS_CLEANSE_STATE", at=NOW.isoformat(),
+                run_id="bounded-one", origin="NON_CUSTOMER_TEST", history_keys=())
+    args.update(overrides)
+    return ca.prepare_bounded_archive(raw, **args)
+
+
+class BoundedCheckpointTests(unittest.TestCase):
+    def test_v2_reconstructs_independent_memberships_identity_shapes_and_pending(self):
+        original = bounded_state()
+        plan = prepare_bounded(original); _, proof = append_and_verify(plan)
+        text = ca.compact_verified(plan, proof, plan["source_text"])
+        head = json.loads(text)
+        self.assertEqual(set(head[ca.HISTORY_REF]), {"schema", "manifest_event_id", "source_state_key", "snapshot_sha256"})
+        self.assertNotIn("verified", head["transactions"])
+        self.assertEqual(head["calibration"]["selected_rows"], [46])
+        self.assertEqual(head["calibration"]["pending_rows"], [46])
+        self.assertEqual(head["reviewed_source_rows"], [])
+        self.assertEqual(head["transactions"]["other_lane_pending"], original["transactions"]["other_lane_pending"])
+        view = ca.history_read_view(text, {proof.manifest_event_id: proof}, source_state_key="AUMS_CLEANSE_STATE")
+        self.assertEqual(view.state, original)
+        self.assertIn(42, view.state["reviewed_source_rows"])
+        self.assertNotIn(42, view.state["verified_final_source_rows"])
+        self.assertEqual(view.state["retry"][0]["status"], "REVIEW")
+        # An existing legacy consumer checks identity before its VERIFIED no-op.
+        tx = view.state["transactions"]["verified"]
+        self.assertEqual(tx["rows"], [42, 44]); self.assertEqual(tx["decision_id"][0], "a" * 64)
+        self.assertEqual(tx["status"], "VERIFIED")
+
+    def test_logical_transition_writes_only_new_deltas_and_keeps_other_lane(self):
+        plan = prepare_bounded(); _, proof = append_and_verify(plan)
+        text = ca.compact_verified(plan, proof, plan["source_text"])
+        archives = {proof.manifest_event_id: proof}
+        view = ca.history_read_view(text, archives, source_state_key="AUMS_CLEANSE_STATE")
+        update = view.state
+        for path in (("reviewed_source_rows",), ("verified_final_source_rows",), ("overall_verified_rows",),
+                     ("dual_lane", "lane_a", "verified_completed_rows"),
+                     ("dual_lane", "lane_a", "current_policy_verified_rows"),
+                     ("calibration", "selected_rows"), ("calibration", "completed_rows")):
+            ca._at(update, path).append(50)
+        update["reviewed_current_version"] = len(update["reviewed_source_rows"])
+        update["overall_verified_count"] = len(update["overall_verified_rows"])
+        update["next_source_row"] = 51
+        update["transactions"]["new_pending"] = {"status": "PENDING_READBACK", "rows": [52]}
+        next_text = ca.merge_next_head(view, update, text)
+        next_head = json.loads(next_text)
+        self.assertEqual(next_head["reviewed_source_rows"], [50])
+        self.assertEqual(next_head["calibration"]["selected_rows"], [46, 50])
+        self.assertNotIn("verified", next_head["transactions"])
+        self.assertEqual(next_head[ca.HISTORY_REF], json.loads(text)[ca.HISTORY_REF])
+        self.assertEqual(next_head["transactions"]["other_lane_pending"], bounded_state()["transactions"]["other_lane_pending"])
+        self.assertEqual(next_head["unknown_active"], bounded_state()["unknown_active"])
+        self.assertIsNone(next_head["remaining_unique_companies"])
+        self.assertEqual(ca.history_read_view(next_text, archives, source_state_key="AUMS_CLEANSE_STATE").state, update)
+
+    def test_merge_rejects_stale_head_historical_removal_edit_and_scope_change(self):
+        plan = prepare_bounded(); _, proof = append_and_verify(plan)
+        text = ca.compact_verified(plan, proof, plan["source_text"])
+        view = ca.history_read_view(text, {proof.manifest_event_id: proof}, source_state_key="AUMS_CLEANSE_STATE")
+        with self.assertRaisesRegex(ca.ArchiveError, "SNAPSHOT_CHANGED_NO_WRITE"):
+            ca.merge_next_head(view, view.state, text + "\n")
+        variants = []
+        update = view.state; update["reviewed_source_rows"].remove(42); variants.append((update, "MEMBERSHIP_REMOVED"))
+        update = view.state; update["transactions"]["verified"]["status"] = "PENDING_READBACK"; variants.append((update, "TRANSACTION_REMOVED_OR_CHANGED"))
+        update = view.state; del update["transactions"]["verified"]; variants.append((update, "TRANSACTION_REMOVED_OR_CHANGED"))
+        update = view.state; update["policy_sha256"] = "f" * 64; variants.append((update, "SCOPE_CHANGED"))
+        for update, error in variants:
+            with self.assertRaisesRegex(ca.ArchiveError, error):
+                ca.merge_next_head(view, update, text)
+
+    def test_legacy_pending_closure_counting_and_pre_status_identity_replay(self):
+        plan = prepare_bounded(); _, proof = append_and_verify(plan)
+        text = ca.compact_verified(plan, proof, plan["source_text"])
+        archives = {proof.manifest_event_id: proof}
+        view = ca.history_read_view(text, archives, source_state_key="AUMS_CLEANSE_STATE")
+        update = view.state
+        # The production recovery helper performs identity lookups before its
+        # VERIFIED no-op and counts full lists after a real readback closure.
+        tx = update["transactions"]["other_lane_pending"]
+        self.assertEqual(tx["rows"], [46]); self.assertEqual(tx["decision_id"], ["d" * 64])
+        self.assertEqual(tx["identity"][0]["domain"], "pending.test")
+        self.assertEqual(tx["packet_sha"], ["e" * 64])
+        self.assertEqual(tx["status"], "PENDING_READBACK")
+        tx.update(status="VERIFIED", verified_at=NOW.isoformat())
+        for path in (("reviewed_source_rows",), ("verified_final_source_rows",), ("overall_verified_rows",),
+                     ("dual_lane", "lane_b", "verified_completed_rows"),
+                     ("dual_lane", "lane_b", "current_policy_verified_rows"),
+                     ("calibration", "completed_rows")):
+            ca._at(update, path).append(46)
+        update["calibration"]["pending_rows"] = []
+        update["reviewed_current_version"] = len(update["reviewed_source_rows"])
+        update["overall_verified_count"] = len(update["overall_verified_rows"])
+        update["dual_lane"]["lane_b"]["verified_count"] = len(update["dual_lane"]["lane_b"]["verified_completed_rows"])
+        update["pass"] += 1
+        next_text = ca.merge_next_head(view, update, text)
+        compact = json.loads(next_text)
+        self.assertEqual(compact["reviewed_source_rows"], [46])
+        self.assertEqual(compact["reviewed_current_version"], 3)
+        self.assertEqual(compact["overall_verified_count"], 4)
+        self.assertEqual(compact["dual_lane"]["lane_a"]["scan_cursor"], 47)
+        closure = prepare_bounded(next_text, run_id="archive-closed-pending")
+        _, proof2 = append_and_verify(closure)
+        closed = ca.compact_verified(closure, proof2, next_text, archive_dependencies=archives)
+        archives[proof2.manifest_event_id] = proof2
+        replay = ca.history_read_view(closed, archives, source_state_key="AUMS_CLEANSE_STATE").state
+        tx = replay["transactions"]["other_lane_pending"]
+        self.assertEqual(tx["rows"], [46]); self.assertEqual(tx["decision_id"], ["d" * 64])
+        self.assertEqual(tx["status"], "VERIFIED")  # Existing helper returns no-op here.
+        self.assertEqual(replay, update)
+
+    def test_new_policy_or_calibration_excludes_old_scoped_history_but_keeps_global(self):
+        plan = prepare_bounded(); _, proof = append_and_verify(plan)
+        text = ca.compact_verified(plan, proof, plan["source_text"])
+        head = json.loads(text); head["version"] = "AUMS_UNIFIED_V11_CONTINUOUS"
+        head["policy_sha256"] = "f" * 64; head["calibration"]["id"] = "calibration-two"
+        head["calibration"].update(selected_rows=[], completed_rows=[], pending_rows=[])
+        view = ca.history_read_view(ca.dumps(head), {proof.manifest_event_id: proof}, source_state_key="AUMS_CLEANSE_STATE")
+        self.assertEqual(view.state["reviewed_source_rows"], [])
+        self.assertEqual(view.state["overall_verified_rows"], [10, 42, 44])
+        self.assertEqual(view.state["calibration"]["completed_rows"], [])
+        self.assertEqual(view.state["dual_lane"]["lane_a"]["current_policy_verified_rows"], [])
+        self.assertEqual(view.state["dual_lane"]["lane_a"]["verified_completed_rows"], [42])
+        self.assertEqual(view.state["reviewed_current_version"], 2)  # Caller-owned scalar, no inference.
+        value = bounded_state(); value["baseline_v10"] = {"active": "current" * 100}
+        with self.assertRaisesRegex(ca.ArchiveError, "BASELINE_NOT_PROVEN_OLD"):
+            prepare_bounded(value, history_keys=("baseline_v10",))
+
+    def test_v1_migration_future_native_loader_and_no_hydrated_baseline_backwrite(self):
+        original = state(); first = prepare(original); api1, proof1 = append_and_verify(first)
+        v1 = ca.compact_verified(first, proof1, first["source_text"])
+        second = prepare_bounded(v1, run_id="v1-to-v2"); api2, proof2 = append_and_verify(second)
+        with self.assertRaisesRegex(ca.ArchiveError, "ARCHIVE_MISSING"):
+            ca.compact_verified(second, proof2, v1)
+        v2 = ca.compact_verified(second, proof2, v1, archive_dependencies={proof1.manifest_event_id: proof1})
+        view = ca.load_history_view(LAYOUT, v2, api1.rows[20] + api2.rows[20], source_state_key="AUMS_CLEANSE_STATE")
+        self.assertEqual(view.state, original)
+        update = view.state; update["next_source_row"] = 88
+        next_head = json.loads(ca.merge_next_head(view, update, v2))
+        self.assertEqual(next_head["baseline_v9"], json.loads(v1)["baseline_v9"])
+        self.assertNotIn("verified", next_head["transactions"])
+        with self.assertRaisesRegex(ca.ArchiveError, "MISSING_OR_DUPLICATE"):
+            ca.load_history_view(LAYOUT, v2, api2.rows[20], source_state_key="AUMS_CLEANSE_STATE")
+
+    def test_v2_archive_first_failures_and_changed_snapshot_never_prune(self):
+        plan = prepare_bounded(); api, proof = append_and_verify(plan)
+        for rows in ([], api.rows[20][:-1], api.rows[20] + [api.rows[20][-1]]):
+            with self.assertRaisesRegex(ca.ArchiveError, "READBACK_UNRESOLVED"):
+                ca.verify_archive(LAYOUT, plan, rows)
+        changed = json.loads(plan["source_text"])
+        changed["transactions"]["lane_a_new"] = {"status": "PENDING_READBACK", "rows": [77]}
+        with self.assertRaisesRegex(ca.ArchiveError, "SNAPSHOT_CHANGED_NO_PRUNING"):
+            ca.compact_verified(plan, proof, ca.dumps(changed))
+        tampered = copy.deepcopy(plan); candidate = json.loads(tampered["compact_text"])
+        candidate["calibration"]["pending_rows"] = []
+        tampered["compact_text"] = ca.dumps(candidate); tampered["compact_sha256"] = ca.sha256(tampered["compact_text"])
+        with self.assertRaisesRegex(ca.ArchiveError, "SELECTION_CHANGED_NO_PRUNING"):
+            ca.compact_verified(tampered, proof, plan["source_text"])
+        self.assertEqual(api.cells[CELL], plan["source_text"])
+
+    def test_v2_exact_fence_and_changed_prior_history_reference(self):
+        plan = prepare_bounded(); api, proof = append_and_verify(plan)
+        owned = Lease("v2", "guard_v2", NOW, NOW + timedelta(seconds=120))
+        api.batch(acquire_requests(LAYOUT, owned, NOW))
+        requests = ca.compaction_requests(LAYOUT, owned, NOW, state_row=STATE_ROW, state_column=2,
+            plan=plan, observed_archive_rows=api.rows[20], fresh_state_text=api.cells[CELL])
+        self.assertIn("updateNamedRange", requests[0]); self.assertIn("deleteNamedRange", requests[-1])
+        with self.assertRaises(TimeoutError): api.batch(requests, lose_response=True)
+        self.assertEqual(api.cells[CELL], plan["compact_text"])
+        with self.assertRaises(ValueError): api.batch(requests)
+        head = json.loads(plan["compact_text"]); head[ca.HISTORY_REF]["snapshot_sha256"] = "0" * 64
+        with self.assertRaisesRegex(ca.ArchiveError, "REFERENCE_HASH"):
+            ca.history_read_view(head, {proof.manifest_event_id: proof}, source_state_key="AUMS_CLEANSE_STATE")
+
+    def test_unknown_membership_and_unrecognized_verified_record_remain_live(self):
+        value = bounded_state(); value["overall_verified_rows"] = [42, None]
+        value["transactions"]["unknown_verified"] = {"status": "VERIFIED", "rows": [51]}
+        plan = prepare_bounded(value); _, proof = append_and_verify(plan)
+        head = json.loads(ca.compact_verified(plan, proof, plan["source_text"]))
+        self.assertEqual(head["overall_verified_rows"], [42, None])
+        self.assertEqual(head["transactions"]["unknown_verified"], value["transactions"]["unknown_verified"])
+
+    def test_four_thousand_companies_and_one_hundred_generations_keep_constant_head(self):
+        current = bounded_state()
+        for path in ca.MEMBERSHIP_PATHS:
+            ca._put(current, path, [])
+        current["calibration"].update(selected_rows=[900_000], pending_rows=[900_000], reviewed=0)
+        current["transactions"] = {"pending_b": {"status": "PENDING_READBACK", "rows": [900_000], "unknown": None}}
+        current["reviewed_current_version"] = current["overall_verified_count"] = 0
+        current["retry"] = [{"row": 900_000, "status": "REVIEW"}]
+        text, archives, sizes, refs = ca.dumps(current), {}, [], []
+        for generation in range(100):
+            view = ca.history_read_view(text, archives, source_state_key="AUMS_CLEANSE_STATE")
+            update = view.state
+            rows = list(range(1000 + generation * 40, 1040 + generation * 40))
+            for path in ca.MEMBERSHIP_PATHS:
+                if "lane_b" not in path:
+                    ca._at(update, path).extend(rows)
+            update["transactions"][f"batch-{generation}"] = {"status": "VERIFIED", "lane": "A",
+                "rows": [{"row": row, "decision_id": ca.sha256(str(row)), "domain": f"{row}.test"} for row in rows]}
+            update["reviewed_current_version"] = len(update["reviewed_source_rows"])
+            update["overall_verified_count"] = len(update["overall_verified_rows"])
+            update["next_source_row"] = rows[-1] + 1
+            delta_text = ca.merge_next_head(view, update, text)
+            self.assertLess(ca.utf16_units(delta_text), ca.MAX_HEAD_UNITS)
+            plan = prepare_bounded(delta_text, run_id=f"generation-{generation}")
+            _, proof = append_and_verify(plan)
+            text = ca.compact_verified(plan, proof, delta_text, archive_dependencies=archives)
+            archives[proof.manifest_event_id] = proof
+            compact = json.loads(text)
+            sizes.append(ca.utf16_units(text)); refs.append(ca.utf16_units(ca.dumps(compact[ca.HISTORY_REF])))
+            self.assertEqual(set(compact["transactions"]), {"pending_b"})
+            self.assertEqual(compact["reviewed_source_rows"], [])
+            self.assertEqual(compact["calibration"]["selected_rows"], [900_000])
+        self.assertEqual(len(set(refs)), 1)
+        self.assertLess(max(sizes), 2500)
+        final = ca.history_read_view(text, archives, source_state_key="AUMS_CLEANSE_STATE").state
+        self.assertEqual(final["reviewed_current_version"], 4000)
+        self.assertEqual(len(final["reviewed_source_rows"]), 4000)
+        self.assertEqual(len(set(final["overall_verified_rows"])), 4000)
+        self.assertEqual(final["calibration"]["selected_rows"], [900_000] + list(range(1000, 5000)))
+        self.assertEqual(len(final["transactions"]), 101)
+        self.assertEqual(final["transactions"]["batch-0"]["rows"][0]["decision_id"], ca.sha256("1000"))
+        self.assertIsNone(final["remaining_unique_companies"])
+        missing = dict(archives); missing.pop(next(iter(missing)))
+        with self.assertRaisesRegex(ca.ArchiveError, "ARCHIVE_MISSING"):
+            ca.history_read_view(text, missing, source_state_key="AUMS_CLEANSE_STATE")
+
+
 if __name__ == "__main__":
     unittest.main()
