@@ -5,6 +5,7 @@ import json
 import os
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from models import Source
@@ -12,6 +13,67 @@ from safety import canonicalize_url
 
 SSOT = "営業リスト＿Factory/BPO"
 PERSISTENT_CONFIG_SHEET = "SalesOS_Goal_Config"
+_CONFIG_READ_ROWS = 10000  # Two columns per request; keep reads bounded.
+
+
+@dataclass(frozen=True)
+class _PersistentConfigSnapshot:
+    sheet_id: int
+    rows: tuple[tuple[int, tuple], ...]
+
+
+def _read_persistent_config(repo, *, allow_cache=False) -> _PersistentConfigSnapshot:
+    """Resolve the actual config sheet and read its full, current row bounds.
+
+    Normal lookups retain the repository's short cache lifetime. Upserts always
+    read fresh, including after an append whose response was lost.
+    """
+    ttl = float(getattr(repo, "_read_cache_ttl", 3.0)) if allow_cache else 0.0
+    cached = getattr(repo, "_single_sheet_config_snapshot", None)
+    if ttl > 0 and cached and time.monotonic() - cached[0] < ttl:
+        return cached[1]
+    metadata = repo.svc.spreadsheets().get(
+        spreadsheetId=repo.spreadsheet_id,
+        fields="sheets(properties(sheetId,title,sheetType,gridProperties(rowCount,columnCount)))",
+    ).execute()
+    matches = [
+        item.get("properties", {}) for item in metadata.get("sheets", [])
+        if item.get("properties", {}).get("title") == PERSISTENT_CONFIG_SHEET
+    ]
+    if len(matches) != 1:
+        raise RuntimeError("persistent_config_sheet_identity_unconfirmed")
+    properties = matches[0]
+    sheet_id = properties.get("sheetId")
+    grid = properties.get("gridProperties", {})
+    row_count, column_count = grid.get("rowCount"), grid.get("columnCount")
+    if (
+        type(sheet_id) is not int or sheet_id < 0
+        or properties.get("sheetType", "GRID") != "GRID"
+        or type(row_count) is not int or row_count < 1
+        or type(column_count) is not int or column_count < 2
+    ):
+        raise RuntimeError("persistent_config_grid_identity_unconfirmed")
+    rows = []
+    title = PERSISTENT_CONFIG_SHEET.replace("'", "''")
+    for start in range(1, row_count + 1, _CONFIG_READ_ROWS):
+        end = min(row_count, start + _CONFIG_READ_ROWS - 1)
+        values = repo.svc.spreadsheets().values().get(
+            spreadsheetId=repo.spreadsheet_id,
+            range=f"'{title}'!A{start}:B{end}",
+            valueRenderOption="FORMATTED_VALUE",
+        ).execute().get("values", [])
+        if start == 1:
+            header = values[0] if values else []
+            if [str(value or "").strip().casefold() for value in header[:2]] != ["key", "value"]:
+                raise RuntimeError("persistent_config_header_unconfirmed")
+        rows.extend(
+            (number, tuple(row))
+            for number, row in enumerate(values, start=start) if number > 1
+        )
+    snapshot = _PersistentConfigSnapshot(sheet_id, tuple(rows))
+    if ttl > 0:
+        repo._single_sheet_config_snapshot = (time.monotonic(), snapshot)
+    return snapshot
 
 
 def install(cls):
@@ -26,7 +88,7 @@ def install(cls):
     def _persistent_runtime_config(self):
         """Read durable runtime state from the existing goal-config tab."""
         try:
-            values = native_read(self, f"'{PERSISTENT_CONFIG_SHEET}'!A2:B1000")
+            snapshot = _read_persistent_config(self, allow_cache=True)
         except Exception as exc:
             print(
                 f"single-sheet-ssot:persistent-config-read-warning:{type(exc).__name__}:{exc}",
@@ -34,7 +96,7 @@ def install(cls):
             )
             return {}
         out = {}
-        for row in values or []:
+        for _, row in snapshot.rows:
             if len(row) < 2:
                 continue
             key = str(row[0] or "").strip()
@@ -45,45 +107,60 @@ def install(cls):
     def persist_runtime_config(self, values):
         """Upsert namespaced runtime state into an existing config tab."""
         values = {
-            str(k): str(v)
+            str(k).strip(): str(v)
             for k, v in dict(values or {}).items()
-            if str(k).startswith("LEAD_FACTORY_")
+            if str(k).strip().startswith("LEAD_FACTORY_")
         }
         if not values:
             return
-        rows = native_read(self, f"'{PERSISTENT_CONFIG_SHEET}'!A2:B1000")
-        positions = {
-            str(row[0]).strip(): index
-            for index, row in enumerate(rows or [], start=2)
-            if row and str(row[0] or "").strip()
-        }
-        updates = []
-        appends = []
-        for key, value in values.items():
-            if key in positions:
-                updates.append({
-                    "range": f"'{PERSISTENT_CONFIG_SHEET}'!B{positions[key]}",
-                    "values": [[value]],
-                })
-            else:
-                appends.append([key, value])
 
         def operation():
-            if updates:
-                self.svc.spreadsheets().values().batchUpdate(
-                    spreadsheetId=self.spreadsheet_id,
-                    body={"valueInputOption": "RAW", "data": updates},
-                ).execute()
+            # Rebuild positions inside the retryable operation. A committed
+            # append with a lost response becomes an existing-key update/no-op.
+            snapshot = _read_persistent_config(self)
+            positions = {
+                str(row[0]).strip(): (number, row)
+                for number, row in snapshot.rows
+                if row and str(row[0] or "").strip()
+            }
+            requests, appends = [], []
+            for key, value in values.items():
+                if key in positions:
+                    # Preserve the existing last-row-wins duplicate semantics.
+                    # Earlier copies and their neighboring notes stay intact.
+                    number, row = positions[key]
+                    if len(row) >= 2 and str(row[1] or "") == value:
+                        continue
+                    requests.append({"updateCells": {
+                        "range": {
+                            "sheetId": snapshot.sheet_id,
+                            "startRowIndex": number - 1, "endRowIndex": number,
+                            "startColumnIndex": 1, "endColumnIndex": 2,
+                        },
+                        "rows": [{"values": [{"userEnteredValue": {"stringValue": value}}]}],
+                        "fields": "userEnteredValue",
+                    }})
+                else:
+                    appends.append({"values": [
+                        {"userEnteredValue": {"stringValue": key}},
+                        {"userEnteredValue": {"stringValue": value}},
+                    ]})
             if appends:
-                self.svc.spreadsheets().values().append(
+                requests.append({"appendCells": {
+                    "sheetId": snapshot.sheet_id, "rows": appends,
+                    "fields": "userEnteredValue",
+                }})
+            if requests:
+                self.svc.spreadsheets().batchUpdate(
                     spreadsheetId=self.spreadsheet_id,
-                    range=f"'{PERSISTENT_CONFIG_SHEET}'!A:B",
-                    valueInputOption="RAW",
-                    insertDataOption="INSERT_ROWS",
-                    body={"values": appends},
+                    body={"requests": requests},
                 ).execute()
 
-        self._execute_write(operation)
+        self._single_sheet_config_snapshot = None
+        try:
+            self._execute_write(operation)
+        finally:
+            self._single_sheet_config_snapshot = None
 
     def _persistent_json_records(self, prefix):
         out = {}
