@@ -29,8 +29,13 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
       - run: pip install google-auth==2.36.0 google-api-python-client==2.154.0
+      - name: Verify canonical policy read access without customer actions
+        run: python form_policy_preflight.py --output form-policy-access.json
       - run: python workbook_sales.py --check --output workbook-preflight.json
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: workbook-readonly-summary
-          path: workbook-preflight.json
+          path: |
+            workbook-preflight.json
+            form-policy-access.json
