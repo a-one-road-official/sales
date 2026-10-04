@@ -1,7 +1,7 @@
 """No-network regression checks for the existing form persistence integration."""
 import ast
 import copy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import re
 import sys
@@ -24,6 +24,15 @@ class Call:
     def execute(self): return self.fn()
 
 
+class NativeHttpError(Exception):
+    """Google HttpError interface fixture; the duplicate message was observed live."""
+    def __init__(self, status, message, *, body_code=None, body_status='INVALID_ARGUMENT'):
+        super().__init__(message)
+        self.resp=types.SimpleNamespace(status=status)
+        self.content=json.dumps({'error':{'code':status if body_code is None else body_code,
+            'status':body_status,'message':message}}).encode()
+
+
 def col_number(text):
     n=0
     for char in text: n=n*26+ord(char)-64
@@ -44,6 +53,7 @@ class FakeSheets:
             'AI担当状態':131,'AI実行JSON':133}
         self.tabs={fp.SALES_TAB:(1,8987,151), fp.CONFIG_TAB:(2,12149,26),fp.EVENT_TAB:(3,2,26)}
         self.cells={}; self.named={};self.requests=[];self.deny_commit=False;self.ambiguous_commit=False
+        self.acquire_error=None;self.ambiguous_acquire=False;self.last_contention_error=None
         for key,col in self.headers.items():self.cells[1,1,col]=key
         for col,key in enumerate(EVENT_HEADERS,1):self.cells[3,1,col]=key
         config={'AUMS_MASTER_RUN_STATE':'START','CHATGPT_FORM_RUN_STATE':'START','FORM_EXECUTOR_RUN_STATE':'START',
@@ -96,11 +106,15 @@ class FakeSheets:
         self.requests.append(copy.deepcopy(requests))
         cells,named,tabs=copy.deepcopy(self.cells),copy.deepcopy(self.named),copy.deepcopy(self.tabs)
         is_commit=any('appendCells' in req for req in requests)
+        is_acquire=any('addNamedRange' in req for req in requests)
+        if is_acquire and self.acquire_error is not None:raise self.acquire_error
         if is_commit and self.deny_commit:raise ValueError('ORIGINAL_SAFETY_DENIAL')
         for req in requests:
             if 'addNamedRange' in req:
                 nr=req['addNamedRange']['namedRange']
-                if any(x['name']==nr['name'] for x in named.values()):raise ValueError('GUARD_CONTENTION')
+                if any(x['name']==nr['name'] for x in named.values()):
+                    self.last_contention_error=NativeHttpError(400,fp.GUARD_CONTENTION_MESSAGE)
+                    raise self.last_contention_error
                 named[nr['namedRangeId']]=copy.deepcopy(nr)
             elif 'updateNamedRange' in req:
                 nr=req['updateNamedRange']['namedRange']
@@ -121,6 +135,7 @@ class FakeSheets:
                 tabs[title]=(sid,last,width)
             else:raise AssertionError(req)
         self.cells,self.named,self.tabs=cells,named,tabs
+        if is_acquire and self.ambiguous_acquire:raise OSError('AMBIGUOUS_RESPONSE_AFTER_ACQUIRE')
         if is_commit and self.ambiguous_commit:raise OSError('AMBIGUOUS_RESPONSE_AFTER_COMMIT')
         return {'replies':[{} for _ in requests]}
 
@@ -128,12 +143,17 @@ class FakeSheets:
 class FormRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.svc=FakeSheets()
+        self.delays=[]
+        errors=types.ModuleType('googleapiclient.errors');errors.HttpError=NativeHttpError
+        package=types.ModuleType('googleapiclient');package.__path__=[]
+        self.http_modules=patch.dict(sys.modules,{'googleapiclient':package,'googleapiclient.errors':errors})
+        self.http_modules.start()
         self.runtime=fp.FormPersistence(self.svc,lambda:{'policy_version':'CURRENT'},
-            now=lambda:datetime(2026,10,4,12,20,tzinfo=timezone.utc))
+            now=lambda:datetime(2026,10,4,12,20,tzinfo=timezone.utc),sleep=self.delays.append)
         self.policy1=patch('lead_generator.policy.validate_receipt',return_value={'decision':'PASS','domain':'example.com'})
         self.policy2=patch('lead_generator.policy.policy_context',return_value={'policy':{'output':{'PASS':'AUMS適合｜返信後精査'}}})
         self.policy1.start();self.policy2.start()
-    def tearDown(self):self.policy1.stop();self.policy2.stop()
+    def tearDown(self):self.policy1.stop();self.policy2.stop();self.http_modules.stop()
     def test_new_master_row_is_discovered(self):
         controls,rows=fp.read_controls(self.svc)
         self.assertEqual(rows['AUMS_MASTER_RUN_STATE'],12149)
@@ -200,6 +220,100 @@ class FormRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(OSError,'AMBIGUOUS_RESPONSE'):self.runtime.begin(8972,self.runtime.row(8972))
         self.assertTrue(fp.execution_pending(self.svc.get_meta()))
         self.assertFalse(self.svc.named)
+        self.assertEqual(self.delays,[])
+        self.assertEqual(sum(any('appendCells' in r for r in batch) for batch in self.svc.requests),1)
+
+    def other_writer_guard(self):
+        guard={'name':'AONE_OUTBOUND_WRITE_GUARD','namedRangeId':'other-writer-token',
+            'range':self.runtime.layout.guard_range}
+        self.svc.named['other-writer-token']=copy.deepcopy(guard)
+        for key,value in (('OUTBOUND_PACING_LEASE_OWNER','legitimate-bounce-writer'),
+                          ('OUTBOUND_PACING_LEASE_TOKEN','other-writer-token'),
+                          ('OUTBOUND_PACING_LEASE_UNTIL','2026-10-04T12:22:00+00:00')):
+            self.svc.set_control(key,value)
+        return guard
+
+    def acquire_batches(self):
+        return [batch for batch in self.svc.requests if any('addNamedRange' in r for r in batch)]
+
+    def test_known_contention_waits_for_owner_then_commits_once(self):
+        other=self.other_writer_guard()
+        clock=[datetime(2026,10,4,12,20,tzinfo=timezone.utc)]
+        self.runtime.now=lambda:clock[0]
+        def release_during_wait(seconds):
+            self.delays.append(seconds);clock[0]+=timedelta(seconds=seconds)
+            self.assertEqual(self.svc.named,{'other-writer-token':other})
+            self.assertEqual(self.svc.cells[2,self.svc.config_rows['OUTBOUND_PACING_LEASE_OWNER'],2],
+                             'legitimate-bounce-writer')
+            if len(self.delays)==2:
+                # Simulate the legitimate writer's own completed release.
+                self.svc.named.clear()
+                for key in ('OUTBOUND_PACING_LEASE_OWNER','OUTBOUND_PACING_LEASE_TOKEN','OUTBOUND_PACING_LEASE_UNTIL'):
+                    self.svc.set_control(key,'')
+        self.runtime.sleep=release_during_wait
+        self.runtime.begin(8972,self.runtime.row(8972))
+        self.assertEqual(self.delays,[5,25])
+        batches=self.acquire_batches();self.assertEqual(len(batches),3)
+        tokens=[batch[0]['addNamedRange']['namedRange']['namedRangeId'] for batch in batches]
+        self.assertEqual(len(set(tokens)),3)
+        expiry=[next(r['updateCells']['rows'][0]['values'][0]['userEnteredValue']['stringValue']
+            for r in batch if 'updateCells' in r and r['updateCells']['range']['startRowIndex']
+            == self.svc.config_rows['OUTBOUND_PACING_LEASE_UNTIL']-1) for batch in batches]
+        self.assertEqual(expiry[-1],'2026-10-04T12:22:30+00:00')
+        self.assertEqual(sum(any('appendCells' in r for r in batch) for batch in self.svc.requests),1)
+        self.assertTrue(fp.execution_pending(self.svc.get_meta()));self.assertFalse(self.svc.named)
+
+    def test_persistent_contention_stops_after_three_without_touching_owner(self):
+        other=self.other_writer_guard();external=Mock()
+        with self.assertRaises(NativeHttpError) as raised:
+            self.runtime.begin(8972,self.runtime.row(8972))
+            external()
+        self.assertIs(raised.exception,self.svc.last_contention_error)
+        self.assertEqual(self.delays,[5,25]);self.assertEqual(len(self.acquire_batches()),3)
+        self.assertEqual(self.svc.named,{'other-writer-token':other})
+        self.assertEqual(self.svc.cells[2,self.svc.config_rows['OUTBOUND_PACING_LEASE_OWNER'],2],
+                         'legitimate-bounce-writer')
+        self.assertFalse(any('deleteNamedRange' in r or 'appendCells' in r
+            for batch in self.svc.requests for r in batch))
+        self.assertFalse(fp.execution_pending(self.svc.get_meta()));external.assert_not_called()
+
+    def test_stop_during_contention_wait_blocks_the_next_acquire(self):
+        other=self.other_writer_guard()
+        def stop_while_waiting(seconds):
+            self.delays.append(seconds);self.svc.set_control('AUMS_MASTER_RUN_STATE','STOP')
+        self.runtime.sleep=stop_while_waiting
+        with self.assertRaisesRegex(ValueError,'FORM_CONTROL_BLOCK'):
+            self.runtime.begin(8972,self.runtime.row(8972))
+        self.assertEqual(self.delays,[5]);self.assertEqual(len(self.acquire_batches()),1)
+        self.assertEqual(self.svc.named,{'other-writer-token':other})
+
+    def test_other_native_or_text_only_errors_are_not_retried(self):
+        errors=[NativeHttpError(403,fp.GUARD_CONTENTION_MESSAGE,body_status='PERMISSION_DENIED'),
+            NativeHttpError(400,'SAFETY_REVIEW_DENIED'),NativeHttpError(429,'Rate limit exceeded'),
+            NativeHttpError(500,'Provider internal error'),
+            NativeHttpError(400,fp.GUARD_CONTENTION_MESSAGE.replace('AONE_OUTBOUND_WRITE_GUARD','OTHER_GUARD')),
+            NativeHttpError(400,fp.GUARD_CONTENTION_MESSAGE,body_code=403),
+            NativeHttpError(400,fp.GUARD_CONTENTION_MESSAGE,body_status='PERMISSION_DENIED'),
+            ValueError('HTTP 400 INVALID_ARGUMENT: '+fp.GUARD_CONTENTION_MESSAGE),
+            TimeoutError('Acquire outcome unknown')]
+        for error in errors:
+            with self.subTest(error=str(error)):
+                self.svc.requests=[];self.delays.clear();self.svc.acquire_error=error
+                with self.assertRaises(type(error)) as raised:
+                    self.runtime.begin(8972,self.runtime.row(8972))
+                self.assertIs(raised.exception,error)
+                self.assertEqual(self.delays,[]);self.assertEqual(len(self.acquire_batches()),1)
+                self.assertFalse(fp.execution_pending(self.svc.get_meta()));self.assertFalse(self.svc.named)
+
+    def test_ambiguous_acquire_never_retries_or_clears_unknown_result(self):
+        self.svc.ambiguous_acquire=True
+        with self.assertRaisesRegex(OSError,'AMBIGUOUS_RESPONSE_AFTER_ACQUIRE'):
+            self.runtime.begin(8972,self.runtime.row(8972))
+        self.assertEqual(self.delays,[]);self.assertEqual(len(self.acquire_batches()),1)
+        self.assertEqual(len(self.svc.named),1)
+        self.assertFalse(any('deleteNamedRange' in r or 'appendCells' in r
+            for batch in self.svc.requests for r in batch))
+        self.assertFalse(fp.execution_pending(self.svc.get_meta()))
     def test_narrow_merge_retains_new_suppression_and_crm(self):
         merged=fp.merge_owned({'common_gate':{'new':True},'auto_outbound_blocked':True,'suppression_reason':'HUMAN_REPLY'},
             {'common_gate':{'old':True},'form_state':'FORM_FAILED','auto_outbound_blocked':False,'email_fallback_allowed':True})

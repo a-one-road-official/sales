@@ -9,6 +9,7 @@ import copy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+from time import sleep as sleep_seconds
 import uuid
 
 from sheets_persistence import (Layout, Lease, acquire_requests, cell_update,
@@ -29,6 +30,8 @@ TERMINAL_STATES = {"FORM_SENT", "FORM_UNCONFIRMED", "FORM_SUPPRESSED"}
 PRIOR_CONTACT_STATES = {"VALID_SENT", "DELIVERED_CONFIRMED", "SENT", "UNKNOWN",
     "FORM_SENT", "FORM_UNCONFIRMED", "SUBMIT_REQUESTED"}
 MANUAL_STATES = {"手動対応中", "手動完了", "HUMAN_REQUIRED"}
+GUARD_CONTENTION_MESSAGE = ("Invalid requests[0].addNamedRange: Cannot add named range with name "
+    "AONE_OUTBOUND_WRITE_GUARD, a named range with that name already exists.")
 BLOCKED_STATUSES = {"返信あり", "アポ確定", "商談化", "商談中", "商談実施", "提案",
     "提案済み", "受注", "合意・契約締結", "拒否", "NG", "配信停止", "DO_NOT_CONTACT",
     "手動対応中", "手動完了"}
@@ -36,6 +39,24 @@ BLOCKED_STATUSES = {"返信あり", "アポ確定", "商談化", "商談中", "�
 
 def utcnow():
     return datetime.now(timezone.utc)
+
+
+def known_guard_contention(error):
+    """Recognize only the observed native Sheets duplicate-guard rejection."""
+    try:
+        from googleapiclient.errors import HttpError
+    except ImportError:
+        return False
+    if not isinstance(error, HttpError) or getattr(getattr(error, "resp", None), "status", None) != 400:
+        return False
+    try:
+        payload = json.loads(error.content)
+        detail = payload["error"]
+        return (isinstance(detail, dict) and detail.get("code") == 400
+            and detail.get("status", "INVALID_ARGUMENT") == "INVALID_ARGUMENT"
+            and detail.get("message") == GUARD_CONTENTION_MESSAGE)
+    except (AttributeError, TypeError, ValueError, KeyError):
+        return False
 
 
 def column_label(number):
@@ -214,8 +235,8 @@ def execution_payload(number, row):
 
 
 class FormPersistence:
-    def __init__(self, svc, policy_loader, *, now=utcnow):
-        self.svc, self.policy_loader, self.now = svc, policy_loader, now
+    def __init__(self, svc, policy_loader, *, now=utcnow, sleep=sleep_seconds):
+        self.svc, self.policy_loader, self.now, self.sleep = svc, policy_loader, now, sleep
         self.tabs = discover(svc)
         controls, rows = read_controls(svc, self.tabs)
         self.initial_controls = controls
@@ -374,13 +395,29 @@ class FormPersistence:
         if self.existing_events(event["event_id"]):
             raise ValueError("FORM_EVENT_ALREADY_EXISTS_RECONCILE")
         event_tail_start = max(2, discover(self.svc)[EVENT_TAB]["gridProperties"]["rowCount"] - 5)
-        now = self.now()
-        lease = Lease(self.run_id, "form_guard_" + uuid.uuid4().hex, now, now + timedelta(seconds=120))
         acquired = False
         try:
-            self.svc.spreadsheets().batchUpdate(spreadsheetId=SSOT_ID,
-                body={"requests": acquire_requests(self.layout, lease, now)}).execute()
-            acquired = True
+            # Only an explicit native duplicate-name rejection proves this
+            # atomic acquire did not commit. Never steal/clear the active owner.
+            for attempt, delay in enumerate((0, 5, 25), 1):
+                if delay:
+                    self.sleep(delay)
+                if require_start:
+                    require_form_start(read_controls(self.svc)[0])
+                now = self.now()
+                lease = Lease(self.run_id, "form_guard_" + uuid.uuid4().hex, now, now + timedelta(seconds=120))
+                try:
+                    self.svc.spreadsheets().batchUpdate(spreadsheetId=SSOT_ID,
+                        body={"requests": acquire_requests(self.layout, lease, now)}).execute()
+                except Exception as error:
+                    if not known_guard_contention(error) or attempt == 3:
+                        raise
+                    print(json.dumps({"phase": "FORM_GUARD_CONTENTION_RETRY", "attempt": attempt,
+                        "next_delay_seconds": (5, 25)[attempt - 1], "original_error": str(error),
+                        "existing_owner_unchanged": True, "customer_action_retried": False}, ensure_ascii=False))
+                    continue
+                acquired = True
+                break
             if require_start:
                 require_form_start(read_controls(self.svc)[0])
             fresh = self.row(number)
