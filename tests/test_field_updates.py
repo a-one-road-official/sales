@@ -4,7 +4,8 @@ import unittest
 from unittest.mock import patch
 
 import sheets_persistence
-from field_updates import FieldUpdateError, build_field_updates, header_columns
+from field_updates import (FieldUpdateError, build_config_updates,
+                           build_field_updates, config_key_rows, header_columns)
 
 # Exact native row-1 labels read after Sigmatex row 8893's documented correction.
 # Message values below are local fixtures, not a qualification or send approval.
@@ -162,6 +163,182 @@ class FieldUpdateTests(unittest.TestCase):
 
     def test_empty_updates_make_no_requests(self):
         self.assertEqual(build({}, allowed=[]), [])
+
+
+CONFIG_SHEET_ID = 741233452
+# Exact native Config A11515:C11518 keys after event13751's correction.
+CONFIG_KEYS = ["OUTBOUND_WORKER_A_HEALTH", "OUTBOUND_WORKER_A_LAST_START_AT",
+               "OUTBOUND_WORKER_A_LAST_PROGRESS_AT", "OUTBOUND_WORKER_A_LAST_END_AT"]
+CONFIG_ROWS = dict(zip(CONFIG_KEYS, range(11515, 11519)))
+
+
+def config_grid(keys=CONFIG_KEYS, start_row=11514):
+    # The actual native read omits startColumn because it is zero.
+    return {"startRow": start_row, "rowData": [{"values": [
+        {"effectiveValue": {"stringValue": key}},
+        {"effectiveValue": {"stringValue": "EXISTING_VALUE"}},
+        {"effectiveValue": {"stringValue": "EXISTING_NOTE"}}]} for key in keys]}
+
+
+def config_build(updates, *, grids=None, expected=None, allowed=None):
+    return build_config_updates(
+        sheet_id=CONFIG_SHEET_ID,
+        native_config_grids=[config_grid()] if grids is None else grids,
+        expected_key_rows=CONFIG_ROWS if expected is None else expected,
+        updates=updates,
+        allowed_fields={key: ["value", "note"] for key in CONFIG_KEYS[1:]}
+        if allowed is None else allowed)
+
+
+class ConfigUpdateTests(unittest.TestCase):
+    def test_actual_checkpoint_rows_and_columns_are_exact(self):
+        updates = {key: {"value": "TIME_FIXTURE", "note": {"phase": phase}}
+                   for key, phase in zip(CONFIG_KEYS[1:], ["START", "PROGRESS", "END"])}
+        requests = config_build(updates)
+        self.assertEqual(len(requests), 6)
+        for request, (row, col) in zip(requests,
+                                      [(row, col) for row in range(11516, 11519)
+                                       for col in (2, 3)]):
+            update = request["updateCells"]
+            self.assertEqual(update["range"], {
+                "sheetId": CONFIG_SHEET_ID, "startRowIndex": row - 1,
+                "endRowIndex": row, "startColumnIndex": col - 1,
+                "endColumnIndex": col})
+            self.assertEqual(update["fields"], "userEnteredValue")
+            self.assertEqual(len(update["rows"]), 1)
+            self.assertEqual(len(update["rows"][0]["values"]), 1)
+
+    def test_original_builder_receives_one_based_config_coordinates(self):
+        with patch("field_updates.original_builder.cell_update",
+                   wraps=sheets_persistence.cell_update) as builder:
+            config_build({CONFIG_KEYS[1]: {"value": "START_FIXTURE"}})
+        builder.assert_called_once_with(CONFIG_SHEET_ID, 11516, 2, "START_FIXTURE")
+
+    def test_health_keys_and_unrequested_notes_stay_untouched(self):
+        before = {(row, col): {"stringValue": "PRESERVE_%s_%s" % (row, col)}
+                  for row in range(11515, 11519) for col in range(1, 4)}
+        after = deepcopy(before)
+        requests = config_build({CONFIG_KEYS[1]: {"value": "START_FIXTURE"},
+                                 CONFIG_KEYS[3]: {"value": "END_FIXTURE"}})
+        for request in requests:
+            update = request["updateCells"]
+            area = update["range"]
+            after[(area["startRowIndex"] + 1, area["startColumnIndex"] + 1)] = (
+                update["rows"][0]["values"][0]["userEnteredValue"])
+        changed = {cell for cell in before if before[cell] != after[cell]}
+        self.assertEqual(changed, {(11516, 2), (11518, 2)})
+
+    def test_each_key_and_field_requires_explicit_ownership(self):
+        cases = [({CONFIG_KEYS[0]: {"value": "PASS"}}, None),
+                 ({CONFIG_KEYS[1]: {"note": "x"}}, {CONFIG_KEYS[1]: ["value"]}),
+                 ({CONFIG_KEYS[1]: {"key": "x"}}, {CONFIG_KEYS[1]: ["value", "note"]}),
+                 ({CONFIG_KEYS[1]: {"A": "x"}}, {CONFIG_KEYS[1]: ["A"]})]
+        for updates, allowed in cases:
+            with self.subTest(updates=updates), self.assertRaises(FieldUpdateError):
+                config_build(updates, allowed=allowed)
+
+    def test_missing_and_duplicate_native_keys_fail(self):
+        key = CONFIG_KEYS[1]
+        with self.assertRaisesRegex(FieldUpdateError, "CONFIG_KEY_MISSING"):
+            config_build({key: {"value": "x"}}, grids=[config_grid(CONFIG_KEYS[:1])])
+        for grids in [[config_grid([key, key])],
+                      [config_grid([key]), config_grid([key], start_row=12000)]]:
+            with self.subTest(grids=len(grids)), self.assertRaisesRegex(
+                    FieldUpdateError, "DUPLICATE_CONFIG_KEY"):
+                config_build({key: {"value": "x"}}, grids=grids)
+
+    def test_stale_expected_key_location_fails_before_builder(self):
+        key = CONFIG_KEYS[1]
+        stale = dict(CONFIG_ROWS)
+        stale[key] = 11515  # The actual incident's zero-based row mistake.
+        with patch("field_updates.original_builder.cell_update") as builder:
+            with self.assertRaisesRegex(FieldUpdateError, "CONFIG_EXPECTED_KEY_CHANGED"):
+                config_build({key: {"value": "x"}}, expected=stale)
+        builder.assert_not_called()
+        moved = [config_grid(CONFIG_KEYS[1:], start_row=11516)]
+        with self.assertRaisesRegex(FieldUpdateError, "CONFIG_EXPECTED_KEY_CHANGED"):
+            config_build({key: {"value": "x"}}, grids=moved)
+
+    def test_native_offsets_are_used_and_column_a_is_required(self):
+        grid = config_grid(CONFIG_KEYS[1:], start_row=11515)
+        self.assertEqual(config_key_rows([grid])[CONFIG_KEYS[1]], 11516)
+        request = config_build({CONFIG_KEYS[1]: {"note": "x"}}, grids=[grid])[0]
+        self.assertEqual(request["updateCells"]["range"]["startRowIndex"], 11515)
+        grid["startColumn"] = 1
+        with self.assertRaisesRegex(FieldUpdateError, "CONFIG_COLUMN_A_REQUIRED"):
+            config_build({CONFIG_KEYS[1]: {"note": "x"}}, grids=[grid])
+
+    def test_config_literal_types_and_json_are_preserved(self):
+        values = [(False, {"boolValue": False}), (0, {"numberValue": 0}),
+                  (0.25, {"numberValue": 0.25}), ("=1+1", {"stringValue": "=1+1"}),
+                  ({"count": 0, "stopped": False},
+                   {"stringValue": '{"count":0,"stopped":false}'})]
+        for value, expected in values:
+            with self.subTest(value=value):
+                cell = config_build({CONFIG_KEYS[1]: {"value": value}})[0]["updateCells"]["rows"][0]["values"][0]
+                self.assertEqual(cell["userEnteredValue"], expected)
+
+    def test_explicit_note_clear_touches_only_c(self):
+        for value in (None, ""):
+            request = config_build({CONFIG_KEYS[3]: {"note": value}})[0]["updateCells"]
+            self.assertEqual(request["range"]["startColumnIndex"], 2)
+            self.assertEqual(request["range"]["endColumnIndex"], 3)
+            self.assertEqual(request["rows"], [{"values": [{}]}])
+
+    def test_key_aliases_indices_and_trimmed_guesses_are_not_accepted(self):
+        for key in [11516, "11516", "B11516", CONFIG_KEYS[1].lower(), CONFIG_KEYS[1] + " "]:
+            with self.subTest(key=key), self.assertRaises(FieldUpdateError):
+                config_build({key: {"value": "x"}})
+
+    def test_native_config_keys_must_be_typed_exact_strings(self):
+        invalid = [{"formattedValue": CONFIG_KEYS[1]},
+                   {"effectiveValue": {"numberValue": 11516}},
+                   {"effectiveValue": {"boolValue": True}},
+                   {"effectiveValue": {"stringValue": " "}},
+                   {"effectiveValue": {"stringValue": 11516}}]
+        for cell in invalid:
+            grid = config_grid()
+            grid["rowData"][1]["values"][0] = cell
+            with self.subTest(cell=cell), self.assertRaises(FieldUpdateError):
+                config_build({CONFIG_KEYS[1]: {"value": "x"}}, grids=[grid])
+
+    def test_invalid_shapes_and_expected_rows_fail(self):
+        for expected in [{}, {CONFIG_KEYS[1]: True}, {CONFIG_KEYS[1]: "11516"},
+                         {CONFIG_KEYS[1]: 1}]:
+            with self.subTest(expected=expected), self.assertRaises(FieldUpdateError):
+                config_build({CONFIG_KEYS[1]: {"value": "x"}}, expected=expected)
+        for grids in [{}, None, "A11515:C11518", [None], [{"rowData": {}}]]:
+            with self.subTest(grids=grids), self.assertRaises(FieldUpdateError):
+                config_key_rows(grids)
+        with self.assertRaises(FieldUpdateError):
+            config_build({CONFIG_KEYS[1]: "not-a-value-note-map"})
+        with self.assertRaises(FieldUpdateError):
+            config_build({CONFIG_KEYS[1]: {"value": "x"}}, allowed={CONFIG_KEYS[1]: "value"})
+
+    def test_all_config_values_validate_before_builder_calls(self):
+        for invalid in [float("nan"), {"n": float("inf")}, object()]:
+            with patch("field_updates.original_builder.cell_update") as builder:
+                with self.assertRaises(FieldUpdateError):
+                    config_build({CONFIG_KEYS[1]: {"value": "valid"},
+                                  CONFIG_KEYS[3]: {"note": invalid}})
+            builder.assert_not_called()
+
+    def test_config_inputs_are_not_mutated_and_empty_updates_are_empty(self):
+        grids, updates, expected = [config_grid()], {CONFIG_KEYS[1]: {"note": {"events": [1]}}}, dict(CONFIG_ROWS)
+        before = deepcopy((grids, updates, expected))
+        config_build(updates, grids=grids, expected=expected)
+        self.assertEqual((grids, updates, expected), before)
+        self.assertEqual(config_build({}), [])
+
+    def test_overlapping_native_blocks_fail(self):
+        with self.assertRaisesRegex(FieldUpdateError, "OVERLAPPING_CONFIG_ROWS"):
+            config_key_rows([config_grid(), config_grid(CONFIG_KEYS[1:], start_row=11515)])
+
+    def test_capture_exact_live_key_locations_with_native_blank_rows(self):
+        self.assertEqual(config_key_rows([config_grid()]), CONFIG_ROWS)
+        grid = config_grid([CONFIG_KEYS[1]], start_row=11515)
+        grid["rowData"].insert(0, {})
+        self.assertEqual(config_key_rows([grid]), {CONFIG_KEYS[1]: 11517})
 
 
 if __name__ == "__main__":
