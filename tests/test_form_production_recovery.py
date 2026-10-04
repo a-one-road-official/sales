@@ -144,16 +144,20 @@ class FormRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.svc=FakeSheets()
         self.delays=[]
+        self.clock=datetime(2026,10,4,12,20,tzinfo=timezone.utc)
+        self.elapsed=0.0
         errors=types.ModuleType('googleapiclient.errors');errors.HttpError=NativeHttpError
         package=types.ModuleType('googleapiclient');package.__path__=[]
         self.http_modules=patch.dict(sys.modules,{'googleapiclient':package,'googleapiclient.errors':errors})
         self.http_modules.start()
         self.runtime=fp.FormPersistence(self.svc,lambda:{'policy_version':'CURRENT'},
-            now=lambda:datetime(2026,10,4,12,20,tzinfo=timezone.utc),sleep=self.delays.append)
+            now=lambda:self.clock,sleep=self.advance,monotonic=lambda:self.elapsed)
         self.policy1=patch('lead_generator.policy.validate_receipt',return_value={'decision':'PASS','domain':'example.com'})
         self.policy2=patch('lead_generator.policy.policy_context',return_value={'policy':{'output':{'PASS':'AUMS適合｜返信後精査'}}})
         self.policy1.start();self.policy2.start()
     def tearDown(self):self.policy1.stop();self.policy2.stop();self.http_modules.stop()
+    def advance(self,seconds):
+        self.delays.append(seconds);self.clock+=timedelta(seconds=seconds);self.elapsed+=seconds
     def test_new_master_row_is_discovered(self):
         controls,rows=fp.read_controls(self.svc)
         self.assertEqual(rows['AUMS_MASTER_RUN_STATE'],12149)
@@ -229,7 +233,7 @@ class FormRecoveryTests(unittest.TestCase):
         self.svc.named['other-writer-token']=copy.deepcopy(guard)
         for key,value in (('OUTBOUND_PACING_LEASE_OWNER','legitimate-bounce-writer'),
                           ('OUTBOUND_PACING_LEASE_TOKEN','other-writer-token'),
-                          ('OUTBOUND_PACING_LEASE_UNTIL','2026-10-04T12:22:00+00:00')):
+                          ('OUTBOUND_PACING_LEASE_UNTIL','2026-10-04T12:24:00+00:00')):
             self.svc.set_control(key,value)
         return guard
 
@@ -238,38 +242,35 @@ class FormRecoveryTests(unittest.TestCase):
 
     def test_known_contention_waits_for_owner_then_commits_once(self):
         other=self.other_writer_guard()
-        clock=[datetime(2026,10,4,12,20,tzinfo=timezone.utc)]
-        self.runtime.now=lambda:clock[0]
         def release_during_wait(seconds):
-            self.delays.append(seconds);clock[0]+=timedelta(seconds=seconds)
+            self.advance(seconds)
             self.assertEqual(self.svc.named,{'other-writer-token':other})
             self.assertEqual(self.svc.cells[2,self.svc.config_rows['OUTBOUND_PACING_LEASE_OWNER'],2],
                              'legitimate-bounce-writer')
-            if len(self.delays)==2:
+            if len(self.delays)==3:
                 # Simulate the legitimate writer's own completed release.
                 self.svc.named.clear()
                 for key in ('OUTBOUND_PACING_LEASE_OWNER','OUTBOUND_PACING_LEASE_TOKEN','OUTBOUND_PACING_LEASE_UNTIL'):
                     self.svc.set_control(key,'')
         self.runtime.sleep=release_during_wait
         self.runtime.begin(8972,self.runtime.row(8972))
-        self.assertEqual(self.delays,[5,25])
-        batches=self.acquire_batches();self.assertEqual(len(batches),3)
+        self.assertEqual(self.delays,[30,30,30])
+        batches=self.acquire_batches();self.assertEqual(len(batches),1)
         tokens=[batch[0]['addNamedRange']['namedRange']['namedRangeId'] for batch in batches]
-        self.assertEqual(len(set(tokens)),3)
+        self.assertEqual(len(set(tokens)),1)
         expiry=[next(r['updateCells']['rows'][0]['values'][0]['userEnteredValue']['stringValue']
             for r in batch if 'updateCells' in r and r['updateCells']['range']['startRowIndex']
             == self.svc.config_rows['OUTBOUND_PACING_LEASE_UNTIL']-1) for batch in batches]
-        self.assertEqual(expiry[-1],'2026-10-04T12:22:30+00:00')
+        self.assertEqual(expiry[-1],'2026-10-04T12:23:30+00:00')
         self.assertEqual(sum(any('appendCells' in r for r in batch) for batch in self.svc.requests),1)
         self.assertTrue(fp.execution_pending(self.svc.get_meta()));self.assertFalse(self.svc.named)
 
-    def test_persistent_contention_stops_after_three_without_touching_owner(self):
+    def test_persistent_active_guard_defers_at180_without_burning_acquires(self):
         other=self.other_writer_guard();external=Mock()
-        with self.assertRaises(NativeHttpError) as raised:
+        with self.assertRaisesRegex(ValueError,'guard_wait_budget_exhausted'):
             self.runtime.begin(8972,self.runtime.row(8972))
             external()
-        self.assertIs(raised.exception,self.svc.last_contention_error)
-        self.assertEqual(self.delays,[5,25]);self.assertEqual(len(self.acquire_batches()),3)
+        self.assertEqual(self.delays,[30]*6);self.assertEqual(len(self.acquire_batches()),0)
         self.assertEqual(self.svc.named,{'other-writer-token':other})
         self.assertEqual(self.svc.cells[2,self.svc.config_rows['OUTBOUND_PACING_LEASE_OWNER'],2],
                          'legitimate-bounce-writer')
@@ -280,12 +281,88 @@ class FormRecoveryTests(unittest.TestCase):
     def test_stop_during_contention_wait_blocks_the_next_acquire(self):
         other=self.other_writer_guard()
         def stop_while_waiting(seconds):
-            self.delays.append(seconds);self.svc.set_control('AUMS_MASTER_RUN_STATE','STOP')
+            self.advance(seconds);self.svc.set_control('AUMS_MASTER_RUN_STATE','STOP')
         self.runtime.sleep=stop_while_waiting
         with self.assertRaisesRegex(ValueError,'FORM_CONTROL_BLOCK'):
             self.runtime.begin(8972,self.runtime.row(8972))
-        self.assertEqual(self.delays,[5]);self.assertEqual(len(self.acquire_batches()),1)
+        self.assertEqual(self.delays,[30]);self.assertEqual(len(self.acquire_batches()),0)
         self.assertEqual(self.svc.named,{'other-writer-token':other})
+
+    def test_native_race_rejection_waits_for_release_then_uses_second_acquire(self):
+        original=self.svc.apply; raced=[False]
+        def race_once(requests):
+            if any('addNamedRange' in request for request in requests) and not raced[0]:
+                raced[0]=True;self.other_writer_guard()
+            return original(requests)
+        self.svc.apply=race_once
+        def release_during_wait(seconds):
+            self.advance(seconds)
+            if self.elapsed>=90:
+                self.svc.named.clear()
+                for key in ('OUTBOUND_PACING_LEASE_OWNER','OUTBOUND_PACING_LEASE_TOKEN','OUTBOUND_PACING_LEASE_UNTIL'):
+                    self.svc.set_control(key,'')
+        self.runtime.sleep=release_during_wait
+        self.runtime.begin(8972,self.runtime.row(8972))
+        self.assertEqual(self.delays,[30,30,30]);self.assertEqual(len(self.acquire_batches()),2)
+        tokens=[batch[0]['addNamedRange']['namedRange']['namedRangeId'] for batch in self.acquire_batches()]
+        self.assertEqual(len(set(tokens)),2);self.assertTrue(fp.execution_pending(self.svc.get_meta()))
+
+    def test_repeated_exact_native_races_never_exceed_three_acquires(self):
+        error=NativeHttpError(400,fp.GUARD_CONTENTION_MESSAGE);self.svc.acquire_error=error
+        with self.assertRaises(NativeHttpError) as raised:self.runtime.begin(8972,self.runtime.row(8972))
+        self.assertIs(raised.exception,error)
+        self.assertEqual(len(self.acquire_batches()),3);self.assertEqual(self.delays,[])
+        self.assertFalse(fp.execution_pending(self.svc.get_meta()))
+
+    def test_remaining_invocation_budget_clips_wait(self):
+        self.other_writer_guard();self.runtime.remaining_budget_seconds=lambda:max(0,45-self.elapsed)
+        with self.assertRaisesRegex(ValueError,'guard_wait_budget_exhausted'):
+            self.runtime.begin(8972,self.runtime.row(8972))
+        self.assertEqual(self.delays,[30,15]);self.assertEqual(len(self.acquire_batches()),0)
+
+    def test_terminal_owned_result_waits_and_persists_under_stop(self):
+        self.runtime.begin(8972,self.runtime.row(8972))
+        row=self.runtime.row(8972);self.other_writer_guard()
+        self.svc.set_control('AUMS_MASTER_RUN_STATE','STOP')
+        self.svc.set_control('OUTBOUND_RECONCILE_HEALTH','ERROR:OBSERVED_AFTER_ACTION')
+        def release(seconds):
+            self.advance(seconds);self.svc.named.clear()
+            for key in ('OUTBOUND_PACING_LEASE_OWNER','OUTBOUND_PACING_LEASE_TOKEN','OUTBOUND_PACING_LEASE_UNTIL'):
+                self.svc.set_control(key,'')
+        self.runtime.sleep=release
+        event=self.runtime.event(8972,row,'FORM_UNCONFIRMED','Owned terminal durability',{},'c-1')
+        self.runtime.commit(8972,row,{'form_state':'FORM_UNCONFIRMED'},event,require_start=False)
+        self.assertEqual(self.delays,[30]);self.assertEqual(self.svc.get_meta()['form_state'],'FORM_UNCONFIRMED')
+        self.assertTrue(fp.execution_pending(self.svc.get_meta()));self.assertFalse(self.svc.named)
+
+    def test_unknown_guard_or_moved_lease_layout_never_acquires(self):
+        self.svc.set_control('OUTBOUND_PACING_LEASE_OWNER','orphan-owner')
+        with self.assertRaisesRegex(ValueError,'guard_absent_but_lease_not_clear'):
+            self.runtime.begin(8972,self.runtime.row(8972))
+        self.assertEqual(len(self.acquire_batches()),0);self.assertEqual(self.delays,[])
+        self.svc.set_control('OUTBOUND_PACING_LEASE_OWNER','')
+        old=self.svc.config_rows['OUTBOUND_PACING_LEASE_OWNER']
+        self.svc.cells[2,old,1]='';self.svc.cells[2,12000,1]='OUTBOUND_PACING_LEASE_OWNER'
+        with self.assertRaisesRegex(ValueError,'FORM_GUARD_CONTROL_LAYOUT_CHANGED'):
+            self.runtime.begin(8972,self.runtime.row(8972))
+        self.assertEqual(len(self.acquire_batches()),0)
+
+    def test_guard_observation_preserves_literal_owner_and_rejects_nonstring_lease(self):
+        self.other_writer_guard()
+        observed=self.runtime.guard_observation(require_start=True)
+        self.assertEqual(observed.lease_values['owner'],'legitimate-bounce-writer')
+        def change_literal(seconds):
+            self.advance(seconds)
+            self.svc.set_control('OUTBOUND_PACING_LEASE_OWNER',' legitimate-bounce-writer ')
+        self.runtime.sleep=change_literal
+        with self.assertRaisesRegex(ValueError,'guard_owner_or_immutable_expiry_changed'):
+            self.runtime.begin(8972,self.runtime.row(8972))
+        self.assertEqual(len(self.acquire_batches()),0)
+        self.svc.set_control('OUTBOUND_PACING_LEASE_OWNER','legitimate-bounce-writer')
+        self.svc.set_control('OUTBOUND_PACING_LEASE_UNTIL',12345)
+        with self.assertRaisesRegex(ValueError,'incomplete_lease_evidence'):
+            self.runtime.begin(8972,self.runtime.row(8972))
+        self.assertEqual(len(self.acquire_batches()),0)
 
     def test_other_native_or_text_only_errors_are_not_retried(self):
         errors=[NativeHttpError(403,fp.GUARD_CONTENTION_MESSAGE,body_status='PERMISSION_DENIED'),

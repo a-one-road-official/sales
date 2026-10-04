@@ -6,9 +6,10 @@ read back exact event identities. It never routes a denied call elsewhere.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import json
+import math
 from typing import Any, Iterable, Mapping, Sequence
 
 
@@ -16,6 +17,11 @@ GUARD_NAME = "AONE_OUTBOUND_WRITE_GUARD"
 PROTOCOL = "SHEETS_GUARD_V3"
 MAX_LEASE_SECONDS = 300
 MASTER_CONTROL_KEY = "AUMS_MASTER_RUN_STATE"
+GUARD_CONTENTION_MESSAGE = ("Invalid requests[0].addNamedRange: Cannot add named range with name "
+    "AONE_OUTBOUND_WRITE_GUARD, a named range with that name already exists.")
+MAX_GUARD_WAIT_SECONDS = 180
+MAX_GUARD_POLL_SECONDS = 30
+MAX_GUARD_ACQUIRE_ATTEMPTS = 3
 
 
 class PersistenceError(ValueError):
@@ -132,6 +138,240 @@ class Lease:
         now = _aware(now)
         if now < _aware(self.acquired_at) or now >= _aware(self.expires_at):
             raise PersistenceError("lease_not_active")
+
+
+@dataclass(frozen=True)
+class GuardOwner:
+    owner: str
+    token: str
+    until: str
+
+
+@dataclass(frozen=True)
+class GuardObservation:
+    """Native metadata must bracket the matching lease/control value read."""
+    named_ranges_before: Sequence[Mapping[str, Any]]
+    named_ranges_after: Sequence[Mapping[str, Any]]
+    lease_values: Mapping[str, str]
+    control: Mapping[str, Any]
+    protocol: str
+
+
+@dataclass(frozen=True)
+class GuardWaitState:
+    """One bounded episode; carry this state across native MCP calls unchanged."""
+    started_at: datetime
+    budget_seconds: float = MAX_GUARD_WAIT_SECONDS
+    acquire_attempts: int = 0
+    elapsed_seconds: float = 0
+    phase: str = "OBSERVE"
+    owners: tuple[GuardOwner, ...] = ()
+
+    def __post_init__(self):
+        _aware(self.started_at)
+        if (not math.isfinite(self.budget_seconds) or not 0 <= self.budget_seconds <= MAX_GUARD_WAIT_SECONDS
+                or not math.isfinite(self.elapsed_seconds) or self.elapsed_seconds < 0
+                or type(self.acquire_attempts) is not int or not 0 <= self.acquire_attempts <= MAX_GUARD_ACQUIRE_ATTEMPTS
+                or self.phase not in {"OBSERVE", "ACQUIRE_OUTCOME_PENDING"}):
+            raise PersistenceError("invalid_guard_wait_state")
+
+    def to_dict(self):
+        return {"started_at": _aware(self.started_at).isoformat(), "budget_seconds": self.budget_seconds,
+            "acquire_attempts": self.acquire_attempts, "elapsed_seconds": self.elapsed_seconds,
+            "phase": self.phase, "owners": [dict(owner=owner.owner, token=owner.token, until=owner.until)
+                                            for owner in self.owners]}
+
+    @classmethod
+    def from_dict(cls, value):
+        try:
+            if set(value) != {"started_at", "budget_seconds", "acquire_attempts", "elapsed_seconds", "phase", "owners"}:
+                raise PersistenceError("invalid_guard_wait_state_fields")
+            return cls(_aware(value["started_at"]), value["budget_seconds"], value["acquire_attempts"],
+                value["elapsed_seconds"], value["phase"], tuple(GuardOwner(**owner) for owner in value["owners"]))
+        except (TypeError, AttributeError, KeyError, ValueError) as exc:
+            raise PersistenceError("invalid_serialized_guard_wait_state") from exc
+
+
+@dataclass(frozen=True)
+class GuardWaitDecision:
+    action: str
+    state: GuardWaitState
+    reason: str
+    delay_seconds: float = 0
+    owner: GuardOwner | None = None
+
+    def to_dict(self):
+        return {"action": self.action, "state": self.state.to_dict(), "reason": self.reason,
+            "delay_seconds": self.delay_seconds,
+            "owner": dict(owner=self.owner.owner, token=self.owner.token, until=self.owner.until) if self.owner else None}
+
+
+@dataclass(frozen=True)
+class GuardAcquireRejection:
+    """Populate only from an actual structured native acquisition response."""
+    http_status: int
+    error_code: int
+    status: str
+    message: str
+
+    def is_exact_contention(self):
+        return (self.http_status == 400 and self.error_code == 400
+            and self.status == "INVALID_ARGUMENT" and self.message == GUARD_CONTENTION_MESSAGE)
+
+
+class GuardWaitDeferred(PersistenceError):
+    def __init__(self, decision):
+        self.decision = decision
+        super().__init__(decision.reason + ":" + json.dumps({
+            "elapsed_seconds": decision.state.elapsed_seconds,
+            "acquire_attempts": decision.state.acquire_attempts,
+            "owner": decision.owner.owner if decision.owner else None,
+            "token": decision.owner.token if decision.owner else None,
+            "until": decision.owner.until if decision.owner else None}, sort_keys=True))
+
+
+def _observed_guard_owner(layout, observation):
+    if not isinstance(observation, GuardObservation) or observation.protocol != PROTOCOL:
+        raise PersistenceError("unknown_guard_observation_protocol")
+    def matching(values):
+        if not isinstance(values, (list, tuple)) or any(not isinstance(value, Mapping) for value in values):
+            raise PersistenceError("invalid_native_guard_metadata")
+        return [dict(value) for value in values if value.get("name") == GUARD_NAME]
+    before, after = matching(observation.named_ranges_before), matching(observation.named_ranges_after)
+    if before != after:
+        raise PersistenceError("guard_changed_during_observation")
+    if len(after) > 1:
+        raise PersistenceError("duplicate_native_guard_metadata")
+    values = observation.lease_values
+    if not isinstance(values, Mapping) or any(key not in values or not isinstance(values[key], str)
+                                            for key in ("owner", "token", "until")):
+        raise PersistenceError("incomplete_lease_evidence")
+    if not after:
+        if any(values[key] != "" for key in ("owner", "token", "until")):
+            raise PersistenceError("guard_absent_but_lease_not_clear")
+        return None
+    guard = after[0]
+    if (not all(values[key].strip() for key in ("owner", "token", "until"))
+            or guard.get("namedRangeId") != values["token"] or guard.get("range") != layout.guard_range):
+        raise PersistenceError("native_guard_and_lease_mismatch")
+    try:
+        _aware(values["until"])
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise PersistenceError("invalid_guard_expiry") from exc
+    return GuardOwner(values["owner"], values["token"], values["until"])
+
+
+def decide_release_wait(layout, state, observation, now, *, elapsed_seconds=None,
+                        remaining_budget_seconds=None, require_start=True):
+    """Pure WAIT/ACQUIRE/DEFER decision for SDK and native MCP callers.
+
+    Use actual elapsed time (monotonic in SDK clients, UTC difference otherwise).
+    Polling does not consume acquisitions. An ACQUIRE decision reserves one
+    attempt and enters outcome-pending: only an exact native duplicate rejection
+    can reopen it. A timeout/denial/unknown outcome is never retry authority.
+    Expiry alone never produces ACQUIRE; native absence plus clear lease cells do.
+    """
+    if not isinstance(state, GuardWaitState):
+        raise PersistenceError("invalid_guard_wait_state")
+    elapsed = ((_aware(now) - _aware(state.started_at)).total_seconds()
+               if elapsed_seconds is None else elapsed_seconds)
+    if not isinstance(elapsed, (int, float)) or not math.isfinite(elapsed) or elapsed < state.elapsed_seconds:
+        return GuardWaitDecision("DEFER", state, "guard_wait_clock_invalid")
+    budget = state.budget_seconds
+    if remaining_budget_seconds is not None:
+        if (not isinstance(remaining_budget_seconds, (int, float)) or not math.isfinite(remaining_budget_seconds)
+                or remaining_budget_seconds < 0):
+            return GuardWaitDecision("DEFER", state, "guard_wait_budget_invalid")
+        budget = min(budget, elapsed + remaining_budget_seconds)
+    state = replace(state, elapsed_seconds=elapsed, budget_seconds=budget)
+    last_owner = state.owners[-1] if state.owners else None
+    if state.phase != "OBSERVE":
+        return GuardWaitDecision("DEFER", state, "guard_acquire_outcome_unresolved", owner=last_owner)
+    if require_start:
+        try:
+            require_running(observation.control)
+        except (AttributeError, PersistenceError) as exc:
+            return GuardWaitDecision("DEFER", state, str(exc), owner=last_owner)
+    if state.acquire_attempts >= MAX_GUARD_ACQUIRE_ATTEMPTS:
+        return GuardWaitDecision("DEFER", state, "guard_acquire_attempts_exhausted", owner=last_owner)
+    remaining = budget - elapsed
+    if remaining <= 0:
+        return GuardWaitDecision("DEFER", state, "guard_wait_budget_exhausted", owner=last_owner)
+    try:
+        owner = _observed_guard_owner(layout, observation)
+    except PersistenceError as exc:
+        return GuardWaitDecision("DEFER", state, str(exc), owner=last_owner)
+    if owner is None:
+        return GuardWaitDecision("ACQUIRE", replace(state, acquire_attempts=state.acquire_attempts + 1,
+            phase="ACQUIRE_OUTCOME_PENDING"), "native_guard_absent_and_lease_clear")
+    previous = next((known for known in state.owners if known.token == owner.token), None)
+    if previous is not None and previous != owner:
+        return GuardWaitDecision("DEFER", state, "guard_owner_or_immutable_expiry_changed", owner=owner)
+    if previous is None:
+        state = replace(state, owners=(*state.owners, owner))
+    reason = "known_guard_still_present" if _aware(owner.until) > _aware(now) else "expired_guard_still_present_no_cleanup_authority"
+    return GuardWaitDecision("WAIT", state, reason,
+                             min(MAX_GUARD_POLL_SECONDS, remaining), owner)
+
+
+def retry_after_guard_rejection(state, rejection):
+    """Reopen a reserved attempt only from the exact native no-commit rejection."""
+    if (not isinstance(state, GuardWaitState) or state.phase != "ACQUIRE_OUTCOME_PENDING"
+            or not isinstance(rejection, GuardAcquireRejection) or not rejection.is_exact_contention()):
+        raise PersistenceError("guard_acquire_rejection_not_retry_authority")
+    return replace(state, phase="OBSERVE")
+
+
+def acquire_with_release_wait(layout, *, observe, make_lease, acquire, rejection_from_error,
+                              now, monotonic, sleep, require_start=True,
+                              remaining_budget_seconds=None, on_wait=None):
+    """Orchestrate the same pure planner using existing caller-owned clients.
+
+    No client/backend is created. ``observe`` supplies actual bracketed native
+    reads; ``acquire`` executes one atomic attempt. All callbacks, including the
+    clock/sleep, are explicit for deterministic tests. The 180-second deadline
+    includes observation latency and never resets across owners or rejections.
+    """
+    start = monotonic()
+    state = GuardWaitState(now())
+    last_error = None
+    while True:
+        # Do not start another read after this episode's existing budget/attempt
+        # limit. A slow in-flight read is accounted for again by the pure step.
+        elapsed = monotonic() - start
+        if state.acquire_attempts >= MAX_GUARD_ACQUIRE_ATTEMPTS or elapsed >= state.budget_seconds:
+            reason = "guard_acquire_attempts_exhausted" if state.acquire_attempts >= MAX_GUARD_ACQUIRE_ATTEMPTS else "guard_wait_budget_exhausted"
+            decision = GuardWaitDecision("DEFER", replace(state, elapsed_seconds=elapsed), reason,
+                owner=state.owners[-1] if state.owners else None)
+            if last_error is not None:
+                raise last_error
+            raise GuardWaitDeferred(decision)
+        observation = observe()
+        remaining = remaining_budget_seconds() if remaining_budget_seconds else None
+        decision = decide_release_wait(layout, state, observation, now(),
+            elapsed_seconds=monotonic() - start, remaining_budget_seconds=remaining,
+            require_start=require_start)
+        state = decision.state
+        if decision.action == "DEFER":
+            if last_error is not None and decision.reason in {"guard_wait_budget_exhausted", "guard_acquire_attempts_exhausted"}:
+                raise last_error
+            raise GuardWaitDeferred(decision)
+        if decision.action == "WAIT":
+            if on_wait:
+                on_wait(decision)
+            sleep(decision.delay_seconds)
+            continue
+        moment = now()
+        lease = make_lease(moment)
+        try:
+            acquire(lease, moment)
+            return lease
+        except Exception as error:
+            rejection = rejection_from_error(error)
+            if not isinstance(rejection, GuardAcquireRejection) or not rejection.is_exact_contention():
+                raise
+            last_error = error
+            state = retry_after_guard_rejection(state, rejection)
 
 
 def _fence(layout: Layout, token: str) -> dict:

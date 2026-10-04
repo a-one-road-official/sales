@@ -9,11 +9,13 @@ import copy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-from time import sleep as sleep_seconds
+from time import sleep as sleep_seconds, monotonic as monotonic_seconds
 import uuid
 
 from sheets_persistence import (Layout, Lease, acquire_requests, cell_update,
-    commit_and_release_requests, release_requests, verify_event_readback)
+    commit_and_release_requests, release_requests, verify_event_readback,
+    GuardObservation, GuardAcquireRejection, GUARD_CONTENTION_MESSAGE, PROTOCOL,
+    acquire_with_release_wait, master_control)
 
 SSOT_ID = "1SSg8qB_N1wUESnAyCwTaEB5hgvS6jDJB8Bh2ryoO9mo"
 SALES_TAB = "営業リスト＿Factory/BPO"
@@ -30,8 +32,6 @@ TERMINAL_STATES = {"FORM_SENT", "FORM_UNCONFIRMED", "FORM_SUPPRESSED"}
 PRIOR_CONTACT_STATES = {"VALID_SENT", "DELIVERED_CONFIRMED", "SENT", "UNKNOWN",
     "FORM_SENT", "FORM_UNCONFIRMED", "SUBMIT_REQUESTED"}
 MANUAL_STATES = {"手動対応中", "手動完了", "HUMAN_REQUIRED"}
-GUARD_CONTENTION_MESSAGE = ("Invalid requests[0].addNamedRange: Cannot add named range with name "
-    "AONE_OUTBOUND_WRITE_GUARD, a named range with that name already exists.")
 BLOCKED_STATUSES = {"返信あり", "アポ確定", "商談化", "商談中", "商談実施", "提案",
     "提案済み", "受注", "合意・契約締結", "拒否", "NG", "配信停止", "DO_NOT_CONTACT",
     "手動対応中", "手動完了"}
@@ -41,22 +41,28 @@ def utcnow():
     return datetime.now(timezone.utc)
 
 
-def known_guard_contention(error):
-    """Recognize only the observed native Sheets duplicate-guard rejection."""
+def native_guard_rejection(error):
+    """Return retry proof only for the exact real native HttpError rejection."""
     try:
         from googleapiclient.errors import HttpError
     except ImportError:
-        return False
+        return None
     if not isinstance(error, HttpError) or getattr(getattr(error, "resp", None), "status", None) != 400:
-        return False
+        return None
     try:
         payload = json.loads(error.content)
         detail = payload["error"]
-        return (isinstance(detail, dict) and detail.get("code") == 400
-            and detail.get("status", "INVALID_ARGUMENT") == "INVALID_ARGUMENT"
-            and detail.get("message") == GUARD_CONTENTION_MESSAGE)
+        if not isinstance(detail, dict):
+            return None
+        rejection = GuardAcquireRejection(error.resp.status, detail.get("code"),
+            detail.get("status", "INVALID_ARGUMENT"), detail.get("message"))
+        return rejection if rejection.is_exact_contention() else None
     except (AttributeError, TypeError, ValueError, KeyError):
-        return False
+        return None
+
+
+def known_guard_contention(error):
+    return native_guard_rejection(error) is not None
 
 
 def column_label(number):
@@ -91,7 +97,7 @@ def discover(svc):
     return tabs
 
 
-def read_controls(svc, tabs=None):
+def read_controls(svc, tabs=None, *, preserve_lease_literals=False):
     tabs = tabs or discover(svc)
     end = tabs[CONFIG_TAB]["gridProperties"]["rowCount"]
     values = svc.spreadsheets().values().get(spreadsheetId=SSOT_ID,
@@ -114,7 +120,10 @@ def read_controls(svc, tabs=None):
     controls = {}
     for key, block in zip(keys, result):
         val = block.get("values", [[]])
-        controls[key] = str(val[0][0] if val and val[0] else "").strip()
+        literal = val[0][0] if val and val[0] else ""
+        controls[key] = literal if preserve_lease_literals and key in {
+            "OUTBOUND_PACING_LEASE_OWNER", "OUTBOUND_PACING_LEASE_TOKEN", "OUTBOUND_PACING_LEASE_UNTIL"
+        } else str(literal).strip()
     return controls, rows
 
 
@@ -235,8 +244,13 @@ def execution_payload(number, row):
 
 
 class FormPersistence:
-    def __init__(self, svc, policy_loader, *, now=utcnow, sleep=sleep_seconds):
+    def __init__(self, svc, policy_loader, *, now=utcnow, sleep=sleep_seconds,
+                 monotonic=monotonic_seconds, remaining_budget_seconds=None):
         self.svc, self.policy_loader, self.now, self.sleep = svc, policy_loader, now, sleep
+        self.monotonic = monotonic
+        # Caller may reserve finalization/readback time in its remaining budget.
+        # The default cap is per acquisition episode, not a job-wide result ban.
+        self.remaining_budget_seconds = remaining_budget_seconds
         self.tabs = discover(svc)
         controls, rows = read_controls(svc, self.tabs)
         self.initial_controls = controls
@@ -263,6 +277,26 @@ class FormPersistence:
     def values(self, a1):
         return self.svc.spreadsheets().values().get(spreadsheetId=SSOT_ID, range=a1,
             valueRenderOption="UNFORMATTED_VALUE").execute().get("values", [])
+
+    def guard_observation(self, *, require_start=False):
+        before = self.svc.spreadsheets().get(spreadsheetId=SSOT_ID, fields="namedRanges").execute()
+        controls, rows = read_controls(self.svc, preserve_lease_literals=True)
+        after = self.svc.spreadsheets().get(spreadsheetId=SSOT_ID, fields="namedRanges").execute()
+        if not isinstance(before, dict) or not isinstance(after, dict):
+            raise ValueError("FORM_GUARD_METADATA_READ_INVALID")
+        expected = {"OUTBOUND_PACING_LEASE_OWNER": self.layout.owner_row,
+            "OUTBOUND_PACING_LEASE_TOKEN": self.layout.token_row,
+            "OUTBOUND_PACING_LEASE_UNTIL": self.layout.until_row}
+        if any(rows.get(key) != number for key, number in expected.items()):
+            raise ValueError("FORM_GUARD_CONTROL_LAYOUT_CHANGED")
+        if require_start:
+            require_form_start(controls)
+        return GuardObservation(before.get("namedRanges", []), after.get("namedRanges", []),
+            {"owner": controls["OUTBOUND_PACING_LEASE_OWNER"],
+             "token": controls["OUTBOUND_PACING_LEASE_TOKEN"],
+             "until": controls["OUTBOUND_PACING_LEASE_UNTIL"]},
+            master_control([["AUMS_MASTER_RUN_STATE", controls.get("AUMS_MASTER_RUN_STATE", "")]]),
+            PROTOCOL)
 
     def row(self, number):
         data = self.values(f"'{SALES_TAB}'!A{number}:{column_label(max(self.header.values()))}{number}")
@@ -397,27 +431,26 @@ class FormPersistence:
         event_tail_start = max(2, discover(self.svc)[EVENT_TAB]["gridProperties"]["rowCount"] - 5)
         acquired = False
         try:
-            # Only an explicit native duplicate-name rejection proves this
-            # atomic acquire did not commit. Never steal/clear the active owner.
-            for attempt, delay in enumerate((0, 5, 25), 1):
-                if delay:
-                    self.sleep(delay)
-                if require_start:
-                    require_form_start(read_controls(self.svc)[0])
-                now = self.now()
-                lease = Lease(self.run_id, "form_guard_" + uuid.uuid4().hex, now, now + timedelta(seconds=120))
-                try:
-                    self.svc.spreadsheets().batchUpdate(spreadsheetId=SSOT_ID,
-                        body={"requests": acquire_requests(self.layout, lease, now)}).execute()
-                except Exception as error:
-                    if not known_guard_contention(error) or attempt == 3:
-                        raise
-                    print(json.dumps({"phase": "FORM_GUARD_CONTENTION_RETRY", "attempt": attempt,
-                        "next_delay_seconds": (5, 25)[attempt - 1], "original_error": str(error),
-                        "existing_owner_unchanged": True, "customer_action_retried": False}, ensure_ascii=False))
-                    continue
-                acquired = True
-                break
+            # Known native owners can be observed before the first acquire.
+            # Polling does not burn attempts; ambiguous mutations never retry.
+            def waited(decision):
+                print(json.dumps({"phase": "FORM_GUARD_RELEASE_WAIT",
+                    "acquire_attempts": decision.state.acquire_attempts,
+                    "elapsed_seconds": decision.state.elapsed_seconds,
+                    "next_poll_seconds": decision.delay_seconds, "reason": decision.reason,
+                    "owner": decision.owner.owner, "token": decision.owner.token,
+                    "immutable_until": decision.owner.until,
+                    "existing_owner_unchanged": True, "customer_action_retried": False}, ensure_ascii=False))
+            lease = acquire_with_release_wait(self.layout,
+                observe=lambda: self.guard_observation(require_start=require_start),
+                make_lease=lambda now: Lease(self.run_id, "form_guard_" + uuid.uuid4().hex,
+                    now, now + timedelta(seconds=120)),
+                acquire=lambda lease, now: self.svc.spreadsheets().batchUpdate(spreadsheetId=SSOT_ID,
+                    body={"requests": acquire_requests(self.layout, lease, now)}).execute(),
+                rejection_from_error=native_guard_rejection, now=self.now,
+                monotonic=self.monotonic, sleep=self.sleep, require_start=require_start,
+                remaining_budget_seconds=self.remaining_budget_seconds, on_wait=waited)
+            acquired = True
             if require_start:
                 require_form_start(read_controls(self.svc)[0])
             fresh = self.row(number)
