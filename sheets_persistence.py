@@ -19,6 +19,10 @@ MAX_LEASE_SECONDS = 300
 MASTER_CONTROL_KEY = "AUMS_MASTER_RUN_STATE"
 GUARD_CONTENTION_MESSAGE = ("Invalid requests[0].addNamedRange: Cannot add named range with name "
     "AONE_OUTBOUND_WRITE_GUARD, a named range with that name already exists.")
+# Exact provider wording observed in both existing SDK and native connector paths.
+# Keep the old spelling for compatibility; never fuzzy-match other errors.
+GUARD_CONTENTION_MESSAGES = frozenset((GUARD_CONTENTION_MESSAGE,
+    GUARD_CONTENTION_MESSAGE.replace("with name ", "with name: ", 1)))
 MAX_GUARD_WAIT_SECONDS = 180
 MAX_GUARD_POLL_SECONDS = 30
 MAX_GUARD_ACQUIRE_ATTEMPTS = 3
@@ -216,7 +220,7 @@ class GuardAcquireRejection:
 
     def is_exact_contention(self):
         return (self.http_status == 400 and self.error_code == 400
-            and self.status == "INVALID_ARGUMENT" and self.message == GUARD_CONTENTION_MESSAGE)
+            and self.status == "INVALID_ARGUMENT" and self.message in GUARD_CONTENTION_MESSAGES)
 
 
 class GuardWaitDeferred(PersistenceError):
@@ -547,3 +551,59 @@ def verify_event_readback(layout: Layout, events: Sequence[Mapping[str, Any]],
     return {"verified": verified, "status": "VERIFIED" if verified else "RECONCILE_REQUIRED",
             "missing": missing, "conflicting": conflicting, "duplicated": duplicated,
             "retry_external_action": False}
+
+
+
+def native_metadata_probe_requests(config_sheet_id: int) -> list[dict]:
+    """Plan a zero-change probe for an unfiltered updatedSpreadsheet response.
+
+    The caller uses the existing native connector, includeSpreadsheetInResponse
+    true and responseIncludeGridData false. No company, lease or control changes.
+    """
+    if type(config_sheet_id) is not int or config_sheet_id < 0:
+        raise PersistenceError("invalid_config_sheet_id")
+    marker = "__AUMS_NATIVE_METADATA_PROBE_20261005__"
+    return [{"findReplace": {"find": marker, "replacement": marker,
+        "range": {"sheetId": config_sheet_id, "startRowIndex": 0,
+                  "endRowIndex": 1, "startColumnIndex": 0, "endColumnIndex": 1},
+        "matchCase": True, "matchEntireCell": True}}]
+
+
+def native_named_ranges(response: Mapping[str, Any], expected_spreadsheet_id: str) -> list[dict]:
+    """Reject projected metadata that silently omits native named ranges.
+
+    For the exact no-change probe above, the unfiltered updatedSpreadsheet is a
+    complete native resource; Google may omit an empty repeated namedRanges.
+    Ordinary metadata projections require an explicit namedRanges field.
+    """
+    if not isinstance(response, Mapping) or not expected_spreadsheet_id:
+        raise PersistenceError("invalid_native_metadata_response")
+    if any(response.get(k) not in (None, "", False) for k in
+           ("error", "error_code", "error_http_status_code", "clamp_errors", "clamp_rewrites")):
+        raise PersistenceError("native_metadata_response_error")
+    result = response.get("result", response)
+    if not isinstance(result, Mapping):
+        raise PersistenceError("invalid_native_metadata_result")
+    complete_probe = "updatedSpreadsheet" in result
+    if complete_probe:
+        replies = result.get("replies")
+        if (not isinstance(replies, list) or len(replies) != 1
+                or not isinstance(replies[0], Mapping) or set(replies[0]) != {"findReplace"}
+                or not isinstance(replies[0]["findReplace"], Mapping)):
+            raise PersistenceError("native_metadata_probe_receipt_required")
+        proof = replies[0]["findReplace"]
+        for key in ("occurrencesChanged", "valuesChanged", "formulasChanged", "rowsChanged", "sheetsChanged"):
+            if proof.get(key, 0) != 0:
+                raise PersistenceError("native_metadata_probe_changed_content")
+        result = result["updatedSpreadsheet"]
+    if not isinstance(result, Mapping) or result.get("spreadsheetId") != expected_spreadsheet_id:
+        raise PersistenceError("native_metadata_spreadsheet_mismatch")
+    if "namedRanges" not in result and not complete_probe:
+        raise PersistenceError("native_named_ranges_not_returned")
+    ranges = result.get("namedRanges", [])
+    if not isinstance(ranges, list) or any(not isinstance(r, Mapping) for r in ranges):
+        raise PersistenceError("invalid_native_named_ranges")
+    if any(not isinstance(r.get("namedRangeId"), str) or not r.get("namedRangeId")
+           or not isinstance(r.get("name"), str) or not isinstance(r.get("range"), Mapping) for r in ranges):
+        raise PersistenceError("incomplete_native_named_range")
+    return [dict(r) for r in ranges]
