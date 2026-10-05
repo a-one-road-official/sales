@@ -238,3 +238,47 @@ def require_promotion(record: Mapping[str, Any], receipt: Mapping[str, Any], *,
     if result["decision"] != "PASS":
         raise ValueError("MERGE_REQUIRES_PASS")
     return result
+
+
+def resolve_saved_gate(ec: Mapping[str, Any], *, company_name: str,
+                       website: str) -> dict:
+    """Validate one saved gate across the two existing physical EC layouts.
+
+    Current writers use common_gate. Earlier cleansing wrote the same packet
+    and receipt at the EC root. Layout compatibility never grants admission,
+    requalifies an old receipt, clears suppression, or mutates the input.
+    A present but invalid canonical envelope cannot fall back to legacy data.
+    """
+    if not isinstance(ec, Mapping):
+        raise ValueError("GATE_EC_MUST_BE_MAPPING")
+    expected_domain = domain(website)
+    if not expected_domain or not _present(company_name):
+        raise ValueError("GATE_ROW_IDENTITY_REQUIRED")
+    canonical = "common_gate" in ec
+    source = ec.get("common_gate") if canonical else ec
+    if not isinstance(source, Mapping):
+        raise ValueError("GATE_ENVELOPE_INVALID")
+    packet, receipt = source.get("admission_packet"), source.get("admission_result")
+    if not isinstance(packet, Mapping) or not isinstance(receipt, Mapping):
+        raise ValueError("GATE_PACKET_RECEIPT_PAIR_REQUIRED")
+    if (domain(packet.get("website")) != expected_domain
+            or str(packet.get("company_name") or "").strip() != company_name.strip()):
+        raise ValueError("GATE_ROW_IDENTITY_MISMATCH")
+    verified = validate_receipt(packet, receipt)
+    if canonical and ("admission_packet" in ec or "admission_result" in ec):
+        old_packet, old_receipt = ec.get("admission_packet"), ec.get("admission_result")
+        # The legacy copy may be retained as history. Only another independently
+        # valid current receipt can conflict with this canonical current one.
+        if isinstance(old_packet, Mapping) and isinstance(old_receipt, Mapping):
+            try:
+                other = validate_receipt(old_packet, old_receipt)
+            except ValueError:
+                other = None
+            if other is not None and other["packet_sha256"] != verified["packet_sha256"]:
+                raise ValueError("CONFLICTING_CURRENT_GATE_ENVELOPES")
+    return {"admission_packet": copy.deepcopy(dict(packet)),
+            "admission_result": copy.deepcopy(dict(receipt)),
+            "decision": verified["decision"],
+            "source": "common_gate" if canonical else "legacy_root",
+            "migration_required": not canonical,
+            "customer_action_authorized": False}
