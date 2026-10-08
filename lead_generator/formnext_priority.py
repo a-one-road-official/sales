@@ -33,6 +33,10 @@ def normalized_official_website(value: Any) -> str:
         host = (parsed.hostname or "").lower().rstrip(".")
     except ValueError:
         return ""
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
     if (parsed.scheme not in {"https", "http"} or not host
             or parsed.username or parsed.password or
             "." not in host or ".." in host or host.startswith(".")
@@ -41,7 +45,7 @@ def normalized_official_website(value: Any) -> str:
         return ""
     if any(not part for part in host.split(".")):
         return ""
-    return parsed._replace(netloc=host + ((":" + str(parsed.port)) if parsed.port else ""),fragment="").geturl()
+    return parsed._replace(netloc=host + ((":" + str(port)) if port else ""),fragment="").geturl()
 
 def is_formnext_2026(row: Mapping[str, Any]) -> bool:
     """Identify actual Formnext 2026 cohort from durable original source fields.
