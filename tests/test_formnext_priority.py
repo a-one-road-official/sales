@@ -1,6 +1,7 @@
 import unittest
 from lead_generator.formnext_priority import (
     is_formnext_2026,
+    normalized_official_website,
     manual_release_required,
     prioritize_already_eligible,
 )
@@ -13,6 +14,21 @@ def row(name, *, category="FORMNEXT_RAW", origin="FORMNEXT_RAW", source=None):
 
 
 class FormnextPriorityTests(unittest.TestCase):
+    def test_normalized_formnext_urls_are_gate_ready_inputs(self):
+        self.assertEqual(normalized_official_website("www.acton-finishing.co.uk"),
+                         "https://www.acton-finishing.co.uk")
+        self.assertEqual(normalized_official_website("KINGROON.COM"),
+                         "https://kingroon.com")
+        self.assertEqual(normalized_official_website("Unlayered3d.com"),
+                         "https://unlayered3d.com")
+        self.assertEqual(normalized_official_website("https://example.com/products"),
+                         "https://example.com/products")
+        self.assertEqual(normalized_official_website(""), "")
+        self.assertEqual(normalized_official_website("https://formnext.mesago.com/frankfurt/en/exhibitor-search.detail.html/x"), "")
+        self.assertEqual(normalized_official_website("hello world"), "")
+        self.assertEqual(normalized_official_website("ftp://example.com"), "")
+        self.assertEqual(normalized_official_website("https://user:secret@example.com"), "")
+
     def test_exact_formnext_cohort_only(self):
         self.assertTrue(is_formnext_2026(row("ActOn")))
         self.assertFalse(is_formnext_2026(row("Impostor", category="Factory")))
