@@ -13,6 +13,36 @@ FORMNEXT_SOURCE_HOST = "formnext.mesago.com"
 FORMNEXT_DETAIL_PREFIX = "/frankfurt/en/exhibitor-search.detail.html/"
 
 
+
+def normalized_official_website(value: Any) -> str:
+    """Canonicalize a Formnext company-site INPUT for the unchanged common Gate.
+
+    Formnext imported hosts often lack http(s) (including uppercase hostnames).
+    This pure helper returns an explicit URL, never a send permission or Gate PASS.
+    Invalid, shared exhibition or social-media URLs are rejected. Source fields
+    and company rows remain unchanged until a separately fenced normal commit.
+    """
+    raw = str(value or "").strip()
+    if not raw or any(c.isspace() for c in raw):
+        return ""
+    if raw.startswith("//"):
+        return ""
+    candidate = raw if "://" in raw else "https://" + raw
+    try:
+        parsed = urlparse(candidate)
+        host = (parsed.hostname or "").lower().rstrip(".")
+    except ValueError:
+        return ""
+    if (parsed.scheme not in {"https", "http"} or not host
+            or parsed.username or parsed.password or
+            "." not in host or ".." in host or host.startswith(".")
+            or host in {"formnext.mesago.com", "linkedin.com", "facebook.com",
+                        "instagram.com", "youtube.com", "x.com"}):
+        return ""
+    if any(not part for part in host.split(".")):
+        return ""
+    return parsed._replace(netloc=host + ((":" + str(parsed.port)) if parsed.port else ""),fragment="").geturl()
+
 def is_formnext_2026(row: Mapping[str, Any]) -> bool:
     """Identify actual Formnext 2026 cohort from durable original source fields.
 
