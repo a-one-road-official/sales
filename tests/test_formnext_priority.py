@@ -27,6 +27,7 @@ class FormnextPriorityTests(unittest.TestCase):
         self.assertEqual(normalized_official_website("https://formnext.mesago.com/frankfurt/en/exhibitor-search.detail.html/x"), "")
         self.assertEqual(normalized_official_website("hello world"), "")
         self.assertEqual(normalized_official_website("ftp://example.com"), "")
+        self.assertEqual(normalized_official_website("https://example.com:broken"), "")
         self.assertEqual(normalized_official_website("https://user:secret@example.com"), "")
 
     def test_exact_formnext_cohort_only(self):
