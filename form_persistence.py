@@ -359,6 +359,9 @@ def classify_form_result(result):
     status = str(result.get("status") or "")
     reason = str(result.get("reason") or result.get("confirmation") or status or "FORM_FAILED")
     if status == "FORM_SENT":
+        from form_safety import verified_form_success
+        if not verified_form_success(result):
+            return 'FORM_UNCONFIRMED','FORM_SUCCESS_RECEIPT_NOT_BOUND_TO_SUBMISSION'
         return "FORM_SENT", reason
     if result.get("submission_attempted") and not result.get("explicit_negative_confirmation"):
         return "FORM_UNCONFIRMED", reason

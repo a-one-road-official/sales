@@ -1,0 +1,6751 @@
+[
+  {
+    "case_id": "event-5283",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5284",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5285",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5286",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5287",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5288",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5289",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5290",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5291",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5292",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5293",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5294",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5295",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5296",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5297",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5298",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5300",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5301",
+    "action": "FORM_FAILED",
+    "reason": "FORM_ACTION_HOST_UNVERIFIED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5302",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5303",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5304",
+    "action": "FORM_FAILED",
+    "reason": "FORM_NOT_FOUND",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5305",
+    "action": "FORM_FAILED",
+    "reason": "PREVIEW_NOT_READY",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5306",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5307",
+    "action": "FORM_FAILED",
+    "reason": "FORM_ACTION_HOST_UNVERIFIED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5308",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5309",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5311",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5312",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5313",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5314",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5315",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5316",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5317",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5318",
+    "action": "FORM_FAILED",
+    "reason": "FORM_NOT_FOUND",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5319",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5320",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_404",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5321",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5324",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5325",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5326",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5327",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5328",
+    "action": "FORM_FAILED",
+    "reason": "FORM_NOT_FOUND",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5329",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5330",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5331",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5332",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5333",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5334",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5335",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5336",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5337",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5338",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5339",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5340",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5341",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-5342",
+    "action": "FORM_FAILED",
+    "reason": "FORM_NOT_FOUND",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7536",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7537",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "message",
+      "which_role_describes_you_best_ which_role_describes_you_best_-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513 please select\ngeneral manager\nlogistics/production manager\nconsultant/integrator\nfactory worker\ndistributor\nmedia/agency\nstudent\nother",
+      "is_your_project_related_to_physical_ai is_your_project_related_to_physical_ai-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513 please select\nyes\nno"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7538",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_404",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7539",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7540",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "d9617234-d773-4840-a7ed-1914640e1e28 d9617234-d773-4840-a7ed-1914640e1e28 the netherlands\nusa\nwila location *",
+      "cde0b87f-b47c-406d-d108-033fba808219 cde0b87f-b47c-406d-d108-033fba808219 product information\nservice & support\nquestion type *"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7547",
+    "action": "FORM_FAILED",
+    "reason": "FORM_NOT_FOUND",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7548",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [
+      "identity"
+    ],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7549",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7552",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "message"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7553",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7558",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7560",
+    "action": "FORM_FAILED",
+    "reason": "ValueError:FORM_IDENTITY_VALUE_MISMATCH:email",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7561",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [
+      "identity"
+    ],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7569",
+    "action": "FORM_FAILED",
+    "reason": "FORM_VALIDATION_FAILED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": true,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-ed714f27-404e-4c71-8cd0-35dced06d6ca_3115"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-ed714f27-404e-4c71-8cd0-35dced06d6ca_3115"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-ed714f27-404e-4c71-8cd0-35dced06d6ca_3115"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone phone-ed714f27-404e-4c71-8cd0-35dced06d6ca_3115"
+      },
+      {
+        "index": 4,
+        "key": "country",
+        "label": "Please Select\nAfghanistan\nAlbania\nAlgeria\nAndorra\nAngola\nAntigua & Deps\nArgentina\nArmenia\nAustralia\nAustria\nAzerbaijan\nBahamas\nBahrain\nBangladesh\nBarbados\nBelarus\nBelgium\nBelize\nBenin\nBhutan\nBolivia\nBosnia Herzegovina\nBotswana\nBrazil\nBrunei\nBulgaria\nBurkina\nBurundi\nCambodia\nCameroon\nCanada\nCape Verd",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "country country-ed714f27-404e-4c71-8cd0-35dced06d6ca_3115 please select\nafghanistan\nalbania\nalgeria\nandorra\nangola\nantigua & deps\nargentina\narmenia\naustralia\naustria\nazerbaijan\nbahamas\nbahrain\nbangladesh\nbarbados\nbelarus\nbelgium\nbelize\nbenin\nbhutan\nbolivia\nbosnia herzegovina\nbotswana\nbrazil\nbrunei\nbulgaria\nburkina\nburundi\ncambodia\ncameroon\ncanada\ncape verd"
+      },
+      {
+        "index": 10,
+        "key": "message",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message-ed714f27-404e-4c71-8cd0-35dced06d6ca_3115"
+      }
+    ]
+  },
+  {
+    "case_id": "event-7570",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [
+      "identity"
+    ],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "unknown",
+        "label": "",
+        "type": "search",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "s suchen …"
+      }
+    ]
+  },
+  {
+    "case_id": "event-7571",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "contact_reason contact_reason-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513 please select\ngeneral inquiry\nsales and commercial support\ntechnical support\njob or internship"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "unknown",
+        "label": "Please Select\nGeneral inquiry\nSales and commercial support\nTechnical support\nJob or internship",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Please Select",
+          "General inquiry",
+          "Sales and commercial support",
+          "Technical support",
+          "Job or internship"
+        ],
+        "marker": "contact_reason contact_reason-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513 please select\ngeneral inquiry\nsales and commercial support\ntechnical support\njob or internship"
+      },
+      {
+        "index": 1,
+        "key": "first_name",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513"
+      },
+      {
+        "index": 2,
+        "key": "last_name",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513"
+      },
+      {
+        "index": 3,
+        "key": "company",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513"
+      },
+      {
+        "index": 4,
+        "key": "email",
+        "label": "",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513"
+      },
+      {
+        "index": 5,
+        "key": "phone",
+        "label": "",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone phone-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513"
+      },
+      {
+        "index": 6,
+        "key": "country",
+        "label": "- Please Select -\nAfghanistan\nAlbania\nAlgeria\nAmerican Samoa\nAndorra\nAngola\nAntigua and Barbuda\nArgentina\nArmenia\nAruba\nAustralia\nAustria\nAzerbaijan\nBahamas\nBahrain\nBangladesh\nBarbados\nBelarus\nBelgium\nBelize\nBenin\nBermuda\nBhutan\nBolivia, Plurinational State of\nBonaire, Sint Eustatius and Saba\nBosnia",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "country country-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513 - please select -\nafghanistan\nalbania\nalgeria\namerican samoa\nandorra\nangola\nantigua and barbuda\nargentina\narmenia\naruba\naustralia\naustria\nazerbaijan\nbahamas\nbahrain\nbangladesh\nbarbados\nbelarus\nbelgium\nbelize\nbenin\nbermuda\nbhutan\nbolivia, plurinational state of\nbonaire, sint eustatius and saba\nbosnia"
+      },
+      {
+        "index": 7,
+        "key": "postal_code",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "zip zip-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513"
+      },
+      {
+        "index": 8,
+        "key": "city",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "city city-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513"
+      },
+      {
+        "index": 9,
+        "key": "unknown",
+        "label": "Please Select\nGeneral Manager\nLogistics/Production Manager\nConsultant/Integrator\nFactory Worker\nDistributor\nMedia/Agency\nStudent\nOther",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "which_role_describes_you_best_ which_role_describes_you_best_-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513 please select\ngeneral manager\nlogistics/production manager\nconsultant/integrator\nfactory worker\ndistributor\nmedia/agency\nstudent\nother"
+      },
+      {
+        "index": 10,
+        "key": "unknown",
+        "label": "Please Select\n1\n2-5\n6-10\n10-25\n25-50\n50-100\n100+",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "how_many_units_are_you_considering how_many_units_are_you_considering-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513 please select\n1\n2-5\n6-10\n10-25\n25-50\n50-100\n100+"
+      },
+      {
+        "index": 11,
+        "key": "unknown",
+        "label": "Please Select\nYes\nNo",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "is_your_project_related_to_physical_ai is_your_project_related_to_physical_ai-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513 please select\nyes\nno"
+      },
+      {
+        "index": 12,
+        "key": "message",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "notes_from_form notes_from_form-234f0627-b4d9-4c41-9a41-ae3f571b0c39_4513"
+      }
+    ]
+  },
+  {
+    "case_id": "event-7572",
+    "action": "FORM_FAILED",
+    "reason": "FORM_NOT_FOUND",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7573",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": 403,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7578",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "q search search"
+    ],
+    "core_unfilled": [
+      "identity"
+    ],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "unknown",
+        "label": "Search",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": "20",
+        "available_choices": [],
+        "marker": "q search search"
+      }
+    ]
+  },
+  {
+    "case_id": "event-7579",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "main_business_challenge main_business_challenge-14c659c9-f139-499f-8203-4496799fbf74_7610 what is the main challenge your business is facing?*",
+      "facility_square_footage facility_square_footage-14c659c9-f139-499f-8203-4496799fbf74_7610 facility square footage*",
+      "0-2/numberofemployees 0-2/numberofemployees-14c659c9-f139-499f-8203-4496799fbf74_7610 number of employees*"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First Name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-14c659c9-f139-499f-8203-4496799fbf74_7610 first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last Name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-14c659c9-f139-499f-8203-4496799fbf74_7610 last name*"
+      },
+      {
+        "index": 2,
+        "key": "company",
+        "label": "Company Name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company-14c659c9-f139-499f-8203-4496799fbf74_7610 company name*"
+      },
+      {
+        "index": 3,
+        "key": "email",
+        "label": "Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-14c659c9-f139-499f-8203-4496799fbf74_7610 email*"
+      },
+      {
+        "index": 4,
+        "key": "phone",
+        "label": "Phone Number*",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone phone-14c659c9-f139-499f-8203-4496799fbf74_7610 phone number*"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "What is the main challenge your business is facing?*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Please select the most important option.",
+          "Improve Efficiencies",
+          "Overcome Labor Challenges",
+          "Improve Efficiencies & Overcome Labor Challenges",
+          "Other"
+        ],
+        "marker": "main_business_challenge main_business_challenge-14c659c9-f139-499f-8203-4496799fbf74_7610 what is the main challenge your business is facing?*"
+      },
+      {
+        "index": 10,
+        "key": "unknown",
+        "label": "Facility Square Footage*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Please Select",
+          "< 200k sq. ft.",
+          "200k - 1M sq. ft.",
+          "1M+ sq. ft.",
+          "We have multiple facilities.",
+          "Not applicable."
+        ],
+        "marker": "facility_square_footage facility_square_footage-14c659c9-f139-499f-8203-4496799fbf74_7610 facility square footage*"
+      },
+      {
+        "index": 11,
+        "key": "unknown",
+        "label": "Number of Employees*",
+        "type": "number",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "0-2/numberofemployees 0-2/numberofemployees-14c659c9-f139-499f-8203-4496799fbf74_7610 number of employees*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-7623",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "facility_size facility_size-a43f9b9a-05bd-4ab6-be00-0c21ade4b458 estimated facility square footage*",
+      "hours_per_shift hours_per_shift-a43f9b9a-05bd-4ab6-be00-0c21ade4b458 shifts per day*",
+      "workflow_s__to_automate__dropdown_ workflow_s__to_automate__dropdown_-a43f9b9a-05bd-4ab6-be00-0c21ade4b458 workflows*",
+      "discovery_source"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-a43f9b9a-05bd-4ab6-be00-0c21ade4b458 first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-a43f9b9a-05bd-4ab6-be00-0c21ade4b458 last name*"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Work email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-a43f9b9a-05bd-4ab6-be00-0c21ade4b458 work email*"
+      },
+      {
+        "index": 3,
+        "key": "company",
+        "label": "Company name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company-a43f9b9a-05bd-4ab6-be00-0c21ade4b458 company name*"
+      },
+      {
+        "index": 4,
+        "key": "country",
+        "label": "Country*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "country_picklist country_picklist-a43f9b9a-05bd-4ab6-be00-0c21ade4b458 country*"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "Estimated Facility Square Footage*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Please Select",
+          "Less than 500K sqft.",
+          "500K - 1M sqft.",
+          "1M+  sqft.",
+          "Multiple facilities"
+        ],
+        "marker": "facility_size facility_size-a43f9b9a-05bd-4ab6-be00-0c21ade4b458 estimated facility square footage*"
+      },
+      {
+        "index": 6,
+        "key": "unknown",
+        "label": "Shifts Per Day*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Please Select",
+          "1",
+          "2",
+          "3",
+          "More than 3"
+        ],
+        "marker": "hours_per_shift hours_per_shift-a43f9b9a-05bd-4ab6-be00-0c21ade4b458 shifts per day*"
+      },
+      {
+        "index": 7,
+        "key": "unknown",
+        "label": "Workflows*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Please Select",
+          "Case Picking",
+          "Putaway",
+          "Cross Docking",
+          "Line-side Delivery",
+          "End-of-Line",
+          "Work in Progress",
+          "Point-to-Point",
+          "Other"
+        ],
+        "marker": "workflow_s__to_automate__dropdown_ workflow_s__to_automate__dropdown_-a43f9b9a-05bd-4ab6-be00-0c21ade4b458 workflows*"
+      },
+      {
+        "index": 8,
+        "key": "discovery_source",
+        "label": "How did you hear about us?*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Please Select",
+          "Search engine (Google, Bing)",
+          "Social media",
+          "Sales outreach",
+          "AI search",
+          "Article",
+          "Advertisement",
+          "Tradeshow",
+          "Word of mouth",
+          "Partner or reseller",
+          "Other"
+        ],
+        "marker": "how_did_you_hear_about_us_ how_did_you_hear_about_us_-a43f9b9a-05bd-4ab6-be00-0c21ade4b458 how did you hear about us?*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-7686",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7687",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": 403,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7699",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "radio_required:wpforms[fields][57]:Sales | Service | Filter Paper & Parts"
+    ],
+    "core_unfilled": [
+      "identity"
+    ],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7700",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "checkbox_0"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "John",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "name name john john"
+      },
+      {
+        "index": 1,
+        "key": "email",
+        "label": "jon@doe.com",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "email email jon@doe.com jon@doe.com"
+      },
+      {
+        "index": 2,
+        "key": "unknown",
+        "label": "By sending this form, I agree to the Terms of Service and Privacy Policy.",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "field field by sending this form, i agree to the terms of service and privacy policy."
+      },
+      {
+        "index": 3,
+        "key": "message",
+        "label": "Tell us about your project",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "5000",
+        "marker": "message message tell us about your project tell us about your project"
+      }
+    ]
+  },
+  {
+    "case_id": "event-7706",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "radio_required:wpforms[fields][57]:Sales | Service | Filter Paper & Parts"
+    ],
+    "core_unfilled": [
+      "identity"
+    ],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-7769",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "john doe john doe",
+      "promptarmor promptarmor"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "unknown",
+        "label": "John Doe",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "john doe john doe"
+      },
+      {
+        "index": 1,
+        "key": "email",
+        "label": "john@company.com",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "john@company.com john@company.com"
+      },
+      {
+        "index": 2,
+        "key": "unknown",
+        "label": "PromptArmor",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "promptarmor promptarmor"
+      },
+      {
+        "index": 3,
+        "key": "unknown",
+        "label": "e.g. TPRM, LLM security, vendor risk...",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "e.g. tprm, llm security, vendor risk... e.g. tprm, llm security, vendor risk..."
+      }
+    ]
+  },
+  {
+    "case_id": "event-7770",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "FIRST NAME",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname first name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "LAST NAME",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname last name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "BUSINESS EMAIL",
+        "type": "email",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "businessemail businessemail business email"
+      },
+      {
+        "index": 3,
+        "key": "company",
+        "label": "COMPANY",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company company"
+      },
+      {
+        "index": 4,
+        "key": "message",
+        "label": "MESSAGE",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message message"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "HOW DID YOU KNOW ABOUT US? Select Trade show / events Peer referral / word of mouth Advertising Social media / Youtube Search / Google Other",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "howdidyouknow howdidyouknow how did you know about us? select trade show / events peer referral / word of mouth advertising social media / youtube search / google other"
+      }
+    ]
+  },
+  {
+    "case_id": "event-7771",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "email",
+        "label": "Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-00e5b307-94dc-4e9a-964a-e8920fa46573_00e5b307-94dc-4e9a-964a-e8920fa46573 email* email*"
+      },
+      {
+        "index": 1,
+        "key": "first_name",
+        "label": "First Name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-00e5b307-94dc-4e9a-964a-e8920fa46573_00e5b307-94dc-4e9a-964a-e8920fa46573 first name* first name*"
+      },
+      {
+        "index": 2,
+        "key": "last_name",
+        "label": "Last Name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-00e5b307-94dc-4e9a-964a-e8920fa46573_00e5b307-94dc-4e9a-964a-e8920fa46573 last name* last name*"
+      },
+      {
+        "index": 3,
+        "key": "role",
+        "label": "Job Title",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "jobtitle jobtitle-00e5b307-94dc-4e9a-964a-e8920fa46573_00e5b307-94dc-4e9a-964a-e8920fa46573 job title job title"
+      },
+      {
+        "index": 4,
+        "key": "discovery_source",
+        "label": "How did you hear about us?",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "how_did_the_contact_hear_about_us_ how_did_the_contact_hear_about_us_-00e5b307-94dc-4e9a-964a-e8920fa46573_00e5b307-94dc-4e9a-964a-e8920fa46573 how did you hear about us?"
+      }
+    ]
+  },
+  {
+    "case_id": "event-7772",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "first name first name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "last name last name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email"
+      },
+      {
+        "index": 248,
+        "key": "phone",
+        "label": "Phone Number",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "15",
+        "marker": "phone phone number"
+      },
+      {
+        "index": 270,
+        "key": "message",
+        "label": "Optional",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "notes optional optional"
+      }
+    ]
+  },
+  {
+    "case_id": "event-7821",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "unknown",
+        "label": "John Doe",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "john doe john doe"
+      },
+      {
+        "index": 1,
+        "key": "email",
+        "label": "john@company.com",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "john@company.com john@company.com"
+      },
+      {
+        "index": 2,
+        "key": "unknown",
+        "label": "PromptArmor",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "promptarmor promptarmor"
+      },
+      {
+        "index": 3,
+        "key": "unknown",
+        "label": "e.g. TPRM, LLM security, vendor risk...",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "e.g. tprm, llm security, vendor risk... e.g. tprm, llm security, vendor risk..."
+      }
+    ]
+  },
+  {
+    "case_id": "event-7883",
+    "action": "FORM_FAILED",
+    "reason": "SUBMIT_CONTROL_NOT_FOUND",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "company_name"
+      },
+      {
+        "index": 1,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "company_address"
+      },
+      {
+        "index": 2,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "company_home"
+      },
+      {
+        "index": 3,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "department"
+      },
+      {
+        "index": 4,
+        "key": "name",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "name"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "phone1"
+      },
+      {
+        "index": 6,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "phone2_1"
+      },
+      {
+        "index": 7,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": "4",
+        "marker": "phone2_2"
+      },
+      {
+        "index": 8,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": "4",
+        "marker": "phone2_3"
+      },
+      {
+        "index": 9,
+        "key": "email",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email"
+      },
+      {
+        "index": 10,
+        "key": "message",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "content"
+      },
+      {
+        "index": 11,
+        "key": "message",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "content2"
+      }
+    ]
+  },
+  {
+    "case_id": "event-7984",
+    "action": "FORM_FAILED",
+    "reason": "FORM_NOT_FOUND",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8059",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "reason_for_demo__c reason_for_demo__c lblreason_for_demo__c instructreason_for_demo__c *"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "255",
+        "marker": "firstname firstname lblfirstname instructfirstname *"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "255",
+        "marker": "lastname lastname lbllastname instructlastname *"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "255",
+        "marker": "email email lblemail instructemail *"
+      },
+      {
+        "index": 3,
+        "key": "role",
+        "label": "*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "255",
+        "marker": "title title lbltitle instructtitle *"
+      },
+      {
+        "index": 4,
+        "key": "company",
+        "label": "*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "255",
+        "marker": "company company lblcompany instructcompany *"
+      },
+      {
+        "index": 5,
+        "key": "phone",
+        "label": "*",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "255",
+        "marker": "phone phone lblphone instructphone *"
+      },
+      {
+        "index": 6,
+        "key": "country",
+        "label": "*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "country country lblcountry instructcountry *"
+      },
+      {
+        "index": 7,
+        "key": "unknown",
+        "label": "*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "I want to learn more about Seeq's offerings",
+          "I am a Seeq customer needing support",
+          "I would like to partner with Seeq",
+          "Reason For Demo:"
+        ],
+        "marker": "reason_for_demo__c reason_for_demo__c lblreason_for_demo__c instructreason_for_demo__c *"
+      },
+      {
+        "index": 8,
+        "key": "message",
+        "label": "*",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "32768",
+        "marker": "latest_form_message__c latest_form_message__c lbllatest_form_message__c instructlatest_form_message__c *"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8060",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "settore business sector* business sector*"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "NAME*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "nome name* name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "SURNAME*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "cognome surname* surname*"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "EMAIL*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email* email*"
+      },
+      {
+        "index": 3,
+        "key": "company",
+        "label": "COMPANY*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "azienda company* company*"
+      },
+      {
+        "index": 4,
+        "key": "unknown",
+        "label": "BUSINESS SECTOR*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "settore business sector* business sector*"
+      },
+      {
+        "index": 5,
+        "key": "phone",
+        "label": "PHONE*",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "telefono phone* phone*"
+      },
+      {
+        "index": 6,
+        "key": "message",
+        "label": "MESSAGGE*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "messaggio messagge*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8064",
+    "action": "FORM_FAILED",
+    "reason": "FORM_NOT_FOUND",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8072",
+    "action": "FORM_FAILED",
+    "reason": "FORM_NOT_FOUND",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8116",
+    "action": "FORM_FAILED",
+    "reason": "FORM_NOT_FOUND",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8119",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [
+      "country"
+    ],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "last_name",
+        "label": "Ana Gómez",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "nombreapellido ana gómez ana gómez"
+      },
+      {
+        "index": 1,
+        "key": "company",
+        "label": "tu@empresa.com",
+        "type": "email",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email tu@empresa.com tu@empresa.com"
+      },
+      {
+        "index": 2,
+        "key": "phone",
+        "label": "+52 55 1234 5678",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "telefono +52 55 1234 5678 +52 55 1234 5678"
+      },
+      {
+        "index": 3,
+        "key": "company",
+        "label": "Tienda Demo S.A.",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "nombreempresa tienda demo s.a. tienda demo s.a."
+      },
+      {
+        "index": 4,
+        "key": "country",
+        "label": "País *",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "país *"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "Plataforma *",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "plataforma *"
+      },
+      {
+        "index": 6,
+        "key": "unknown",
+        "label": "Volumen mensual *",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "volumen mensual *"
+      },
+      {
+        "index": 7,
+        "key": "unknown",
+        "label": "https://tutienda.com",
+        "type": "url",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "urltienda https://tutienda.com https://tutienda.com"
+      },
+      {
+        "index": 8,
+        "key": "message",
+        "label": "Describe brevemente tus necesidades logísticas...",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "mensaje describe brevemente tus necesidades logísticas... describe brevemente tus necesidades logísticas..."
+      }
+    ]
+  },
+  {
+    "case_id": "event-8164",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "radio_required:form_fields[field_2e53c03]:Sales/General | Technical"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[name] form-field-name name"
+      },
+      {
+        "index": 1,
+        "key": "email",
+        "label": "Email",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[email] form-field-email email"
+      },
+      {
+        "index": 2,
+        "key": "subject",
+        "label": "Subject",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[field_3d4515f] form-field-field_3d4515f subject"
+      },
+      {
+        "index": 5,
+        "key": "message",
+        "label": "Comment or Message",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[message] form-field-message comment or message"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8166",
+    "action": "FORM_FAILED",
+    "reason": "FORM_VALIDATION_FAILED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": true,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[name] form-field-name name"
+      },
+      {
+        "index": 1,
+        "key": "email",
+        "label": "Email",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[email] form-field-email email"
+      },
+      {
+        "index": 2,
+        "key": "subject",
+        "label": "Subject",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[field_3d4515f] form-field-field_3d4515f subject"
+      },
+      {
+        "index": 5,
+        "key": "message",
+        "label": "Comment or Message",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[message] form-field-message comment or message"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8168",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8215",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [
+      "identity"
+    ],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8265",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": 403,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8320",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": 403,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8322",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-name"
+      },
+      {
+        "index": 1,
+        "key": "company",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-company"
+      },
+      {
+        "index": 2,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": "400",
+        "marker": "your-job"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-phone"
+      },
+      {
+        "index": 4,
+        "key": "email",
+        "label": "",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-email"
+      },
+      {
+        "index": 5,
+        "key": "phone",
+        "label": "",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-fax"
+      },
+      {
+        "index": 6,
+        "key": "message",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "2000",
+        "marker": "your-detail"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8324",
+    "action": "FORM_FAILED",
+    "reason": "Executor receipt contained explicit negative failure text after click, so ambiguity lock was reconciled to confirmed form failure; no form retry; email fallback released to separate controller.",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8331",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "input_17 input_8_17 nom*",
+      "country",
+      "checkbox_0"
+    ],
+    "core_unfilled": [
+      "country"
+    ],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 1,
+        "key": "unknown",
+        "label": "Nom*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "input_17 input_8_17 nom*"
+      },
+      {
+        "index": 2,
+        "key": "first_name",
+        "label": "Prénom*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "input_18 input_8_18 prénom*"
+      },
+      {
+        "index": 3,
+        "key": "email",
+        "label": "E-mail*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "input_6 input_8_6 e-mail*"
+      },
+      {
+        "index": 4,
+        "key": "company",
+        "label": "Société",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "input_7 input_8_7 société"
+      },
+      {
+        "index": 5,
+        "key": "phone",
+        "label": "Téléphone*",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "input_22 input_8_22 téléphone*"
+      },
+      {
+        "index": 6,
+        "key": "country",
+        "label": "Pays*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Sélectionner",
+          "France",
+          "Afghanistan",
+          "Afrique du Sud",
+          "Albanie",
+          "Algérie",
+          "Allemagne",
+          "Andorre",
+          "Angola",
+          "Anguilla",
+          "Antarctique",
+          "Antigua-et-Barbuda",
+          "Arabie Saoudite",
+          "Argentine",
+          "Arménie",
+          "Aruba",
+          "Australie",
+          "Autriche",
+          "Azerbaïdjan",
+          "Bahreïn",
+          "Bangladesh",
+          "Barbade",
+          "Belgique",
+          "Belize",
+          "Bénin",
+          "Bhoutan",
+          "Bolivie",
+          "Bosnie-Herzégovine",
+          "Botswana",
+          "Brésil"
+        ],
+        "marker": "input_9 input_8_9 pays*"
+      },
+      {
+        "index": 8,
+        "key": "message",
+        "label": "Message*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "input_11 input_8_11 message*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8333",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 1,
+        "key": "first_name",
+        "label": "Nome",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "50",
+        "marker": "firstname firstname_6ab462c82b2ff nome"
+      },
+      {
+        "index": 2,
+        "key": "last_name",
+        "label": "Cognome",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "50",
+        "marker": "lastname lastname_6ab462c82b345 cognome"
+      },
+      {
+        "index": 3,
+        "key": "email",
+        "label": "E-mail",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "50",
+        "marker": "email email_6ab462c82b38c e-mail"
+      },
+      {
+        "index": 4,
+        "key": "company",
+        "label": "Azienda",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "60",
+        "marker": "company company_6ab462c82b3d3 azienda"
+      },
+      {
+        "index": 5,
+        "key": "phone",
+        "label": "Telefono",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "30",
+        "marker": "phone phone_6ab462c82b41c telefono"
+      },
+      {
+        "index": 6,
+        "key": "city",
+        "label": "Città",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "30",
+        "marker": "city city_6ab462c82b463 città"
+      },
+      {
+        "index": 7,
+        "key": "country",
+        "label": "Nazione",
+        "type": "text",
+        "required": false,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "nation nation_6ab462c82b4ab nazione"
+      },
+      {
+        "index": 8,
+        "key": "state",
+        "label": "Regione",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "state state_6ab462c82b4f5 regione"
+      },
+      {
+        "index": 9,
+        "key": "postal_code",
+        "label": "CAP",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "20",
+        "marker": "zip zip_6ab462c82b544 cap"
+      },
+      {
+        "index": 10,
+        "key": "unknown",
+        "label": "Interesse",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "interest interest_6ab462c82b591 interesse"
+      },
+      {
+        "index": 11,
+        "key": "unknown",
+        "label": "Settore d'applicazione",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "sector[] sector_6ab462c82b62e settore d'applicazione"
+      },
+      {
+        "index": 12,
+        "key": "message",
+        "label": "Messaggio",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message_6ab462c82b67d messaggio"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8338",
+    "action": "FORM_UNCONFIRMED_LOCK",
+    "reason": "Submission was attempted; receipt contains neither a positive confirmation nor an explicit negative validation/failure signal. Genuine FORM_UNCONFIRMED lock retained across both automated channels.",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8389",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "message"
+    ],
+    "core_unfilled": [
+      "message",
+      "message"
+    ],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "0-1/firstname a114cfea-211f-4e2e-87e1-62a7bfdc0895-6-input a114cfea-211f-4e2e-87e1-62a7bfdc0895-6-label first name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "0-1/lastname a114cfea-211f-4e2e-87e1-62a7bfdc0895-5-input a114cfea-211f-4e2e-87e1-62a7bfdc0895-5-label last name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "0-1/email a114cfea-211f-4e2e-87e1-62a7bfdc0895-3-input a114cfea-211f-4e2e-87e1-62a7bfdc0895-3-label email*"
+      },
+      {
+        "index": 3,
+        "key": "message",
+        "label": "Purpose of inquiry*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Sales inquiry",
+          "Battery repurposing partnership",
+          "Media or press",
+          "Investment or partnership",
+          "Supplier or vendor",
+          "Job application"
+        ],
+        "marker": "a114cfea-211f-4e2e-87e1-62a7bfdc0895-2222116934315-input a114cfea-211f-4e2e-87e1-62a7bfdc0895-2222116934315-label combobox purpose of inquiry*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8390",
+    "action": "FORM_FAILED",
+    "reason": "MULTI_STEP_NOT_ADVANCED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First name*",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "first name* first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name*",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "last name* last name*"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Company email address*",
+        "type": "email",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company email address* company email address*"
+      },
+      {
+        "index": 6,
+        "key": "website",
+        "label": "Company website*",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company website* company website*"
+      },
+      {
+        "index": 10000,
+        "key": "unknown",
+        "label": "Search for option",
+        "type": "custom_dropdown",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "marker": "vs1__combobox search for option combobox search for option"
+      },
+      {
+        "index": 10001,
+        "key": "unknown",
+        "label": "Search for option",
+        "type": "custom_dropdown",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "marker": "vs2__combobox search for option combobox search for option"
+      },
+      {
+        "index": 10002,
+        "key": "unknown",
+        "label": "Search for option",
+        "type": "custom_dropdown",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "marker": "vs3__combobox search for option combobox search for option"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8391",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form-field-input-82c0a6c4-2d3c-4711-2e9b-afd2f1207ac0-comp-mbqgqd1i- first name first name first name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form-field-input-e19f8b32-daae-4c52-6322-c2e7a77e94d7-comp-mbqgqd1i- last name last name last name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form-field-input-75e89bac-f416-4915-429e-180743359592-comp-mbqgqd1i- email email email"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "Phone. Phone",
+        "type": "phone",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form-field-input-47a75787-18d6-4d2d-4e8a-2a5cdab2c62b-comp-mbqgqd1i- phone phone. phone phone. phone"
+      },
+      {
+        "index": 4,
+        "key": "company",
+        "label": "Company/Organization",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form-field-input-fd445717-07e2-45dd-4b67-ec7ebb1b0d99-comp-mbqgqd1i- company/organization company/organization"
+      },
+      {
+        "index": 5,
+        "key": "role",
+        "label": "Position / Role",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form-field-input-312c45a2-38e6-4374-33f9-0074fb7570e1-comp-mbqgqd1i- position / role position / role"
+      },
+      {
+        "index": 6,
+        "key": "subject",
+        "label": "Subject",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form-field-input-5baa129b-9911-4f69-61b5-408563a119f5-comp-mbqgqd1i- subject subject"
+      },
+      {
+        "index": 7,
+        "key": "message",
+        "label": "Message",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form-field-input-6c28e837-12c0-4789-db82-0e7e7b35acc5-comp-mbqgqd1i- message message message"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8392",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8398",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_VALUE_MISMATCH",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "0-1/firstname 8b6d112a-51d6-411c-b7cd-20c959d96454-6-input 8b6d112a-51d6-411c-b7cd-20c959d96454-6-label first name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "0-1/lastname 8b6d112a-51d6-411c-b7cd-20c959d96454-5-input 8b6d112a-51d6-411c-b7cd-20c959d96454-5-label last name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "0-1/email 8b6d112a-51d6-411c-b7cd-20c959d96454-3-input 8b6d112a-51d6-411c-b7cd-20c959d96454-3-label email*"
+      },
+      {
+        "index": 3,
+        "key": "message",
+        "label": "Purpose of inquiry*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "8b6d112a-51d6-411c-b7cd-20c959d96454-2222116934315-input 8b6d112a-51d6-411c-b7cd-20c959d96454-2222116934315-label combobox purpose of inquiry*"
+      },
+      {
+        "index": 5,
+        "key": "company",
+        "label": "Company Name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "0-1/company 8b6d112a-51d6-411c-b7cd-20c959d96454-2365710010324-input 8b6d112a-51d6-411c-b7cd-20c959d96454-2365710010324-label company name*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8481",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "mantine-95c8a21ew combobox product of interest *"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "NAME *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "mantine-5tupxltfk name *"
+      },
+      {
+        "index": 1,
+        "key": "email",
+        "label": "EMAIL *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "mantine-7meezkgz5 email *"
+      },
+      {
+        "index": 2,
+        "key": "company",
+        "label": "COMPANY *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "mantine-tzp3zd4iq company *"
+      },
+      {
+        "index": 3,
+        "key": "unknown",
+        "label": "PRODUCT OF INTEREST *",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "CurieOS",
+          "Next-Generation Cooling",
+          "Data Center Engineering Solutions",
+          "General inquiry"
+        ],
+        "marker": "mantine-95c8a21ew combobox product of interest *"
+      },
+      {
+        "index": 4,
+        "key": "message",
+        "label": "MESSAGE *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "mantine-k2a5iyxs3 message *"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "_field_url"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8482",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "Enter your name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "",
+        "marker": "ipt_fsqm_form_4[pinfo][1][value] ipt_fsqm_form_4_pinfo_1_value enter your name"
+      },
+      {
+        "index": 1,
+        "key": "email",
+        "label": "Enter your e-mail address",
+        "type": "email",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "ipt_fsqm_form_4[pinfo][3][value] ipt_fsqm_form_4_pinfo_3_value enter your e-mail address"
+      },
+      {
+        "index": 2,
+        "key": "company",
+        "label": "Company name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "",
+        "marker": "ipt_fsqm_form_4[pinfo][10][value] ipt_fsqm_form_4_pinfo_10_value company name"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "Enter your phone number",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "",
+        "marker": "ipt_fsqm_form_4[pinfo][9][value] ipt_fsqm_form_4_pinfo_9_value enter your phone number"
+      },
+      {
+        "index": 4,
+        "key": "unknown",
+        "label": "Write here",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": "",
+        "marker": "ipt_fsqm_form_4[freetype][7][value] ipt_fsqm_form_4_freetype_7_value write here"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "Write here",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": "",
+        "marker": "ipt_fsqm_form_4[freetype][0][value] ipt_fsqm_form_4_freetype_0_value write here"
+      },
+      {
+        "index": 6,
+        "key": "message",
+        "label": "Write here",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "",
+        "marker": "ipt_fsqm_form_4[freetype][9][value] ipt_fsqm_form_4_freetype_9_value write here"
+      },
+      {
+        "index": 7,
+        "key": "unknown",
+        "label": "Write here",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "ipt_fsqm_form_4[design][36][value] ipt_fsqm_form_4_design_36_value write here"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8483",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[name] form-field-name name name"
+      },
+      {
+        "index": 1,
+        "key": "company",
+        "label": "Company",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[field_ec18d65] form-field-field_ec18d65 company company"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "E-mail",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[email] form-field-email e-mail e-mail"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "Telephone number",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[field_adc9a87] form-field-field_adc9a87 telephone number telephone number"
+      },
+      {
+        "index": 4,
+        "key": "message",
+        "label": "Message",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[message] form-field-message message message"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8575",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8577",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": 403,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8578",
+    "action": "FORM_FAILED",
+    "reason": "FORM_VALIDATION_FAILED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": true,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 3,
+        "key": "first_name",
+        "label": "First name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-29d71e76-ab4c-4786-be66-3cf0b9a48af4 first name*"
+      },
+      {
+        "index": 4,
+        "key": "last_name",
+        "label": "Last name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-29d71e76-ab4c-4786-be66-3cf0b9a48af4 last name*"
+      },
+      {
+        "index": 5,
+        "key": "email",
+        "label": "Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-29d71e76-ab4c-4786-be66-3cf0b9a48af4 email*"
+      },
+      {
+        "index": 6,
+        "key": "phone",
+        "label": "Phone number",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone phone-29d71e76-ab4c-4786-be66-3cf0b9a48af4 phone number"
+      },
+      {
+        "index": 7,
+        "key": "country",
+        "label": "Country*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "country_new country_new-29d71e76-ab4c-4786-be66-3cf0b9a48af4 country*"
+      },
+      {
+        "index": 8,
+        "key": "message",
+        "label": "Message*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message-29d71e76-ab4c-4786-be66-3cf0b9a48af4 message*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8590",
+    "action": "FORM_FAILED_RECONCILED",
+    "reason": "Deterministic executor received HTTP 403 before submission and found no verified official alternate form candidate. Form failure is confirmed; email fallback may proceed under the separate email controller.",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8591",
+    "action": "FORM_FAILED_RECONCILED",
+    "reason": "Executor returned explicit FORM_VALIDATION_FAILED after submission click; all mapped core fields were filled and no repairable required-field error was identified. No automated form retry.",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8662",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "mantine-a191rcga4 combobox product of interest *"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "NAME *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "mantine-nhod3248k name *"
+      },
+      {
+        "index": 1,
+        "key": "email",
+        "label": "EMAIL *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "mantine-fue419d0j email *"
+      },
+      {
+        "index": 2,
+        "key": "company",
+        "label": "COMPANY *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "mantine-gkajjmgd9 company *"
+      },
+      {
+        "index": 3,
+        "key": "unknown",
+        "label": "PRODUCT OF INTEREST *",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "CurieOS",
+          "Next-Generation Cooling",
+          "Data Center Engineering Solutions",
+          "General inquiry"
+        ],
+        "marker": "mantine-a191rcga4 combobox product of interest *"
+      },
+      {
+        "index": 4,
+        "key": "message",
+        "label": "MESSAGE *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "mantine-6s70mu53a message *"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "_field_url"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8742",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First Name*",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "fname first-name first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last Name*",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "last-name last-name last name*"
+      },
+      {
+        "index": 2,
+        "key": "company",
+        "label": "Company name*",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company-name company-name company name*"
+      },
+      {
+        "index": 3,
+        "key": "email",
+        "label": "Email*",
+        "type": "email",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email email*"
+      },
+      {
+        "index": 4,
+        "key": "phone",
+        "label": "Phone number",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone phone number"
+      },
+      {
+        "index": 5,
+        "key": "message",
+        "label": "Message*",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-8867",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": 403,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-8875",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [
+      "identity"
+    ],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "message",
+        "label": "Tell us your requirement",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "quick_inquiry_requirment tell us your requirement"
+      },
+      {
+        "index": 1,
+        "key": "phone",
+        "label": "+91",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "mobile quick_inquiry_mobile +91"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9048",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [
+      "identity"
+    ],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "unknown",
+        "label": "interest-argument",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "interest-argument interest-argument"
+      },
+      {
+        "index": 1,
+        "key": "message",
+        "label": "Describe the information you need",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "600",
+        "marker": "describe the information you need describe the information you need"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9119",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": 403,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-9203",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT_AFTER_SUBMIT",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": true,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "Your Name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "100",
+        "marker": "your-name input_comp-l5f12oxt1   your name"
+      },
+      {
+        "index": 1,
+        "key": "phone",
+        "label": "Mobile",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone input_comp-l5f1nnmf mobile"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "E-mail",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "250",
+        "marker": "email input_comp-l5f12oyu1   e-mail"
+      },
+      {
+        "index": 3,
+        "key": "message",
+        "label": "Questions",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "textarea_comp-l5f12oyx1   questions"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9305",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "enter the text shown in the image:"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "company",
+        "label": "Company",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contact-215][company] company"
+      },
+      {
+        "index": 1,
+        "key": "unknown",
+        "label": "Salutation",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contact-215][salutation] salutation salutation"
+      },
+      {
+        "index": 2,
+        "key": "first_name",
+        "label": "Forename *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contact-215][firstname] forename *"
+      },
+      {
+        "index": 3,
+        "key": "last_name",
+        "label": "Name *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contact-215][lastname] name *"
+      },
+      {
+        "index": 4,
+        "key": "address",
+        "label": "Street",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contact-215][text-3] street"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "House Number",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contact-215][text-4] house number"
+      },
+      {
+        "index": 6,
+        "key": "postal_code",
+        "label": "Zip Code",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contact-215][text-1] zip code"
+      },
+      {
+        "index": 7,
+        "key": "unknown",
+        "label": "Place",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contact-215][text-2] place"
+      },
+      {
+        "index": 8,
+        "key": "phone",
+        "label": "Telephone",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contact-215][telephone] telephone"
+      },
+      {
+        "index": 9,
+        "key": "email",
+        "label": "Email *",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contact-215][email] email *"
+      },
+      {
+        "index": 10,
+        "key": "message",
+        "label": "Message *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contact-215][message] message *"
+      },
+      {
+        "index": 11,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contact-215][t2qz86bkf9pkpaoobgi5hvxi]"
+      },
+      {
+        "index": 12,
+        "key": "unknown",
+        "label": "Enter the text shown in the image:",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "enter the text shown in the image:"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9350",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "tx_powermail_pi1[field][salutation] powermail_field_salutation salutation*"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 2,
+        "key": "company",
+        "label": "Company",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_powermail_pi1[field][company] powermail_field_company company  company"
+      },
+      {
+        "index": 3,
+        "key": "unknown",
+        "label": "Salutation*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Mr.",
+          "Mrs."
+        ],
+        "marker": "tx_powermail_pi1[field][salutation] powermail_field_salutation salutation*"
+      },
+      {
+        "index": 4,
+        "key": "role",
+        "label": "Title",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_powermail_pi1[field][title] powermail_field_title title  title"
+      },
+      {
+        "index": 5,
+        "key": "first_name",
+        "label": "First Name *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_powermail_pi1[field][firstname] powermail_field_firstname first name  * first name *"
+      },
+      {
+        "index": 6,
+        "key": "last_name",
+        "label": "Last Name *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_powermail_pi1[field][lastname] powermail_field_lastname last name  * last name *"
+      },
+      {
+        "index": 7,
+        "key": "email",
+        "label": "E-mail address *",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_powermail_pi1[field][email] powermail_field_email e-mail address  * e-mail address *"
+      },
+      {
+        "index": 8,
+        "key": "address",
+        "label": "Address *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_powermail_pi1[field][address] powermail_field_address address  * address *"
+      },
+      {
+        "index": 9,
+        "key": "postal_code",
+        "label": "ZIP/City *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_powermail_pi1[field][zip] powermail_field_zip zip/city  * zip/city *"
+      },
+      {
+        "index": 10,
+        "key": "city",
+        "label": "City *",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_powermail_pi1[field][city] powermail_field_city city  * city *"
+      },
+      {
+        "index": 11,
+        "key": "country",
+        "label": "Country*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "tx_powermail_pi1[field][country] powermail_field_country country*"
+      },
+      {
+        "index": 17,
+        "key": "message",
+        "label": "Your message",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_powermail_pi1[field][message] powermail_field_message your message your message"
+      },
+      {
+        "index": 19,
+        "key": "unknown",
+        "label": "Don't fill this field!",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "tx_powermail_pi1[field][__hp] powermail_hp_12 don't fill this field!"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9353",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "input_7.3 input_2_7_3 first",
+      "input_7.6 input_2_7_6 last"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "unknown",
+        "label": "First",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "input_7.3 input_2_7_3 first"
+      },
+      {
+        "index": 1,
+        "key": "unknown",
+        "label": "Last",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "input_7.6 input_2_7_6 last"
+      },
+      {
+        "index": 2,
+        "key": "company",
+        "label": "Company",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "input_4 input_2_4 company"
+      },
+      {
+        "index": 3,
+        "key": "country",
+        "label": "Country",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "input_8 input_2_8 country"
+      },
+      {
+        "index": 4,
+        "key": "email",
+        "label": "Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "input_5 input_2_5 email*"
+      },
+      {
+        "index": 5,
+        "key": "phone",
+        "label": "Phone",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "input_9 input_2_9 phone"
+      },
+      {
+        "index": 6,
+        "key": "message",
+        "label": "Please let us know your question or request*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "input_6 input_2_6 please let us know your question or request*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9355",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "company",
+        "label": "Azienda",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-company azienda azienda"
+      },
+      {
+        "index": 1,
+        "key": "first_name",
+        "label": "Nome",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-name nome nome"
+      },
+      {
+        "index": 2,
+        "key": "address",
+        "label": "indirizzo",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-address indirizzo indirizzo"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "Telefono",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-phone telefono telefono"
+      },
+      {
+        "index": 4,
+        "key": "email",
+        "label": "Email",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-email email email"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9370",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "company",
+        "label": "Company",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-company company company"
+      },
+      {
+        "index": 1,
+        "key": "name",
+        "label": "Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-name name name"
+      },
+      {
+        "index": 2,
+        "key": "address",
+        "label": "Address",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-address address address"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "Phone",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-phone phone phone"
+      },
+      {
+        "index": 4,
+        "key": "email",
+        "label": "Email",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "your-email email email"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9465",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-9561",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "text-bf2-1 bf2-1-1",
+      "text-bf2-2 bf2-2-1",
+      "text-bf2-7 bf2-7-1",
+      "text-bf2-8 bf2-8-1"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 4,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "text-bf2-1 bf2-1-1"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "text-bf2-2 bf2-2-1"
+      },
+      {
+        "index": 6,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "text-bf2-7 bf2-7-1"
+      },
+      {
+        "index": 7,
+        "key": "email",
+        "label": "",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email-bf2-3 bf2-3-1"
+      },
+      {
+        "index": 8,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "text-bf2-8 bf2-8-1"
+      },
+      {
+        "index": 10,
+        "key": "unknown",
+        "label": "Search Options",
+        "type": "search",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "search options.. search options search options"
+      },
+      {
+        "index": 13,
+        "key": "unknown",
+        "label": "Search Options",
+        "type": "search",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "search options.. search options search options"
+      },
+      {
+        "index": 14,
+        "key": "message",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "textarea-bf2-5 bf2-5-1"
+      },
+      {
+        "index": 10000,
+        "key": "unknown",
+        "label": "Dropdown",
+        "type": "custom_dropdown",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "marker": "dropdown combobox dropdown"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9562",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "checkbox_0"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[name] form-field-name name name"
+      },
+      {
+        "index": 1,
+        "key": "email",
+        "label": "Email",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[email] form-field-email email email"
+      },
+      {
+        "index": 2,
+        "key": "phone",
+        "label": "Telefonnummer",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[field_5f1cb3a] form-field-field_5f1cb3a telefonnummer telefonnummer"
+      },
+      {
+        "index": 3,
+        "key": "company",
+        "label": "Firma (Optional)",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[field_5ea694b] form-field-field_5ea694b firma (optional) firma (optional)"
+      },
+      {
+        "index": 4,
+        "key": "message",
+        "label": "Ihre Nachricht an uns",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[message] form-field-message ihre nachricht an uns ihre nachricht an uns"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9563",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "firstname firstname first name first name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "lastname lastname last name last name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "email email email email"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9593",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMIT_CLICK_OUTCOME_UNKNOWN",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 4,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "text-bf2-1 bf2-1-1"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "text-bf2-2 bf2-2-1"
+      },
+      {
+        "index": 6,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "text-bf2-7 bf2-7-1"
+      },
+      {
+        "index": 7,
+        "key": "email",
+        "label": "",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email-bf2-3 bf2-3-1"
+      },
+      {
+        "index": 8,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "text-bf2-8 bf2-8-1"
+      },
+      {
+        "index": 10,
+        "key": "unknown",
+        "label": "Search Options",
+        "type": "search",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "search options.. search options search options"
+      },
+      {
+        "index": 13,
+        "key": "unknown",
+        "label": "Search Options",
+        "type": "search",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "search options.. search options search options"
+      },
+      {
+        "index": 14,
+        "key": "message",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "textarea-bf2-5 bf2-5-1"
+      },
+      {
+        "index": 10000,
+        "key": "unknown",
+        "label": "Dropdown",
+        "type": "custom_dropdown",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "marker": "dropdown combobox dropdown"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9630",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "Prior executor shard was cancelled during customer execution and produced no positive receipt, explicit negative failure, or preserved browser evidence. Ambiguous claim locked to prevent blind retry and cross-channel duplicate.",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-9683",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "firstname firstname first name first name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "lastname lastname last name last name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "email email email email"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9742",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "subject"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "subject",
+        "label": "Purpose (required)",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Contact",
+          "Appointment",
+          "Use case",
+          "Other: specify your need in the message."
+        ],
+        "marker": "subject subject purpose (required)"
+      },
+      {
+        "index": 1,
+        "key": "company",
+        "label": "Company",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company"
+      },
+      {
+        "index": 2,
+        "key": "name",
+        "label": "Full Name (required)",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "name full name (required)"
+      },
+      {
+        "index": 3,
+        "key": "email",
+        "label": "Email addresse (required) Expected format: name@domain.tld",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email addresse (required) expected format: name@domain.tld"
+      },
+      {
+        "index": 4,
+        "key": "country",
+        "label": "Country",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "country country"
+      },
+      {
+        "index": 5,
+        "key": "message",
+        "label": "Message (required) Describe your needs or questions here.",
+        "type": "content",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "content message (required) describe your needs or questions here."
+      }
+    ]
+  },
+  {
+    "case_id": "event-9764",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "subject",
+        "label": "Purpose (required)",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "subject subject purpose (required)"
+      },
+      {
+        "index": 1,
+        "key": "company",
+        "label": "Company",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company"
+      },
+      {
+        "index": 2,
+        "key": "name",
+        "label": "Full Name (required)",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "name full name (required)"
+      },
+      {
+        "index": 3,
+        "key": "email",
+        "label": "Email addresse (required) Expected format: name@domain.tld",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email addresse (required) expected format: name@domain.tld"
+      },
+      {
+        "index": 4,
+        "key": "country",
+        "label": "Country",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "country country"
+      },
+      {
+        "index": 5,
+        "key": "message",
+        "label": "Message (required) Describe your needs or questions here.",
+        "type": "content",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "content message (required) describe your needs or questions here."
+      }
+    ]
+  },
+  {
+    "case_id": "event-9773",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First Name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-e99cb271-91be-4448-91dd-48165bbe8461 first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last Name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-e99cb271-91be-4448-91dd-48165bbe8461 last name*"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-e99cb271-91be-4448-91dd-48165bbe8461 email*"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "Mobile phone number*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "mobilephone mobilephone-e99cb271-91be-4448-91dd-48165bbe8461 mobile phone number*"
+      },
+      {
+        "index": 4,
+        "key": "message",
+        "label": "Message*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message-e99cb271-91be-4448-91dd-48165bbe8461 message*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9774",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "contact_us_topic contact_us_topic-e24e71b5-c408-4f39-90bf-2393f3fdbf02_267 how can we help?*"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-e24e71b5-c408-4f39-90bf-2393f3fdbf02_267 first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-e24e71b5-c408-4f39-90bf-2393f3fdbf02_267 last name*"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-e24e71b5-c408-4f39-90bf-2393f3fdbf02_267 email*"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "Phone number",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone phone-e24e71b5-c408-4f39-90bf-2393f3fdbf02_267 phone number"
+      },
+      {
+        "index": 4,
+        "key": "role",
+        "label": "Job title",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "jobtitle jobtitle-e24e71b5-c408-4f39-90bf-2393f3fdbf02_267 job title"
+      },
+      {
+        "index": 5,
+        "key": "country",
+        "label": "Country*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "country_list country_list-e24e71b5-c408-4f39-90bf-2393f3fdbf02_267 country*"
+      },
+      {
+        "index": 6,
+        "key": "unknown",
+        "label": "How can we help?*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Please Select",
+          "Talk to sales",
+          "I want a demo",
+          "General inquiry",
+          "Other"
+        ],
+        "marker": "contact_us_topic contact_us_topic-e24e71b5-c408-4f39-90bf-2393f3fdbf02_267 how can we help?*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9788",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "mobilephone mobilephone-189cd05e-b493-4925-91d6-1be070a1bbcb +49 123 456 7890 +49 123 456 7890"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "Jane",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-189cd05e-b493-4925-91d6-1be070a1bbcb jane jane"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Doe",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-189cd05e-b493-4925-91d6-1be070a1bbcb doe doe"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "jane@company.com",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-189cd05e-b493-4925-91d6-1be070a1bbcb jane@company.com jane@company.com"
+      },
+      {
+        "index": 3,
+        "key": "unknown",
+        "label": "+49 123 456 7890",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [],
+        "marker": "mobilephone mobilephone-189cd05e-b493-4925-91d6-1be070a1bbcb +49 123 456 7890 +49 123 456 7890"
+      },
+      {
+        "index": 4,
+        "key": "company",
+        "label": "Acme Manufacturing",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company-189cd05e-b493-4925-91d6-1be070a1bbcb acme manufacturing acme manufacturing"
+      },
+      {
+        "index": 5,
+        "key": "role",
+        "label": "JOB TITLE",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "jobtitle jobtitle-189cd05e-b493-4925-91d6-1be070a1bbcb job title"
+      },
+      {
+        "index": 6,
+        "key": "message",
+        "label": "Hi! I would like to schedule a demo.",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message-189cd05e-b493-4925-91d6-1be070a1bbcb hi! i would like to schedule a demo.  hi! i would like to schedule a demo."
+      }
+    ]
+  },
+  {
+    "case_id": "event-9792",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMIT_CLICK_OUTCOME_UNKNOWN",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First Name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-a7c6c9d4-af3d-4085-bc02-a2cf03318017_3639 first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last Name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-a7c6c9d4-af3d-4085-bc02-a2cf03318017_3639 last name*"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Work Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-a7c6c9d4-af3d-4085-bc02-a2cf03318017_3639 work email*"
+      },
+      {
+        "index": 3,
+        "key": "country",
+        "label": "Country*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "country_list country_list-a7c6c9d4-af3d-4085-bc02-a2cf03318017_3639 country*"
+      },
+      {
+        "index": 4,
+        "key": "company",
+        "label": "Company*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company-a7c6c9d4-af3d-4085-bc02-a2cf03318017_3639 company*"
+      },
+      {
+        "index": 5,
+        "key": "category",
+        "label": "Inquiry Category*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "contact_us_category contact_us_category-a7c6c9d4-af3d-4085-bc02-a2cf03318017_3639 inquiry category*"
+      },
+      {
+        "index": 6,
+        "key": "message",
+        "label": "Please describe your request",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "your_message your_message-a7c6c9d4-af3d-4085-bc02-a2cf03318017_3639 please describe your request please describe your request"
+      }
+    ]
+  },
+  {
+    "case_id": "event-9806",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First Name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "first-name first-name first name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last Name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "last-name last-name last name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email Address",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "email email email address"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "Phone Number",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "phone-number phone-number phone number"
+      },
+      {
+        "index": 4,
+        "key": "role",
+        "label": "Job Title",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "job-title job-title job title"
+      },
+      {
+        "index": 6,
+        "key": "company",
+        "label": "Company Name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "company-name company-name company name"
+      },
+      {
+        "index": 7,
+        "key": "industry",
+        "label": "Industry",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "256",
+        "marker": "industry industry industry"
+      },
+      {
+        "index": 10000,
+        "key": "unknown",
+        "label": "YOUR INFO",
+        "type": "custom_dropdown",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "marker": "w-dropdown-toggle-5 button your info"
+      }
+    ]
+  },
+  {
+    "case_id": "event-10985",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-11117",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 5,
+        "key": "company",
+        "label": "Company Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company_name 9ac8bee7-70d8-40b9-9b24-593b7ebc62a6 company name"
+      },
+      {
+        "index": 6,
+        "key": "email",
+        "label": "Email",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email 9ac8bee7-7c01-4e52-9bd1-c0d26caa6b25 email"
+      },
+      {
+        "index": 7,
+        "key": "phone",
+        "label": "Phone number",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone 9ac8bee7-89dd-4759-8562-77f4ed144b11 phone number"
+      },
+      {
+        "index": 8,
+        "key": "message",
+        "label": "Your Message",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "3000",
+        "marker": "message 9ac8bee7-965a-4922-84e8-63a920c9ecb3 your message"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11118",
+    "action": "FORM_FAILED",
+    "reason": "FORM_ACTION_HOST_UNVERIFIED",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-11119",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First Name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-711b1066-4ff7-425c-be9b-66dd4f8ceef4 first name first name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last Name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-711b1066-4ff7-425c-be9b-66dd4f8ceef4 last name last name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "you@yourcompany.com",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-711b1066-4ff7-425c-be9b-66dd4f8ceef4 you@yourcompany.com you@yourcompany.com"
+      },
+      {
+        "index": 3,
+        "key": "company",
+        "label": "Company name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company-711b1066-4ff7-425c-be9b-66dd4f8ceef4 company name company name"
+      },
+      {
+        "index": 4,
+        "key": "country",
+        "label": "Country*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "country country-711b1066-4ff7-425c-be9b-66dd4f8ceef4 country*"
+      },
+      {
+        "index": 5,
+        "key": "phone",
+        "label": "Phone number",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "phone_ext-711b1066-4ff7-425c-be9b-66dd4f8ceef4 phone number"
+      },
+      {
+        "index": 6,
+        "key": "phone",
+        "label": "Phone number",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone-711b1066-4ff7-425c-be9b-66dd4f8ceef4 phone number phone number"
+      },
+      {
+        "index": 7,
+        "key": "message",
+        "label": "Tell us a bit more about your project",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message-711b1066-4ff7-425c-be9b-66dd4f8ceef4 tell us a bit more about your project tell us a bit more about your project"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11122",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-11138",
+    "action": "FORM_FAILED",
+    "reason": "FORM_VALIDATION_FAILED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": true,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 5,
+        "key": "company",
+        "label": "Company Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company_name 9ac8bee7-70d8-40b9-9b24-593b7ebc62a6 company name"
+      },
+      {
+        "index": 6,
+        "key": "email",
+        "label": "Email",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email 9ac8bee7-7c01-4e52-9bd1-c0d26caa6b25 email"
+      },
+      {
+        "index": 7,
+        "key": "phone",
+        "label": "Phone number",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone 9ac8bee7-89dd-4759-8562-77f4ed144b11 phone number"
+      },
+      {
+        "index": 8,
+        "key": "message",
+        "label": "Your Message",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": "3000",
+        "marker": "message 9ac8bee7-965a-4922-84e8-63a920c9ecb3 your message"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11162",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": 403,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-11229",
+    "action": "FORM_FAILED",
+    "reason": "FORM_VALIDATION_FAILED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": true,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-ed714f27-404e-4c71-8cd0-35dced06d6ca_3115 first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-ed714f27-404e-4c71-8cd0-35dced06d6ca_3115 last name*"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-ed714f27-404e-4c71-8cd0-35dced06d6ca_3115 email*"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "Phone",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone phone-ed714f27-404e-4c71-8cd0-35dced06d6ca_3115 phone"
+      },
+      {
+        "index": 4,
+        "key": "country",
+        "label": "Country*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "country country-ed714f27-404e-4c71-8cd0-35dced06d6ca_3115 country*"
+      },
+      {
+        "index": 10,
+        "key": "message",
+        "label": "Message*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message-ed714f27-404e-4c71-8cd0-35dced06d6ca_3115 message*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11267",
+    "action": "FORM_FAILED",
+    "reason": "CAPTCHA_PRESENT",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-11268",
+    "action": "FORM_FAILED",
+    "reason": "FORM_VALIDATION_FAILED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": true,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "last_name",
+        "label": "Last Name *",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "xlname last name * last name *"
+      },
+      {
+        "index": 1,
+        "key": "first_name",
+        "label": "First Name *",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "xfname first name * first name *"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email *",
+        "type": "email",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "xmail email * email *"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "Phone *",
+        "type": "phone",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "xphone phone * phone *"
+      },
+      {
+        "index": 4,
+        "key": "country",
+        "label": "Country * Albania Algeria Angola Antigua and Barbuda Argentina Armenia Australia Austria Azerbaijan Bahamas Bahrain Bangladesh Barbados Belarus Belgium Belize Benin Bhutan Bolivia Bosnia & Herzegovina Botswana Brazil Brunei Bulgaria Burkina Faso Burundi Cambodia Cameroon Canada Cape Verde Cayman Isl",
+        "type": "text",
+        "required": false,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "xcountry country * albania algeria angola antigua and barbuda argentina armenia australia austria azerbaijan bahamas bahrain bangladesh barbados belarus belgium belize benin bhutan bolivia bosnia & herzegovina botswana brazil brunei bulgaria burkina faso burundi cambodia cameroon canada cape verde cayman isl"
+      },
+      {
+        "index": 5,
+        "key": "company",
+        "label": "Company *",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "xcompany company * company *"
+      },
+      {
+        "index": 6,
+        "key": "website",
+        "label": "Purpose * [unitech website] Sales Inquiry [unitech website] Technical Issue [unitech website] Local sales channel [unitech website] Become Partners [unitech website] Others",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "xsubject purpose * [unitech website] sales inquiry [unitech website] technical issue [unitech website] local sales channel [unitech website] become partners [unitech website] others"
+      },
+      {
+        "index": 7,
+        "key": "unknown",
+        "label": "Product Group PA768 (6th Gen) EA660 (3rd Gen) EA630 Plus (2nd Gen) EA530 (3rd Gen) EA520 (2nd Gen) HT730 Plus (2nd Gen) HT330 RT112 Windows RT112 (4th Gen) TB170 TB110 WD200 (2nd Gen) Showcase MS852 MS852 plus MS852 LR MS838 MS852N MS832 MS822B MS852P MS838B MS852B MS852B plus MS852B LR MS851B MS852",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "xprod product group pa768 (6th gen) ea660 (3rd gen) ea630 plus (2nd gen) ea530 (3rd gen) ea520 (2nd gen) ht730 plus (2nd gen) ht330 rt112 windows rt112 (4th gen) tb170 tb110 wd200 (2nd gen) showcase ms852 ms852 plus ms852 lr ms838 ms852n ms832 ms822b ms852p ms838b ms852b ms852b plus ms852b lr ms851b ms852"
+      },
+      {
+        "index": 8,
+        "key": "message",
+        "label": "Message *",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "xmessage message * message *"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11276",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "last_name",
+        "label": "Last Name *",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "xlname last name * last name *"
+      },
+      {
+        "index": 1,
+        "key": "first_name",
+        "label": "First Name *",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "xfname first name * first name *"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email *",
+        "type": "email",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "xmail email * email *"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "Phone *",
+        "type": "phone",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "xphone phone * phone *"
+      },
+      {
+        "index": 4,
+        "key": "country",
+        "label": "Country * Albania Algeria Angola Antigua and Barbuda Argentina Armenia Australia Austria Azerbaijan Bahamas Bahrain Bangladesh Barbados Belarus Belgium Belize Benin Bhutan Bolivia Bosnia & Herzegovina Botswana Brazil Brunei Bulgaria Burkina Faso Burundi Cambodia Cameroon Canada Cape Verde Cayman Isl",
+        "type": "text",
+        "required": false,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "xcountry country * albania algeria angola antigua and barbuda argentina armenia australia austria azerbaijan bahamas bahrain bangladesh barbados belarus belgium belize benin bhutan bolivia bosnia & herzegovina botswana brazil brunei bulgaria burkina faso burundi cambodia cameroon canada cape verde cayman isl"
+      },
+      {
+        "index": 5,
+        "key": "company",
+        "label": "Company *",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "xcompany company * company *"
+      },
+      {
+        "index": 6,
+        "key": "website",
+        "label": "Purpose * [unitech website] Sales Inquiry [unitech website] Technical Issue [unitech website] Local sales channel [unitech website] Become Partners [unitech website] Others",
+        "type": "text",
+        "required": false,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "xsubject purpose * [unitech website] sales inquiry [unitech website] technical issue [unitech website] local sales channel [unitech website] become partners [unitech website] others"
+      },
+      {
+        "index": 7,
+        "key": "unknown",
+        "label": "Product Group PA768 (6th Gen) EA660 (3rd Gen) EA630 Plus (2nd Gen) EA530 (3rd Gen) EA520 (2nd Gen) HT730 Plus (2nd Gen) HT330 RT112 Windows RT112 (4th Gen) TB170 TB110 WD200 (2nd Gen) Showcase MS852 MS852 plus MS852 LR MS838 MS852N MS832 MS822B MS852P MS838B MS852B MS852B plus MS852B LR MS851B MS852",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "xprod product group pa768 (6th gen) ea660 (3rd gen) ea630 plus (2nd gen) ea530 (3rd gen) ea520 (2nd gen) ht730 plus (2nd gen) ht330 rt112 windows rt112 (4th gen) tb170 tb110 wd200 (2nd gen) showcase ms852 ms852 plus ms852 lr ms838 ms852n ms832 ms822b ms852p ms838b ms852b ms852b plus ms852b lr ms851b ms852"
+      },
+      {
+        "index": 8,
+        "key": "message",
+        "label": "Message *",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "xmessage message * message *"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11324",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "q search search"
+    ],
+    "core_unfilled": [
+      "identity"
+    ],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "unknown",
+        "label": "Search",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": "20",
+        "available_choices": [],
+        "marker": "q search search"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11368",
+    "action": "FORM_FAILED",
+    "reason": "FORM_NAVIGATION_FAILED",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-11371",
+    "action": "FORM_FAILED",
+    "reason": "Deterministic executor could not navigate the verified first-party contact form; no submission was attempted and no discovery candidate was returned. Automated form retry exhausted; manual recovery required.",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-11419",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": 403,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-11421",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [
+      "company"
+    ],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname form-input-firstname first name first name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname form-input-lastname last name last name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email",
+        "type": "email",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email form-input-email email email"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "Cell Phone",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "cellphone form-input-cellphone cell phone cell phone"
+      },
+      {
+        "index": 4,
+        "key": "country",
+        "label": "Country",
+        "type": "text",
+        "required": false,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "country form-input-country country"
+      },
+      {
+        "index": 5,
+        "key": "company",
+        "label": "Company",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "company form-input-company company"
+      },
+      {
+        "index": 6,
+        "key": "message",
+        "label": "Message",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message form-input-message message message"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11423",
+    "action": "FORM_FAILED",
+    "reason": "The recovered official Pickit form exposed a company identity field that remained unmapped. No submission was attempted; the bounded repair is exhausted and manual mapping is required.",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-11424",
+    "action": "FORM_FAILED",
+    "reason": "The re-verified official Kroeplin form returned HTTP 403 to the executor. No submission was attempted; the bounded repair is exhausted and manual recovery is required.",
+    "submission_attempted": null,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-11475",
+    "action": "FORM_FAILED",
+    "reason": "FORM_VALIDATION_FAILED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": true,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "Name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "text-1 name name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "text-2 last name last name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "email@address.com",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "email-1 email@address.com email@address.com"
+      },
+      {
+        "index": 3,
+        "key": "phone",
+        "label": "+123 456 789",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "400",
+        "marker": "tel-1 +123 456 789 +123 456 789"
+      },
+      {
+        "index": 4,
+        "key": "message",
+        "label": "Enter your message here...",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": "2000",
+        "marker": "textarea-1 enter your message here... enter your message here..."
+      }
+    ]
+  },
+  {
+    "case_id": "event-11618",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "inquiry inquiry-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 inquiry*"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 last name*"
+      },
+      {
+        "index": 2,
+        "key": "role",
+        "label": "Job title*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "jobtitle jobtitle-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 job title*"
+      },
+      {
+        "index": 3,
+        "key": "company",
+        "label": "Company name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 company name*"
+      },
+      {
+        "index": 4,
+        "key": "email",
+        "label": "Company-affiliated email address*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 company-affiliated email address*"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "Inquiry*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Please Select",
+          "General",
+          "Demo/Request Access",
+          "Collaboration",
+          "Investment"
+        ],
+        "marker": "inquiry inquiry-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 inquiry*"
+      },
+      {
+        "index": 6,
+        "key": "message",
+        "label": "Message*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 message*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11623",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 last name*"
+      },
+      {
+        "index": 2,
+        "key": "role",
+        "label": "Job title*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "jobtitle jobtitle-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 job title*"
+      },
+      {
+        "index": 3,
+        "key": "company",
+        "label": "Company name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 company name*"
+      },
+      {
+        "index": 4,
+        "key": "email",
+        "label": "Company-affiliated email address*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 company-affiliated email address*"
+      },
+      {
+        "index": 5,
+        "key": "unknown",
+        "label": "Inquiry*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "inquiry inquiry-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 inquiry*"
+      },
+      {
+        "index": 6,
+        "key": "message",
+        "label": "Message*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message-dd0bd351-312f-45b1-923d-ad87a530a9c0_8877 message*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11707",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "discovery_source"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-58ba739f-35a6-468f-82e4-6ca55859e979 first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-58ba739f-35a6-468f-82e4-6ca55859e979 last name*"
+      },
+      {
+        "index": 2,
+        "key": "industry",
+        "label": "Primary Industry*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "primary_industry primary_industry-58ba739f-35a6-468f-82e4-6ca55859e979 primary industry*"
+      },
+      {
+        "index": 3,
+        "key": "role",
+        "label": "Job Title*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "jobtitle jobtitle-58ba739f-35a6-468f-82e4-6ca55859e979 job title*"
+      },
+      {
+        "index": 4,
+        "key": "company",
+        "label": "Company name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company-58ba739f-35a6-468f-82e4-6ca55859e979 company name*"
+      },
+      {
+        "index": 5,
+        "key": "address",
+        "label": "Street Address*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "address address-58ba739f-35a6-468f-82e4-6ca55859e979 street address*"
+      },
+      {
+        "index": 6,
+        "key": "address",
+        "label": "Street Address 2",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "street_address_2 street_address_2-58ba739f-35a6-468f-82e4-6ca55859e979 street address 2"
+      },
+      {
+        "index": 7,
+        "key": "city",
+        "label": "City*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "city city-58ba739f-35a6-468f-82e4-6ca55859e979 city*"
+      },
+      {
+        "index": 8,
+        "key": "region",
+        "label": "State/Region*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "state state-58ba739f-35a6-468f-82e4-6ca55859e979 state/region*"
+      },
+      {
+        "index": 9,
+        "key": "postal_code",
+        "label": "ZIP/Postal Code*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "zip zip-58ba739f-35a6-468f-82e4-6ca55859e979 zip/postal code*"
+      },
+      {
+        "index": 10,
+        "key": "email",
+        "label": "Business Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-58ba739f-35a6-468f-82e4-6ca55859e979 business email*"
+      },
+      {
+        "index": 11,
+        "key": "phone",
+        "label": "Phone number*",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone phone-58ba739f-35a6-468f-82e4-6ca55859e979 phone number*"
+      },
+      {
+        "index": 12,
+        "key": "unknown",
+        "label": "Fax Number",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "fax fax-58ba739f-35a6-468f-82e4-6ca55859e979 fax number"
+      },
+      {
+        "index": 21,
+        "key": "message",
+        "label": "How can we support you (please elaborate):*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message-58ba739f-35a6-468f-82e4-6ca55859e979 how can we support you (please elaborate):*"
+      },
+      {
+        "index": 22,
+        "key": "discovery_source",
+        "label": "How did you hear about NSL?*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Please Select",
+          "Magazine",
+          "Referral",
+          "Direct Mail",
+          "Email",
+          "Social Media",
+          "Web Search",
+          "Online Directory",
+          "Tradeshow",
+          "Current Customer",
+          "Other"
+        ],
+        "marker": "how_did_you_hear_about_nsl_ how_did_you_hear_about_nsl_-58ba739f-35a6-468f-82e4-6ca55859e979 how did you hear about nsl?*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11708",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "Campany",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[name] form-field-name campany campany"
+      },
+      {
+        "index": 1,
+        "key": "name",
+        "label": "Name",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[field_ed5fd59] form-field-field_ed5fd59 name name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Tel.",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[email] form-field-email tel. tel."
+      },
+      {
+        "index": 3,
+        "key": "email",
+        "label": "E-mail",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[field_b7243bf] form-field-field_b7243bf e-mail e-mail"
+      },
+      {
+        "index": 4,
+        "key": "role",
+        "label": "Title",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[field_e811c10] form-field-field_e811c10 title title"
+      },
+      {
+        "index": 5,
+        "key": "message",
+        "label": "Contents",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "form_fields[message] form-field-message contents contents"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11714",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [
+      "discovery_source"
+    ],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "firstname firstname-58ba739f-35a6-468f-82e4-6ca55859e979 first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "lastname lastname-58ba739f-35a6-468f-82e4-6ca55859e979 last name*"
+      },
+      {
+        "index": 2,
+        "key": "industry",
+        "label": "Primary Industry*",
+        "type": "text",
+        "required": true,
+        "action": "SELECTED",
+        "maxlength": null,
+        "marker": "primary_industry primary_industry-58ba739f-35a6-468f-82e4-6ca55859e979 primary industry*"
+      },
+      {
+        "index": 3,
+        "key": "role",
+        "label": "Job Title*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "jobtitle jobtitle-58ba739f-35a6-468f-82e4-6ca55859e979 job title*"
+      },
+      {
+        "index": 4,
+        "key": "company",
+        "label": "Company name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "company company-58ba739f-35a6-468f-82e4-6ca55859e979 company name*"
+      },
+      {
+        "index": 5,
+        "key": "address",
+        "label": "Street Address*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "address address-58ba739f-35a6-468f-82e4-6ca55859e979 street address*"
+      },
+      {
+        "index": 6,
+        "key": "address",
+        "label": "Street Address 2",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "street_address_2 street_address_2-58ba739f-35a6-468f-82e4-6ca55859e979 street address 2"
+      },
+      {
+        "index": 7,
+        "key": "city",
+        "label": "City*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "city city-58ba739f-35a6-468f-82e4-6ca55859e979 city*"
+      },
+      {
+        "index": 8,
+        "key": "region",
+        "label": "State/Region*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "state state-58ba739f-35a6-468f-82e4-6ca55859e979 state/region*"
+      },
+      {
+        "index": 9,
+        "key": "postal_code",
+        "label": "ZIP/Postal Code*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "zip zip-58ba739f-35a6-468f-82e4-6ca55859e979 zip/postal code*"
+      },
+      {
+        "index": 10,
+        "key": "email",
+        "label": "Business Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "email email-58ba739f-35a6-468f-82e4-6ca55859e979 business email*"
+      },
+      {
+        "index": 11,
+        "key": "phone",
+        "label": "Phone number*",
+        "type": "tel",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "phone phone-58ba739f-35a6-468f-82e4-6ca55859e979 phone number*"
+      },
+      {
+        "index": 12,
+        "key": "unknown",
+        "label": "Fax Number",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "fax fax-58ba739f-35a6-468f-82e4-6ca55859e979 fax number"
+      },
+      {
+        "index": 21,
+        "key": "message",
+        "label": "How can we support you (please elaborate):*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "message message-58ba739f-35a6-468f-82e4-6ca55859e979 how can we support you (please elaborate):*"
+      },
+      {
+        "index": 22,
+        "key": "discovery_source",
+        "label": "How did you hear about NSL?*",
+        "type": "text",
+        "required": true,
+        "action": "REQUIRED_UNMAPPED",
+        "maxlength": null,
+        "available_choices": [
+          "Please Select",
+          "Magazine",
+          "Referral",
+          "Direct Mail",
+          "Email",
+          "Social Media",
+          "Web Search",
+          "Online Directory",
+          "Tradeshow",
+          "Current Customer",
+          "Other"
+        ],
+        "marker": "how_did_you_hear_about_nsl_ how_did_you_hear_about_nsl_-58ba739f-35a6-468f-82e4-6ca55859e979 how did you hear about nsl?*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-11799",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": 403,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-11801",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "name",
+        "label": "Your name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "your-name your name"
+      },
+      {
+        "index": 1,
+        "key": "company",
+        "label": "Your company",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "your-company your company"
+      },
+      {
+        "index": 2,
+        "key": "industry",
+        "label": "Your industry",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "your-industry your industry"
+      },
+      {
+        "index": 3,
+        "key": "email",
+        "label": "Your email",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "your-email your email"
+      },
+      {
+        "index": 4,
+        "key": "company",
+        "label": "Brief introduction to your company",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "your-brief brief introduction to your company"
+      },
+      {
+        "index": 5,
+        "key": "message",
+        "label": "Your message (optional)",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "your-message your message (optional)"
+      }
+    ]
+  },
+  {
+    "case_id": "event-12103",
+    "action": "FORM_FAILED",
+    "reason": "REQUIRED_FIELD_MAPPING_UNCERTAIN",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [
+      "identity"
+    ],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-12385",
+    "action": "FORM_UNCONFIRMED",
+    "reason": "SUBMISSION_NOT_CONFIRMED",
+    "submission_attempted": true,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contactmetalle-620][text-1] contactmetalle-620-text-1 first name first name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contactmetalle-620][text-2] contactmetalle-620-text-2 last name last name"
+      },
+      {
+        "index": 2,
+        "key": "unknown",
+        "label": "",
+        "type": "text",
+        "required": false,
+        "action": "OPTIONAL_UNMAPPED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contactmetalle-620][s59xocpyvwufj2zd6mu] contactmetalle-620-s59xocpyvwufj2zd6mu"
+      },
+      {
+        "index": 3,
+        "key": "email",
+        "label": "Email",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contactmetalle-620][email] contactmetalle-620-email email email"
+      },
+      {
+        "index": 4,
+        "key": "phone",
+        "label": "Telephone number",
+        "type": "tel",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contactmetalle-620][telephone-1] contactmetalle-620-telephone-1 telephone number telephone number"
+      },
+      {
+        "index": 5,
+        "key": "message",
+        "label": "Your message",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "tx_form_formframework[contactmetalle-620][message] contactmetalle-620-message your message your message"
+      }
+    ]
+  },
+  {
+    "case_id": "event-13012",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First Name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "wpforms[fields][1][first] wpforms-21-field_1 first name first name"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last Name",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "wpforms[fields][1][last] wpforms-21-field_1-last last name last name"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Email",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "wpforms[fields][2] wpforms-21-field_2 email email"
+      },
+      {
+        "index": 5,
+        "key": "company",
+        "label": "Organization",
+        "type": "text",
+        "required": false,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "wpforms[fields][3] wpforms-21-field_3 organization organization"
+      }
+    ]
+  },
+  {
+    "case_id": "event-13120",
+    "action": "FORM_FAILED",
+    "reason": "MESSAGE_FIELD_MISSING",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": [
+      {
+        "index": 0,
+        "key": "first_name",
+        "label": "First Name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "0-1/firstname 4a736d47-fd7c-474d-bb29-42b55a262467-6-input 4a736d47-fd7c-474d-bb29-42b55a262467-6-label first name*"
+      },
+      {
+        "index": 1,
+        "key": "last_name",
+        "label": "Last Name*",
+        "type": "text",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "0-1/lastname 4a736d47-fd7c-474d-bb29-42b55a262467-5-input 4a736d47-fd7c-474d-bb29-42b55a262467-5-label last name*"
+      },
+      {
+        "index": 2,
+        "key": "email",
+        "label": "Company Email*",
+        "type": "email",
+        "required": true,
+        "action": "FILLED",
+        "maxlength": null,
+        "marker": "0-1/email 4a736d47-fd7c-474d-bb29-42b55a262467-3-input 4a736d47-fd7c-474d-bb29-42b55a262467-3-label company email*"
+      }
+    ]
+  },
+  {
+    "case_id": "event-13123",
+    "action": "FORM_FAILED",
+    "reason": "FORM_NOT_FOUND",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": null,
+    "field_audit": []
+  },
+  {
+    "case_id": "event-13124",
+    "action": "FORM_FAILED",
+    "reason": "FORM_HTTP_403",
+    "submission_attempted": false,
+    "explicit_negative_confirmation": false,
+    "missing_required": [],
+    "core_unfilled": [],
+    "http_status": 403,
+    "field_audit": []
+  }
+]

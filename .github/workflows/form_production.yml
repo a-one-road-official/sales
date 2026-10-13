@@ -78,8 +78,8 @@ jobs:
 
       - name: Form resilience tests
         run: |
-          python -m compileall form_execution.py form_persistence.py form_production.py form_runtime_entrypoint.py
-          pytest -q tests/test_form_execution_resilience.py tests/test_form_runtime_entrypoint.py tests/test_form_production_recovery.py tests/test_form_sender_inputs.py tests/test_form_read_resilience.py
+          python -m compileall form_execution.py form_safety.py form_persistence.py form_production.py form_runtime_entrypoint.py
+          pytest -q tests/test_form_execution_resilience.py tests/test_form_runtime_entrypoint.py tests/test_form_production_recovery.py tests/test_form_sender_inputs.py tests/test_form_read_resilience.py tests/test_form_failure_coverage.py
 
       - name: Execute ChatGPT-claimed form jobs
         run: python form_runtime_entrypoint.py

@@ -28,6 +28,7 @@ from form_persistence import (FormPersistence, discover, read_controls, policy_f
     require_form_start, execution_pending, strict_json, column_label, classify_form_result,
     canonical_domain, execution_payload, packet_digest)
 from form_persistence import FormReadService, runtime_log, read_error_status
+from form_safety import failure_plan
 
 _RUNTIME = None
 
@@ -195,6 +196,8 @@ def compact_form_result(result: dict | None) -> dict:
         "core_unfilled", "filled_field_count", "field_status", "http_status",
         "explicit_negative_confirmation", "discovery_candidates", "recovered_form_url",
         "submitted_message_sha256", "submitted_subject_sha256", "screenshots",
+        "submission_evidence", "preflight", "recovery_plan", "discovery_report",
+        "completed_steps",
     ):
         if key in result:
             value = result.get(key)
@@ -215,6 +218,7 @@ def compact_form_result(result: dict | None) -> dict:
                 "maxlength", "final_value", "error", "available_choices",
                 "phone_country", "phone_country_verified",
                 "sender_contact_verified",
+                "html_semantics",
             )
             if key in item
         }
@@ -424,18 +428,17 @@ def main() -> None:
         # Stored URLs go stale. Recover only when the first attempt provably made
         # no customer submission, then use GET-only discovery + read-only preview
         # before any second external action.
-        recoverable_discovery_reasons = {
-            "FORM_HTTP_403", "FORM_HTTP_404", "FORM_NOT_FOUND",
-            "FORM_NAVIGATION_FAILED", "FORM_HOST_UNVERIFIED",
-            "MESSAGE_FIELD_MISSING",
-        }
         if (
             result.get("status") == "FORM_FAILED"
             and not result.get("submission_attempted")
-            and str(result.get("reason") or "") in recoverable_discovery_reasons
+            and failure_plan(result)['explore']
         ):
-            candidates = discover_official_contact_urls(website, form_url, limit=8)
+            previous = row['meta'].get('form_recovery_progress') or {}
+            tried = previous.get('tried_urls') or []
+            candidates = discover_official_contact_urls(website, form_url, limit=8,exclude_urls=tried)
             result["discovery_candidates"] = candidates
+            runtime_log('FORM_EXPLORATION_START',row=row_number,claim_id=claim_id,
+                original_reason=result.get('reason'),candidates=candidates,saved_copy_changed=False)
             if candidates:
                 preview = executor.preview_candidates(
                     form_urls=candidates,
@@ -493,6 +496,30 @@ def main() -> None:
                     best_attempt["discovery_candidates"] = candidates
                     best_attempt["reason"] = str(best_attempt.get("reason") or "FORM_DISCOVERY_PREVIEW_FAILED")
                     result = best_attempt
+                result['discovery_report']={'candidate_count':len(candidates),
+                    'attempts':[{'url':r.get('form_url'),'status':r.get('status'),
+                        'reason':r.get('reason'),'missing_required':r.get('missing_required',[])}
+                        for r in preview.get('attempts',[])],
+                    'saved_copy_changed':False}
+            progress = {'claim_id':claim_id,'updated_at':now_iso(),
+                'original_reason':result.get('reason'),
+                'tried_urls':list(dict.fromkeys(tried+[form_url]+
+                    [r.get('url') for r in (result.get('discovery_report') or {}).get('attempts',[]) if r.get('url')])),
+                'remaining_urls':[u for u in candidates if u not in
+                    {r.get('url') for r in (result.get('discovery_report') or {}).get('attempts',[])}],
+                'next_action':failure_plan(result)['action'],'saved_copy_changed':False}
+            requested=dict(row['meta'],form_recovery_progress=progress)
+            runtime_log('FORM_EXPLORATION_RESULT_BEFORE_COMMIT',row=row_number,
+                claim_id=claim_id,result=compact_form_result(result),progress=progress)
+            try:
+                row['meta']=write_meta(svc,row_number,requested,expected_row=row,
+                    reason='Preserve official-form exploration frontier and actual blockers')
+            except Exception as exc:
+                runtime_log('FORM_EXPLORATION_COMMIT_ERROR',row=row_number,claim_id=claim_id,
+                    original_error=str(exc),result=compact_form_result(result),
+                    retry_external_action=False)
+                raise
+            runtime_log('FORM_EXPLORATION_END',row=row_number,claim_id=claim_id,progress=progress)
 
         state, reason = classify_form_result(result)
         runtime_log("FORM_RESULT_BEFORE_COMMIT", row=row_number, claim_id=claim_id,

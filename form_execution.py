@@ -10,7 +10,7 @@ import os
 import re
 import json
 from datetime import datetime, timezone
-from urllib.parse import urljoin, urlparse, urldefrag
+from urllib.parse import urljoin, urlparse, urldefrag, parse_qs
 import time
 import hashlib
 import unicodedata
@@ -18,6 +18,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 from customer_care import identity_field_key, validate_identity_fields
+from form_safety import dom_preflight, failure_plan, SubmissionEvidence, text_hash
 
 
 CAPTCHA_RE = re.compile(r"captcha|recaptcha|hcaptcha|turnstile", re.I)
@@ -28,6 +29,12 @@ SUCCESS_RE = re.compile(
     r"message\s+sent|受付|送信完了|お問い合わせ.{0,20}受け付け|ありがとうございました",
     re.I,
 )
+CONTACT_RECEIPT_RE = re.compile(
+    r'thank(?:s|\s+you)\s+for\s+(?:contacting|reaching\s+out|your\s+(?:message|inquiry|enquiry))|'
+    r'(?:your\s+)?(?:message|inquiry|enquiry|submission).{0,50}(?:successfully\s+(?:sent|submitted)|has\s+been\s+(?:sent|received)|was\s+(?:sent|received))|'
+    r'we\s+have\s+received\s+your\s+(?:message|inquiry|enquiry)|message\s+sent|submission\s+(?:successful|confirmed)|'
+    r'votre\s+message.{0,40}(?:envoyé|reçu)|nachricht.{0,40}(?:gesendet|erhalten)|'
+    r'messaggio.{0,40}(?:inviato|ricevuto)|送信完了|お問い合わせ.{0,20}受け付け|提交成功|发送成功',re.I)
 VALIDATION_ERROR_RE = re.compile(
     r"please\s+complete\s+(?:this|the)\s+required\s+field|this\s+field\s+is\s+required|required\s+field(?:s)?|"
     r"please\s+(?:complete|fill|select|choose).{0,80}(?:required|field|option)|"
@@ -122,6 +129,10 @@ def next_step_once(control, *, preview_only, before_submit=None):
                 "reason": "STEP_CLICK_OUTCOME_UNKNOWN"}
 
 
+def _is_next_step(label):
+    return bool(re.search(r'\b(next|continue|weiter|suivant)\b|下一步|次へ|続行',label,re.I))
+
+
 def post_submit_failure(before_text, after_text, *, captcha_present=False, partial_transmission=False):
     """Only a new explicit rejection can prove this attempted submit failed."""
     if before_text is not None and not partial_transmission:
@@ -151,13 +162,13 @@ def _is_first_party_thank_you_url(url: str, website: str) -> bool:
     if not _same_host_or_subdomain(url, website):
         return False
     parsed = urlparse(str(url or ""))
+    query = parse_qs(parsed.query)
     return bool(
-        re.search(r"/thank[-_]?you(?:/|$)", parsed.path, re.I)
-        or re.search(
-            r"(?:submissionguid|submission_id|submissionid|success)=",
-            parsed.query,
-            re.I,
-        )
+        re.search(r"/(?:thank[-_]?you|thanks)(?:\.(?:html?|php))?(?:/|$)", parsed.path, re.I)
+        or any(k.casefold() in {'submissionguid','submission_id','submissionid'} and any(v.strip() for v in values)
+               for k,values in query.items())
+        or any(k.casefold()=='success' and any(v.casefold() in {'true','1','success','yes'} for v in values)
+               for k,values in query.items())
     )
 
 
@@ -311,6 +322,24 @@ def _field_key(el, label: str) -> str:
         return "phone"
     if typ == "email":
         return "email"
+    autocomplete = str(el.get_attribute('autocomplete') or '').lower().split()
+    for token in reversed(autocomplete):
+        known = {'given-name':'first_name','family-name':'last_name','name':'name',
+            'organization':'company','organization-title':'role','email':'email',
+            'tel':'phone','tel-national':'phone','tel-local':'phone','postal-code':'postal_code',
+            'country':'country','country-name':'country','address-level1':'state',
+            'address-level2':'city','street-address':'address','url':'website'}
+        if token in known:
+            return known[token]
+    if typ in {'text',''} and re.fullmatch(r'\s*(?:first|last)\s*\*?\s*',label,re.I):
+        return 'first_name' if label.strip(' *').lower()=='first' else 'last_name'
+    is_choice = tag=='select' or (el.get_attribute('role') or '').lower()=='combobox' or el.get_attribute('aria-haspopup')=='listbox'
+    if is_choice and re.search(r'purpose|contact_us_topic|how can we help|product.of.interest|\binquiry\b|\benquiry\b',marker,re.I):
+        return 'reason'
+    if re.search(r'mobilephone|phone_number|phonenumber',marker,re.I):
+        return 'phone'
+    if re.search(r'facility.{0,25}(?:size|square|footage)|employees|shifts.per.day|business.challenge|purchasing.budget',marker,re.I):
+        return ''
     if re.search(r"\b(phone|telephone|tel|mobile|telefon|telefono)\b|電話", label, re.I) and not re.search(r"e[- ]?mail", label, re.I):
         return "phone"
     if re.search(r"\be[- ]?mail\b", label, re.I):
@@ -319,6 +348,9 @@ def _field_key(el, label: str) -> str:
         return "state"
     if re.fullmatch(r"\s*(?:company(?:\s+name)?|campany|firma|会社名)\s*\*?\s*", label, re.I):
         return "company"
+    if (re.search(r'\b(company|corporate|business|organization|organisation)\b.{0,30}\bname\b|\bname\b.{0,30}\b(company|business|organization|organisation)\b',label,re.I)
+            and not re.search(r'owner|contact.person|representative|first.name|last.name|given.name|family.name',label,re.I)):
+        return 'company'
     if tag == "input" and typ in {"text", ""}:
         identity_key = identity_field_key(marker, el.get_attribute("autocomplete") or "")
         if identity_key:
@@ -462,10 +494,7 @@ def _field_override(marker: str, overrides: dict | None) -> dict | None:
 
 def _value_for(key: str, marker: str, *, subject: str, message: str, overrides: dict | None = None) -> str | None:
     override = _field_override(marker, overrides)
-    sender_keys = {"name", "first_name", "last_name", "company", "email", "phone",
-                   "country", "region", "postal_code", "state", "city", "address", "website", "role",
-                   "subject", "message"}
-    if override and override.get("value") and key not in sender_keys:
+    if override and override.get("value") and key in {'reason','discovery_source','category','company_type','industry','platform'}:
         return str(override["value"])
     if key == "email":
         return "admin@a1-road.com"
@@ -484,9 +513,9 @@ def _value_for(key: str, marker: str, *, subject: str, message: str, overrides: 
     if key == "category":
         return "Other"
     if key == "revenue":
-        return os.getenv("OUTREACH_FORM_ANNUAL_REVENUE") or None
+        return None
     if key == "monthly_traffic":
-        return os.getenv("OUTREACH_FORM_MONTHLY_TRAFFIC") or None
+        return None
     if key == "platform":
         return os.getenv("OUTREACH_FORM_ECOMMERCE_PLATFORM") or "Other"
     if key == "name":
@@ -573,17 +602,29 @@ def _available_choice_labels(el, context=None, limit: int = 40) -> list[str]:
     return labels[:limit]
 
 
+def _choice_matches(text, value, wanted):
+    for token in wanted:
+        for candidate in (text,value):
+            normal=_normalise_choice_text(candidate)
+            if token in {'other','jp'}:
+                if normal==token or (token=='other' and re.fullmatch(r'other\s*[-:(].{0,40}(?:specify|please).{0,40}',normal)):
+                    return True
+            elif re.search(r'(?<!\w)'+re.escape(token)+r'(?!\w)',normal):
+                return True
+    return False
+
+
 def _select_option(el, key: str, override_tokens=()) -> tuple[bool, str]:
-    wanted = tuple(str(token).strip().casefold() for token in (override_tokens or ()) if str(token).strip())
+    wanted = tuple(str(token).strip().casefold() for token in (override_tokens or ()) if str(token).strip()) if key in {'reason','discovery_source','category'} else ()
     if not wanted:
         wanted = {
         "company_type": ("other", "consulting", "service provider", "professional services"),
-        "country": ("japan", "日本", "jp"),
+        "country": ("japan", "日本", "jp", "japon", "japón", "giappone", "japão"),
         "region": ("apac", "asia pacific", "asia-pacific", "asia"),
         "state": ("kanagawa", "神奈川"),
         "industry": ("consulting", "professional services", "other"),
         "reason": ("general inquiry", "general enquiry", "partnership", "partner", "business development", "other"),
-        "discovery_source": ("found you online", "online marketing"),
+        "discovery_source": ("found you online", "online directory", "other"),
         "category": ("other",),
         "platform": ("other",),
         "role": ("founder", "ceo", "chief executive", "代表", "経営", "owner"),
@@ -595,7 +636,7 @@ def _select_option(el, key: str, override_tokens=()) -> tuple[bool, str]:
             text = str(option.inner_text() or "").strip()
             value = str(option.get_attribute("value") or "").strip()
             haystack = f"{text} {value}".lower()
-            if not wanted or not any(token in haystack for token in wanted):
+            if not wanted or not _choice_matches(text,value,wanted):
                 continue
             if value:
                 el.select_option(value=value)
@@ -643,7 +684,14 @@ def _dom_click_matching_option(el, wanted_tokens) -> str:
                         const isLocalOption = local.includes(option);
                         if (!isLocalOption && !visible(option)) return false;
                         const haystack = normalise(option.innerText || option.textContent || '');
-                        return !tokens.length || tokens.some(token => haystack.includes(token));
+                        return tokens.some(token => {
+                            if(token==='other' || token==='jp') return haystack===token;
+                            const at=haystack.indexOf(token);
+                            if(at<0)return false;
+                            const before=at>0?haystack[at-1]:'';
+                            const after=haystack[at+token.length]||'';
+                            return !/[a-z0-9]/i.test(before) && !/[a-z0-9]/i.test(after);
+                        });
                     });
                     if (!candidate) return '';
                     try {
@@ -667,17 +715,17 @@ def _dom_click_matching_option(el, wanted_tokens) -> str:
 
 def _select_custom_option(el, key: str, context=None, override_tokens=()) -> tuple[bool, str]:
     """Select a visible option from a HubSpot-style custom dropdown."""
-    wanted = tuple(str(token).strip().casefold() for token in (override_tokens or ()) if str(token).strip())
+    wanted = tuple(str(token).strip().casefold() for token in (override_tokens or ()) if str(token).strip()) if key in {'reason','discovery_source','category'} else ()
     if not wanted:
         wanted = {
         "company_type": ("other", "consulting", "service provider", "professional services"),
-        "country": ("japan", "日本"),
+        "country": ("japan", "日本", "japon", "japón", "giappone", "japão"),
         "region": ("apac", "asia pacific", "asia-pacific", "asia"),
         "state": ("kanagawa", "神奈川"),
         "industry": ("consulting", "professional services", "other"),
         "role": ("founder", "ceo", "chief executive", "owner"),
         "reason": ("general inquiry", "general enquiry", "partnership", "partner", "business development", "other"),
-        "discovery_source": ("found you online", "online marketing"),
+        "discovery_source": ("found you online", "online directory", "other"),
         "category": ("other",),
         "platform": ("other",),
     }.get(key, ())
@@ -747,7 +795,7 @@ def _select_custom_option(el, key: str, context=None, override_tokens=()) -> tup
                     option = options.nth(index)
                     text = str(option.inner_text() or "").strip()
                     haystack = _normalise_choice_text(text)
-                    if wanted_tokens and not any(token in haystack for token in wanted_tokens):
+                    if wanted_tokens and not _choice_matches(text,'',wanted_tokens):
                         continue
                     try:
                         option.click(timeout=5000)
@@ -850,6 +898,11 @@ def _current_value(el) -> str:
             return "true" if el.is_checked() else "false"
         return str(el.input_value() or "")
     except Exception:
+        try:
+            if el.get_attribute('role')=='combobox' or el.get_attribute('aria-haspopup')=='listbox':
+                return str(el.evaluate("el=>el.getAttribute('aria-valuetext') || el.getAttribute('data-value') || el.innerText || ''") or '').strip()
+        except Exception:
+            pass
         return ""
 
 
@@ -1358,6 +1411,7 @@ def _contact_link_score(text: str, href: str) -> int:
 def _new_browser_context(browser):
     """Stable browser context; compatibility settings only, no anti-bot bypass."""
     return browser.new_context(
+        service_workers="block",
         locale="en-US",
         timezone_id="Asia/Tokyo",
         viewport={"width": 1440, "height": 1000},
@@ -1365,7 +1419,8 @@ def _new_browser_context(browser):
     )
 
 
-def discover_official_contact_urls(website: str, seed_url: str = "", limit: int = 8) -> list[str]:
+def discover_official_contact_urls(website: str, seed_url: str = "", limit: int = 8,
+                                  exclude_urls=(), budget_seconds: float = 90) -> list[str]:
     """Discover current first-party contact/form pages using GET-only browsing.
 
     Used only after a stored form URL fails before submission. Candidates remain
@@ -1381,10 +1436,12 @@ def discover_official_contact_urls(website: str, seed_url: str = "", limit: int 
         return []
     root = f"{root_parsed.scheme or 'https'}://{root_parsed.netloc}/"
     candidates: dict[str, int] = {}
+    deadline = time.monotonic() + max(5,min(90,float(budget_seconds)))
+    excluded = {urldefrag(str(url))[0] for url in exclude_urls}
 
     def add(url: str, score: int):
         clean = urldefrag(urljoin(root, str(url or "").strip()))[0]
-        if not clean or not _form_page_allowed(clean, root):
+        if not clean or clean in excluded or not _form_page_allowed(clean, root):
             return
         parsed = urlparse(clean)
         if parsed.scheme not in {"http", "https"}:
@@ -1409,7 +1466,11 @@ def discover_official_contact_urls(website: str, seed_url: str = "", limit: int 
             sources = [root]
             if seed_url and _same_host_or_subdomain(seed_url, root):
                 sources.append(seed_url)
-            for source in list(dict.fromkeys(sources))[:2]:
+            visited = set()
+            for source in sources:
+                if source in visited: continue
+                if len(visited)>=6 or time.monotonic()>=deadline: break
+                visited.add(source)
                 try:
                     response = page.goto(source, wait_until="domcontentloaded", timeout=20000)
                     if response is not None and response.status >= 500:
@@ -1428,12 +1489,17 @@ def discover_official_contact_urls(website: str, seed_url: str = "", limit: int 
                         score = _contact_link_score(text, href)
                         if score:
                             add(href, score)
+                        elif re.fullmatch(r'english|en|deutsch|français|about(?:\s+us)?|company|企業情報',text,re.I):
+                            next_url=urldefrag(urljoin(source,href))[0]
+                            if _same_host_or_subdomain(next_url,root) and next_url not in sources:
+                                sources.append(next_url)
                 except Exception:
                     continue
 
             ranked = sorted(candidates.items(), key=lambda item: (-item[1], item[0]))
             live = []
             for url, _score in ranked[: max(limit * 2, 12)]:
+                if time.monotonic()>=deadline: break
                 try:
                     response = page.goto(url, wait_until="domcontentloaded", timeout=15000)
                     if response is not None and response.status >= 400:
@@ -1466,6 +1532,26 @@ def _execution_log_sheet() -> str:
     ).strip() or "LeadFactory_ExecutionLog"
 
 
+_CUSTOM_FIELD_SELECTOR = ("input[role=combobox], div[role=combobox], "
+    "[role=button][aria-haspopup='listbox'], button[aria-haspopup='listbox'], "
+    "[aria-haspopup='listbox'][aria-expanded], [data-hook*='dropdown' i], [data-testid*='dropdown' i]")
+
+
+def _audited_control(form, item):
+    index = item.get('index')
+    if not isinstance(index,int) or index<0:
+        raise ValueError('FORM_AUDITED_CONTROL_MISSING:'+str(item.get('key')))
+    controls = form.locator(_CUSTOM_FIELD_SELECTOR if index>=10000 else 'input:not([type=hidden]), textarea, select')
+    position=index-10000 if index>=10000 else index
+    if position>=controls.count():
+        raise ValueError('FORM_AUDITED_CONTROL_MISSING:'+str(item.get('key')))
+    el=controls.nth(position)
+    if item.get('marker') or item.get('label'):
+        if _field_key(el,_label_for(el)) != item.get('key'):
+            raise ValueError('FORM_AUDITED_CONTROL_CHANGED:'+str(item.get('key')))
+    return el
+
+
 def _verify_identity_dom(form, field_audit=None):
     """Verify only identity controls that this executor actually filled.
 
@@ -1488,9 +1574,9 @@ def _verify_identity_dom(form, field_audit=None):
                 index = int(item.get("index"))
             except (TypeError, ValueError):
                 raise ValueError("FORM_IDENTITY_CONTROL_MISSING:" + key)
-            if index < 0 or index >= controls.count():
+            if index < 0 or (index < 10000 and index >= controls.count()):
                 raise ValueError("FORM_IDENTITY_CONTROL_MISSING:" + key)
-            el = controls.nth(index)
+            el = _audited_control(form,item)
             try:
                 if not el.is_visible() or not el.is_enabled():
                     raise ValueError("FORM_IDENTITY_CONTROL_UNAVAILABLE:" + key)
@@ -1517,7 +1603,7 @@ def _contact_normal(value):
 def _verify_sender_contact_dom(form, field_audit):
     """Verify submitted business-address/profile values against known sender facts."""
     aliases = {
-        "country": ("Japan", "日本", "JP", "JPN"),
+        "country": ("Japan", "日本", "JP", "JPN", "Japon", "Japón", "Giappone", "Japão"),
         "region": ("Asia Pacific", "APAC", "Asia-Pacific", "Asia", "アジア太平洋"),
         "state": ("Kanagawa", "Kanagawa Prefecture", "神奈川", "神奈川県", "JP-14"),
         "city": ("Yokohama", "横浜", "横浜市"),
@@ -1530,9 +1616,9 @@ def _verify_sender_contact_dom(form, field_audit):
         if key not in keys or item.get("action") not in {"FILLED", "SELECTED"}:
             continue
         index = item.get("index")
-        if not isinstance(index, int) or not 0 <= index < controls.count():
+        if not isinstance(index, int) or index<0 or (index<10000 and index>=controls.count()):
             raise ValueError("FORM_SENDER_CONTACT_CONTROL_MISSING:" + key)
-        el = controls.nth(index)
+        el = _audited_control(form,item)
         if not el.is_visible() or not el.is_enabled():
             raise ValueError("FORM_SENDER_CONTACT_CONTROL_UNAVAILABLE:" + key)
         value = _current_value(el)
@@ -1572,7 +1658,7 @@ class PublicContactFormExecutor:
         """
         from urllib.parse import urldefrag
         pages = list(dict.fromkeys(urldefrag(url)[0] for url in form_urls
-                                  if _form_page_allowed(url, website)))[:5]
+                                  if _form_page_allowed(url, website)))[:3]
         attempts = []
         for url in pages:
             result = self.execute(form_url=url, website=website, company_name=company_name,
@@ -1660,6 +1746,8 @@ class PublicContactFormExecutor:
         initial_success_texts = set()
         page = None
         screenshots = {}
+        network = None
+        completed_steps = []
 
         def capture(stage):
             directory = os.getenv("OUTREACH_EVIDENCE_DIR", "")
@@ -1687,6 +1775,7 @@ class PublicContactFormExecutor:
                 "checkbox_audit": checkbox_audit,
                 "submission_attempted": submission_attempted,
                 "screenshots": dict(screenshots),
+                "completed_steps":list(completed_steps),
                 "field_status": dict(field_status),
                 "missing_required": list(missing_required),
                 "core_unfilled": list(core_unfilled),
@@ -1699,6 +1788,9 @@ class PublicContactFormExecutor:
             if reason:
                 payload["reason"] = reason
             payload.update(extra)
+            if network is not None:
+                payload['submission_evidence']=network.proof()
+            payload['recovery_plan']=failure_plan(payload)
             return payload
 
         suppressed, suppression_reason = _ssot_automation_suppressed(self.sheets, source_row)
@@ -1741,6 +1833,10 @@ class PublicContactFormExecutor:
                 browser = playwright.chromium.launch(headless=True)
                 browser_context = _new_browser_context(browser)
                 page = browser_context.new_page()
+                if not preview_only:
+                    network = SubmissionEvidence(message, lambda url: _form_action_allowed(url,website))
+                    browser_context.route('**/*', network.route)
+                    browser_context.on('response', network.response)
                 preview_filling_started = False
                 if preview_only:
                     # Multi-step forms can transmit partial data on Next. The
@@ -1814,7 +1910,7 @@ class PublicContactFormExecutor:
                 form_context, form = chosen
                 for context in (page, form_context):
                     try:
-                        initial_success_texts.update(m.group(0).casefold() for m in SUCCESS_RE.finditer(context.locator("body").inner_text()))
+                        initial_success_texts.update(m.group(0).casefold() for m in CONTACT_RECEIPT_RE.finditer(context.locator("body").inner_text()))
                     except Exception:
                         pass
                 base_url = getattr(form_context, "url", "") or page.url
@@ -1838,6 +1934,8 @@ class PublicContactFormExecutor:
                     if current_step_signature:
                         seen_step_signatures.add(current_step_signature)
                     fields = form.locator("input:not([type=hidden]), textarea, select")
+                    if network is not None:
+                        network.filling = True
                     present_keys = set()
                     for index in range(fields.count()):
                         el = fields.nth(index)
@@ -1865,6 +1963,8 @@ class PublicContactFormExecutor:
                             "maxlength": el.get_attribute("maxlength"),
                             "action": "NOT_FILLED",
                             "final_value": "",
+                            "html_semantics":{attribute:el.get_attribute(attribute) for attribute in
+                                ('name','id','autocomplete','role','pattern','min','max')},
                         }
                         if key:
                             present_keys.add(key)
@@ -1952,14 +2052,7 @@ class PublicContactFormExecutor:
                         field_audit.append(item)
 
 
-                    custom_fields = form.locator(
-                        "input[role=combobox], div[role=combobox], "
-                        "[role=button][aria-haspopup='listbox'], "
-                        "button[aria-haspopup='listbox'], "
-                        "[aria-haspopup='listbox'][aria-expanded], "
-                        "[data-hook*='dropdown' i], "
-                        "[data-testid*='dropdown' i]"
-                    )
+                    custom_fields = form.locator(_CUSTOM_FIELD_SELECTOR)
                     custom_seen = set()
                     for custom_index in range(custom_fields.count()):
                         el = custom_fields.nth(custom_index)
@@ -2005,6 +2098,8 @@ class PublicContactFormExecutor:
                                 "required": required,
                                 "action": "NOT_FILLED",
                                 "final_value": "",
+                                "html_semantics":{attribute:el.get_attribute(attribute) for attribute in
+                                    ('name','id','autocomplete','role','aria-haspopup','aria-required')},
                             }
                             override = _field_override(marker, field_overrides)
                             value = _value_for(key, marker, subject=subject, message=message, overrides=field_overrides)
@@ -2089,9 +2184,7 @@ class PublicContactFormExecutor:
                                 lower,
                             )
                         )
-                        consent = bool(
-                            re.search(r"agree|consent|privacy|terms|同意|個人情報|利用規約", lower)
-                        )
+                        consent = bool(re.search(r'privacy|terms(?:\s+of\s+(?:use|service))?|data.processing|個人情報|利用規約',lower))
                         role_match = bool(
                             re.search(r"founder|ceo|chief executive|代表|経営者", lower)
                         )
@@ -2108,7 +2201,10 @@ class PublicContactFormExecutor:
                                     action = "OPTIONAL_MARKETING_ALREADY_CHECKED"
                             else:
                                 action = "LEFT_UNCHECKED_OPTIONAL"
-                        elif (required or consent or role_match) and not el.is_checked():
+                        elif required and not consent and not role_match:
+                            action='REQUIRED_FACT_UNVERIFIED'
+                            missing_required.append(f'checkbox_{index}')
+                        elif (consent or role_match) and not el.is_checked():
                             try:
                                 el.check()
                                 action = (
@@ -2201,9 +2297,23 @@ class PublicContactFormExecutor:
                     _verify_phone_dom(form, field_audit)
                     _verify_sender_contact_dom(form, field_audit)
                     control_label = _control_label(submit)
-                    if re.search(r"\bnext\b", control_label, re.I):
+                    preflight=dom_preflight(form,subject=subject,message=message,
+                        classify=_field_key,label_for=_label_for,
+                        require_message=not _is_next_step(control_label))
+                    if not preflight['ready']:
+                        return result_payload('FORM_FAILED',reason=preflight['reason'],preflight=preflight)
+                    if _is_next_step(control_label):
                         before_click_signature = _visible_step_signature(form)
-                        step_result = next_step_once(submit, preview_only=preview_only, before_submit=before_submit)
+                        def authorize_next():
+                            if before_submit is not None: before_submit()
+                            _verify_identity_dom(form,field_audit)
+                            _verify_phone_dom(form,field_audit)
+                            _verify_sender_contact_dom(form,field_audit)
+                            latest=dom_preflight(form,subject=subject,message=message,
+                                classify=_field_key,label_for=_label_for,require_message=False)
+                            if not latest['ready']: raise ValueError('FORM_PREFLIGHT_CHANGED:'+latest['reason'])
+                            if network is not None: network.authorize(form,require_message=False)
+                        step_result = next_step_once(submit, preview_only=preview_only, before_submit=authorize_next)
                         submission_attempted = submission_attempted or step_result["submission_attempted"]
                         partial_transmission = partial_transmission or step_result["submission_attempted"]
                         if not step_result["clicked"]:
@@ -2214,17 +2324,23 @@ class PublicContactFormExecutor:
                         except Exception:
                             pass
                         page.wait_for_timeout(1500)
+                        if network is not None: network.active=False
                         after_click_signature = _visible_step_signature(form)
                         if after_click_signature == before_click_signature:
                             return result_payload(
                                 "FORM_FAILED",
                                 reason="MULTI_STEP_NOT_ADVANCED",
                             )
+                        completed_steps.append({'step':len(completed_steps)+1,
+                            'verified_keys':list(dict.fromkeys(item.get('key') for item in field_audit
+                                if item.get('action') in {'FILLED','SELECTED'})),
+                            'input_audit_sha256':text_hash(json.dumps(field_audit,sort_keys=True,ensure_ascii=False))})
+                        field_audit=[]
                         continue
                     # A final submit control ends filling. Repeating the same
                     # form four times can reset dependent widgets and consent.
                     break
-                if re.search(r"\bnext\b", control_label, re.I):
+                if _is_next_step(control_label):
                     return result_payload(
                         "FORM_FAILED",
                         reason="MULTI_STEP_NOT_COMPLETED",
@@ -2270,6 +2386,15 @@ class PublicContactFormExecutor:
                 capture("before-submit")
                 if before_submit is not None:
                     before_submit()
+                _verify_identity_dom(form,field_audit)
+                _verify_phone_dom(form,field_audit)
+                _verify_sender_contact_dom(form,field_audit)
+                latest=dom_preflight(form,subject=subject,message=message,
+                    classify=_field_key,label_for=_label_for)
+                if not latest['ready']:
+                    return result_payload('FORM_FAILED',reason=latest['reason'],preflight=latest)
+                if network is not None:
+                    network.authorize(form)
                 submission_attempted = True
                 if not final_submit_once(submit):
                     # The request may already have reached the recipient. Never
@@ -2295,16 +2420,18 @@ class PublicContactFormExecutor:
                     except Exception:
                         continue
                 visible_text = "\n".join(dict.fromkeys(part for part in visible_parts if part))
-                success_match = next((m for m in SUCCESS_RE.finditer(visible_text or "") if m.group(0).casefold() not in initial_success_texts), None)
+                success_match = next((m for m in CONTACT_RECEIPT_RE.finditer(visible_text or "") if m.group(0).casefold() not in initial_success_texts), None)
                 thank_you_url = final_url != form_url and _is_first_party_thank_you_url(final_url, website)
+                proof = network.proof() if network is not None else {}
+                provider_success = any(r.get('provider_success') for r in proof.get('responses',[]))
 
-                if not success_match and not thank_you_url:
+                if not (success_match or thank_you_url or provider_success) or not proof.get('message_bound') or proof.get('confirmation_blocked') or proof.get('provider_rejected'):
                     failure = post_submit_failure(before_submit_text, visible_text,
                         captcha_present=_captcha_present([page] + list(page.frames[1:])),
                         partial_transmission=partial_transmission)
                     return result_payload(**failure, form_url=final_url,
                         confirmation_text=(visible_text or "")[:4000])
-                confirmation = "SUCCESS_TEXT" if success_match else "THANK_YOU_URL"
+                confirmation = "PROVIDER_RECEIPT" if provider_success else "SUCCESS_TEXT" if success_match else "THANK_YOU_URL"
                 result = result_payload(
                     "FORM_SENT",
                     form_url=final_url,
