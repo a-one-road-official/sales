@@ -172,16 +172,19 @@ def scheduled_claim(packet):
     return context
 
 
-def require_saved_ready_copy(row, packet):
+def require_saved_ready_copy(row, packet, historical_handoff=None):
     """Bind new downstream form claims to Handoff's exact stored customer copy."""
     invoked = datetime.fromisoformat(str(scheduled_claim(packet)["invoked_at"]).replace("Z", "+00:00"))
     if invoked < datetime(2026, 10, 13, 3, 18, 12, tzinfo=timezone.utc):
         return  # Historical claims retain their original reconciliation contract.
     fields = row["fields"]
-    handoff = row["meta"].get("handoff") or {}
-    if (handoff.get("task_id") != "6ac5b018a72c81919b80cf3daa6d3cc5"
-            or handoff.get("source") != "DRAFT_READY_HANDOFF"
-            or not handoff.get("verified_at") or not handoff.get("email_sha256")
+    handoff = row["meta"].get("handoff") or historical_handoff or {}
+    original_source = (handoff.get("origin") == "SCHEDULED_AUTOMATION"
+                       and handoff.get("phase") == "DRAFT_READY_HANDOFF"
+                       and handoff.get("run_id") and handoff.get("decision_id")) if historical_handoff else (
+        handoff.get("task_id") == "6ac5b018a72c81919b80cf3daa6d3cc5"
+        and handoff.get("source") == "DRAFT_READY_HANDOFF" and handoff.get("verified_at"))
+    if (not original_source or not handoff.get("email_sha256")
             or packet.get("draft_ready_handoff") != handoff):
         raise ValueError("FORM_DRAFT_READY_HANDOFF_REQUIRED")
     subject = fields.get("営業メール件名")
@@ -190,6 +193,48 @@ def require_saved_ready_copy(row, packet):
         raise ValueError("FORM_SAVED_READY_COPY_MISSING")
     if packet.get("subject") != subject or packet.get("form_message") != body:
         raise ValueError("FORM_SAVED_READY_COPY_CHANGED")
+
+
+def confirmed_email_failure(row, packet, receipt):
+    """A prior SENT is recoverable only with exact, immutable terminal DSN proof."""
+    proof = packet.get("email_failure_recovery")
+    if not isinstance(proof, dict):
+        return False
+    context = scheduled_claim(packet)
+    payload = strict_json(receipt.get("crm_payload"))
+    fields = row["fields"]
+    expected_tasks = {"A": "6ac4b0e73b548191a3050b65505e67bc",
+                      "B": "6ab0b2bbe9b481919513cc9185b0e660"}
+    original = proof.get("original_message_id")
+    recipient = str(fields.get("Last_Outbound_Recipient") or fields.get("営業メール宛先") or "").strip().casefold()
+    history = proof.get("company_history_check") or {}
+    status = str(proof.get("dsn_status") or "")
+    return bool(
+        original and original == fields.get("Last_Outbound_Message_ID")
+        and recipient and str(proof.get("original_recipient") or "").strip().casefold() == recipient
+        and str(proof.get("dsn_final_recipient") or "").strip().casefold() == recipient
+        and proof.get("original_subject") == fields.get("営業メール件名")
+        and proof.get("original_body") == fields.get("営業メール本文")
+        and proof.get("original_task_id") == expected_tasks.get(proof.get("original_lane"))
+        and proof.get("gmail_dsn_message_id") and proof.get("checked_at")
+        and proof.get("dsn_action") == "failed"
+        and len(status.split(".")) == 3 and status.startswith("5.")
+        and all(part.isdigit() for part in status.split("."))
+        and proof.get("original_rfc822_message_id")
+        and proof.get("dsn_original_rfc822_message_id") == proof.get("original_rfc822_message_id")
+        and history.get("full_pagination_complete") is True
+        and history.get("human_reply_found") is False
+        and history.get("other_successful_contact_found") is False
+        and history.get("query") and history.get("checked_at")
+        and receipt.get("event_id") == proof.get("evidence_event_id")
+        and receipt.get("action_type") == "FORM_EMAIL_FAILURE_VERIFIED"
+        and receipt.get("company_name") == row["company"]
+        and str(receipt.get("source_row")) == str(packet.get("source_row"))
+        and payload.get("origin") == "SCHEDULED_AUTOMATION"
+        and payload.get("task_id") == FORM_TASK_ID
+        and payload.get("run_id") == context["run_id"]
+        and payload.get("email_failure_recovery") == proof
+    )
 
 
 def merge_owned(fresh, requested):
@@ -366,7 +411,27 @@ class FormPersistence:
         meta = current["meta"]
         packet = meta.get("form_submission_packet_v1") or {}
         scheduler = scheduled_claim(packet)
-        require_saved_ready_copy(current, packet)
+        historical_handoff = None
+        recovery = packet.get("email_failure_recovery")
+        if recovery and not meta.get("handoff"):
+            event_id = recovery.get("original_handoff_event_id") if isinstance(recovery, dict) else None
+            rows = self.existing_events(event_id) if event_id else []
+            if len(rows) != 1:
+                raise ValueError("FORM_ORIGINAL_HANDOFF_RECEIPT_UNRESOLVED")
+            record = dict(zip(self.layout.event_headers, rows[0]))
+            hp = strict_json(record.get("crm_payload"))
+            historical_handoff = hp.get("handoff") or hp
+            if (record.get("source") != "DRAFT_READY_HANDOFF"
+                    or record.get("to_status") != "DRAFT_READY"
+                    or record.get("action_type") != "DRAFT_READY"
+                    or not record.get("occurred_at")
+                    or str(record.get("source_row")) != str(number)
+                    or record.get("company_name") != current["company"]
+                    or historical_handoff.get("main_row") != number
+                    or historical_handoff.get("origin") != "SCHEDULED_AUTOMATION"
+                    or historical_handoff.get("phase") != "DRAFT_READY_HANDOFF"):
+                raise ValueError("FORM_ORIGINAL_HANDOFF_RECEIPT_MISMATCH")
+        require_saved_ready_copy(current, packet, historical_handoff)
         claim_rows = self.existing_events(scheduler["claim_event_id"])
         if len(claim_rows) != 1:
             raise ValueError("FORM_SCHEDULER_CLAIM_RECEIPT_UNRESOLVED")
@@ -386,8 +451,22 @@ class FormPersistence:
         if int(packet.get("source_row", -1)) != number or packet.get("company_name") != current["company"]:
             raise ValueError("FORM_CLAIM_IDENTITY_MISMATCH")
         email_state = str(current["fields"].get("営業メール状態", "")).upper()
+        failed_delivery = False
+        recovery = packet.get("email_failure_recovery")
+        if recovery:
+            evidence_id = recovery.get("evidence_event_id") if isinstance(recovery, dict) else None
+            if not evidence_id:
+                raise ValueError("FORM_EMAIL_FAILURE_PROOF_REQUIRED")
+            evidence_rows = self.existing_events(evidence_id)
+            if len(evidence_rows) != 1:
+                raise ValueError("FORM_EMAIL_FAILURE_RECEIPT_UNRESOLVED")
+            failed_delivery = confirmed_email_failure(current, packet,
+                dict(zip(self.layout.event_headers, evidence_rows[0])))
+            if not failed_delivery:
+                raise ValueError("FORM_EMAIL_FAILURE_PROOF_MISMATCH")
         if email_state in PRIOR_CONTACT_STATES:
-            raise ValueError("FORM_PRIOR_OR_AMBIGUOUS_CONTACT:" + email_state)
+            if email_state not in {"SENT", "VALID_SENT"} or not failed_delivery:
+                raise ValueError("FORM_PRIOR_OR_AMBIGUOUS_CONTACT:" + email_state)
         if current["status"] in BLOCKED_STATUSES or meta.get("auto_outbound_blocked"):
             raise ValueError("FORM_COMPANY_SUPPRESSED")
         if str(current["fields"].get("AI担当状態", "")) in MANUAL_STATES:

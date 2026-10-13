@@ -33,6 +33,56 @@ def test_new_downstream_claim_requires_unchanged_saved_handoff_copy():
     with unittest.TestCase().assertRaisesRegex(ValueError, 'FORM_DRAFT_READY_HANDOFF_REQUIRED'):
         fp.require_saved_ready_copy(row, changed)
 
+
+def test_recovery_requires_same_ab_attempt_terminal_dsn_and_no_other_contact():
+    proof = {'original_lane': 'A', 'original_task_id': '6ac4b0e73b548191a3050b65505e67bc',
+             'original_message_id': 'gmail-original', 'original_recipient': 'sales@example.com',
+             'original_subject': 'Saved subject', 'original_body': 'Saved body',
+             'gmail_dsn_message_id': 'gmail-dsn', 'checked_at': '2026-10-13T03:30:00Z',
+             'dsn_action': 'failed', 'dsn_status': '5.1.1', 'dsn_final_recipient': 'sales@example.com',
+             'original_rfc822_message_id': '<original@example.com>',
+             'dsn_original_rfc822_message_id': '<original@example.com>', 'evidence_event_id': 'dsn-proof',
+             'company_history_check': {'query': 'in:anywhere example.com', 'checked_at': '2026-10-13T03:30:00Z',
+                                      'full_pagination_complete': True, 'human_reply_found': False,
+                                      'other_successful_contact_found': False}}
+    packet = {'source_row': 9000, 'email_failure_recovery': proof,
+              'scheduler_context': {'task_id': fp.FORM_TASK_ID, 'origin': 'SCHEDULED_AUTOMATION',
+                                    'run_id': 'c-run', 'invoked_at': '2026-10-13T03:30:00Z',
+                                    'nominal_slot': '2026-10-13T03:18:00Z', 'claim_event_id': 'claim'}}
+    row = {'company': 'Example', 'fields': {'Last_Outbound_Message_ID': 'gmail-original',
+           'Last_Outbound_Recipient': 'sales@example.com', '営業メール件名': 'Saved subject', '営業メール本文': 'Saved body'}}
+    def receipt(p):
+        return {'event_id': 'dsn-proof', 'action_type': 'FORM_EMAIL_FAILURE_VERIFIED', 'source_row': '9000',
+                'company_name': 'Example', 'crm_payload': {'origin': 'SCHEDULED_AUTOMATION',
+                'task_id': fp.FORM_TASK_ID, 'run_id': 'c-run', 'email_failure_recovery': p['email_failure_recovery']}}
+    assert fp.confirmed_email_failure(row, packet, receipt(packet))
+    for key, value in [('original_message_id', 'another-email'), ('dsn_status', '4.2.0'),
+                       ('dsn_action', 'delayed'), ('dsn_final_recipient', 'other@example.com'),
+                       ('dsn_original_rfc822_message_id', '<other@example.com>'), ('original_lane', 'manual')]:
+        changed = copy.deepcopy(packet)
+        changed['email_failure_recovery'][key] = value
+        assert not fp.confirmed_email_failure(row, changed, receipt(changed))
+    for key in ['human_reply_found', 'other_successful_contact_found']:
+        changed = copy.deepcopy(packet)
+        changed['email_failure_recovery']['company_history_check'][key] = True
+        assert not fp.confirmed_email_failure(row, changed, receipt(changed))
+
+
+def test_historical_handoff_keeps_exact_source_payload_without_main_rewrite():
+    historical = {'run_id': 'DRAFT_READY_HANDOFF_20261012T053328Z', 'origin': 'SCHEDULED_AUTOMATION',
+                  'phase': 'DRAFT_READY_HANDOFF', 'main_row': 9562, 'raw_row': 789,
+                  'email_sha256': 'original-stored-hash', 'decision_id': 'original-decision'}
+    row = {'meta': {}, 'fields': {'営業メール件名': 'Saved subject', '営業メール本文': 'Saved body'}}
+    packet = {'subject': 'Saved subject', 'form_message': 'Saved body', 'draft_ready_handoff': copy.deepcopy(historical),
+              'scheduler_context': {'task_id': fp.FORM_TASK_ID, 'origin': 'SCHEDULED_AUTOMATION',
+                                    'run_id': 'c-run', 'invoked_at': '2026-10-13T03:30:00Z',
+                                    'nominal_slot': '2026-10-13T03:18:00Z', 'claim_event_id': 'claim'}}
+    fp.require_saved_ready_copy(row, packet, historical)
+    assert row['meta'] == {}
+    changed = copy.deepcopy(packet)
+    changed['draft_ready_handoff']['email_sha256'] = 'invented-new-hash'
+    with unittest.TestCase().assertRaisesRegex(ValueError, 'FORM_DRAFT_READY_HANDOFF_REQUIRED'):
+        fp.require_saved_ready_copy(row, changed, historical)
 EVENT_HEADERS = ('event_id','occurred_at','date','source_row','company_key','company_name',
  'from_status','to_status','action_type','source','recorded_at','lead_id','previous_status',
  'new_status','writer','reason','evidence','timestamp','code_version','idempotency_key',
