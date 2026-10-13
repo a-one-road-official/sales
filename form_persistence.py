@@ -530,7 +530,7 @@ class FormPersistence:
     def event(self, number, row, action, reason, evidence, claim_id):
         at = self.now().isoformat()
         domain = str((row["meta"].get("form_submission_packet_v1") or {}).get("canonical_domain") or row["website"])
-        event_id = f"form-production:{domain or number}:{action}:{claim_id}"
+        event_id = f"form-production:{domain or number}:{action}:{claim_id}:{self.run_id}"
         payload = dict(evidence, run_id=self.run_id, phase=action, origin="GITHUB_EXISTING_FORM_EXECUTOR",
             claim_id=claim_id, source_row=number)
         return {"event_id": event_id, "occurred_at": at, "date": at[:10], "source_row": str(number),
@@ -801,13 +801,52 @@ class FormPersistence:
         packet = row["meta"].get("form_submission_packet_v1") or {}
         claim_id = packet.get("claim_id", "")
         fresh = self.assert_admission(number, claim_id, peers=peers)
+        previous = fresh['meta'].get('form_executor_attempt')
+        history = copy.deepcopy(fresh['meta'].get('form_executor_attempt_history') or [])
+        if previous:
+            if (previous.get('claim_id') != claim_id or not previous.get('run_id')
+                    or not previous.get('finished_at') or previous.get('outcome') != 'FORM_FAILED'
+                    or previous.get('submission_attempted') is not False):
+                raise ValueError('FORM_PRIOR_ATTEMPT_RECONCILE_REQUIRED')
+            domain = (fresh['meta'].get('form_submission_packet_v1') or {}).get('canonical_domain') or fresh['website']
+            base = f'form-production:{domain or number}:FORM_FAILED:{claim_id}'
+            receipt_ids = [base, f"{base}:{previous['run_id']}"]
+            records = self.existing_events_many(receipt_ids)
+            matches = []
+            for identity in receipt_ids:
+                if len(records.get(identity, [])) > 1:
+                    raise ValueError('FORM_PRIOR_NO_SUBMIT_RECEIPT_UNRESOLVED')
+                for values in records.get(identity, []):
+                    receipt = dict(zip(self.layout.event_headers, values))
+                    payload = strict_json(receipt.get('crm_payload'))
+                    if payload.get('run_id') == previous['run_id']:
+                        matches.append((receipt, payload))
+            if len(matches) != 1:
+                raise ValueError('FORM_PRIOR_NO_SUBMIT_RECEIPT_UNRESOLVED')
+            receipt, payload = matches[0]
+            result = payload.get('result') or {}
+            if (receipt.get('action_type') != 'FORM_FAILED'
+                    or str(receipt.get('source_row')) != str(number)
+                    or receipt.get('company_name') != fresh['company']
+                    or payload.get('origin') != 'GITHUB_EXISTING_FORM_EXECUTOR'
+                    or payload.get('claim_id') != claim_id
+                    or result.get('submission_attempted') is not False
+                    or result != fresh['meta'].get('form_result')):
+                raise ValueError('FORM_PRIOR_NO_SUBMIT_RECEIPT_MISMATCH')
+            if not isinstance(history, list):
+                raise ValueError('FORM_ATTEMPT_HISTORY_INVALID')
+            history.append(dict(attempt=copy.deepcopy(previous), result=copy.deepcopy(result),
+                                event_id=receipt['event_id']))
         attempt = {"claim_id": claim_id, "run_id": self.run_id, "started_at": self.now().isoformat(),
             "origin": "GITHUB_EXISTING_FORM_EXECUTOR", "status": "STARTED", "outcome": "UNRESOLVED",
             "packet_sha256": packet_digest(fresh["meta"].get("form_submission_packet_v1")),
             "gate_sha256": packet_digest(fresh["meta"].get("common_gate")),
             "claim_receipt_sha256": fresh["claim_receipt_sha256"]}
         event = self.event(number, fresh, "FORM_EXECUTION_STARTED", "Durable no-replay barrier", attempt, claim_id)
-        merged = self.commit(number, fresh, {"form_executor_attempt": attempt}, event, require_start=True)
+        requested = {'form_executor_attempt': attempt}
+        if previous:
+            requested['form_executor_attempt_history'] = history
+        merged = self.commit(number, fresh, requested, event, require_start=True)
         fresh["meta"] = merged
         return fresh
 

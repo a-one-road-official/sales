@@ -288,6 +288,44 @@ class FormRecoveryTests(unittest.TestCase):
         self.assertEqual(rows['AUMS_MASTER_RUN_STATE'],12149)
         self.assertEqual(controls['AUMS_MASTER_RUN_STATE'],'START')
 
+    def test_proven_no_submit_continuation_keeps_claim_and_old_receipts(self):
+        self.runtime.begin(8972,self.runtime.row(8972))
+        previous=self.svc.get_meta()['form_executor_attempt']
+        previous.update(outcome='FORM_FAILED',status='FORM_FAILED',
+            finished_at=self.clock.isoformat(),submission_attempted=False)
+        result={'status':'FORM_FAILED','submission_attempted':False,'reason':'FORM_PHONE_INPUT_INVALID'}
+        meta=self.svc.get_meta();meta.update(form_executor_attempt=previous,form_result=result)
+        self.svc.set_meta(meta)
+        event=self.runtime.event(8972,self.runtime.row(8972),'FORM_FAILED','Actual no-submit',{'result':result},'c-1')
+        self.runtime.commit(8972,self.runtime.row(8972),{'form_state':'FORM_FAILED'},event)
+        old_event_id=event['event_id'];meta=self.svc.get_meta();meta['form_state']='FORM_SUBMIT_REQUESTED';self.svc.set_meta(meta)
+        self.runtime.run_id='next-normal-executor'
+        self.runtime.begin(8972,self.runtime.row(8972))
+        actual=self.svc.get_meta()
+        self.assertEqual(actual['form_submission_packet_v1']['claim_id'],'c-1')
+        self.assertEqual(actual['form_executor_attempt_history'][0]['attempt'],previous)
+        self.assertEqual(actual['form_executor_attempt_history'][0]['result'],result)
+        self.assertEqual(actual['form_executor_attempt_history'][0]['event_id'],old_event_id)
+        self.assertEqual(len(self.runtime.existing_events(old_event_id)),1)
+        new_id=self.runtime.event(8972,self.runtime.row(8972),'FORM_EXECUTION_STARTED','',{},'c-1')['event_id']
+        self.assertEqual(len(self.runtime.existing_events(new_id)),1)
+
+    def test_requeued_unknown_or_submitted_attempt_cannot_restart(self):
+        for outcome,submitted in [('FORM_UNCONFIRMED',True),('FORM_SENT',True),('FORM_FAILED',True),('FORM_FAILED',None)]:
+            with self.subTest(outcome=outcome,submitted=submitted):
+                meta=self.svc.get_meta();meta['form_executor_attempt']=dict(claim_id='c-1',run_id='prior',
+                    outcome=outcome,finished_at=self.clock.isoformat(),submission_attempted=submitted)
+                self.svc.set_meta(meta)
+                with self.assertRaisesRegex(ValueError,'FORM_PRIOR_ATTEMPT_RECONCILE_REQUIRED'):
+                    self.runtime.begin(8972,self.runtime.row(8972))
+
+    def test_missing_immutable_no_submit_receipt_blocks_requeue(self):
+        meta=self.svc.get_meta();meta['form_executor_attempt']=dict(claim_id='c-1',run_id='prior',
+            outcome='FORM_FAILED',finished_at=self.clock.isoformat(),submission_attempted=False)
+        meta['form_result']={'submission_attempted':False};self.svc.set_meta(meta)
+        with self.assertRaisesRegex(ValueError,'FORM_PRIOR_NO_SUBMIT_RECEIPT_UNRESOLVED'):
+            self.runtime.begin(8972,self.runtime.row(8972))
+
     def test_recovery_reads_historical_id_from_original_packet_lineage(self):
         for nested in (False, True):
             with self.subTest(nested=nested):
