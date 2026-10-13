@@ -1877,6 +1877,8 @@ class PublicContactFormExecutor:
                                     )
                                     if picker_present and not phone_country_ok:
                                         raise ValueError("FORM_PHONE_COUNTRY_UNVERIFIED")
+                                    if picker_present:
+                                        fill_value = "08048705690"
                                 el.fill(fill_value)
                                 item["action"] = "FILLED"
                                 item["final_value"] = _current_value(el) or fill_value
