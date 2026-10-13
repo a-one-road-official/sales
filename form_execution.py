@@ -324,6 +324,8 @@ def _field_key(el, label: str) -> str:
         return "email"
     autocomplete = str(el.get_attribute('autocomplete') or '').lower().split()
     for token in reversed(autocomplete):
+        if token == 'honorific-prefix':
+            return 'honorific_title'
         known = {'given-name':'first_name','family-name':'last_name','name':'name',
             'organization':'company','organization-title':'role','email':'email',
             'tel':'phone','tel-national':'phone','tel-local':'phone','postal-code':'postal_code',
@@ -333,6 +335,11 @@ def _field_key(el, label: str) -> str:
             return known[token]
     if typ in {'text',''} and re.fullmatch(r'\s*(?:first|last)\s*\*?\s*',label,re.I):
         return 'first_name' if label.strip(' *').lower()=='first' else 'last_name'
+    # An isolated Title may mean Dr./Prof.; a business role is not evidence
+    # of an academic qualification. Only explicit job/role semantics map CEO.
+    if re.fullmatch(r'\s*(?:title|academic title|honorific|titel)\s*\*?\s*', label, re.I):
+        if not re.search(r'job|position|role|organization.title', marker, re.I):
+            return 'honorific_title'
     is_choice = tag=='select' or (el.get_attribute('role') or '').lower()=='combobox' or el.get_attribute('aria-haspopup')=='listbox'
     if is_choice and re.search(r'purpose|contact_us_topic|how can we help|product.of.interest|\binquiry\b|\benquiry\b',marker,re.I):
         return 'reason'
@@ -987,6 +994,7 @@ def _verify_phone_dom(form, field_audit):
 
 
 CAPTCHA_WIDGET_SELECTORS = (
+    "cap-widget",
     "iframe[src*='recaptcha']",
     "iframe[src*='hcaptcha']",
     "iframe[src*='challenges.cloudflare.com']",

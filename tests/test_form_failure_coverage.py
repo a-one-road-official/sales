@@ -17,6 +17,29 @@ from form_safety import (failure_plan, dom_preflight, decoded_fields,
 CASES=json.loads((Path(__file__).parent/'fixtures/form_failure_corpus.json').read_text())
 
 
+def test_honorific_title_never_invents_academic_qualification(page):
+    page.set_content('<form><label>Title<input name="title"></label>'
+                     '<label>Job title<input name="job_title"></label>'
+                     '<input autocomplete="honorific-prefix" name="prefix"></form>')
+    fields=page.locator('input')
+    for index in (0,2):
+        el=fields.nth(index)
+        key=execution._field_key(el,execution._label_for(el))
+        assert key=='honorific_title'
+        assert execution._value_for(key,'title',subject='Saved',message='Saved') is None
+    assert execution._field_key(fields.nth(1),execution._label_for(fields.nth(1)))=='role'
+
+
+def test_observed_cap_widget_is_challenge_without_guessing_disabled_button(page):
+    page.set_content('<form><cap-widget data-cap-api-endpoint="/local/">'
+                     'Click here for anti-robot verification!</cap-widget>'
+                     '<button type="submit" disabled style="display:none">Send (disabled)</button></form>')
+    assert execution._captcha_present([page])
+    assert execution._submit_control(page,page.locator('form')) is None
+    page.locator('cap-widget').evaluate('el=>el.style.display="none"')
+    assert not execution._captcha_present([page])
+
+
 def test_corpus_retains_every_observed_failure_and_uncertain_event():
     assert len(CASES)==177 and len({c['case_id'] for c in CASES})==177
     assert sum('UNCONFIRMED' in c['action'] for c in CASES)==35
