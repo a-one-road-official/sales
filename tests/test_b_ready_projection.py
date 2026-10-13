@@ -37,7 +37,8 @@ class ReadyProjectionTests(unittest.TestCase):
 
     def test_each_current_external_protection_blocks(self):
         for key in ('unique_identity','current_history_clear','newer_protection_clear'):
-            with self.subTest(key=key), self.assertRaises(ValueError):self.execute(fixture(),**{key:False})
+            for value in (False, 'false', 'true', 1, None):
+                with self.subTest(key=key,value=value), self.assertRaises(ValueError):self.execute(fixture(),**{key:value})
 
     def test_manual_scope_and_prior_contact_remain_protected(self):
         for key,val in [('review_required',True),('send_receipt',{'id':'prior'}),('applied_at','new-hold'),('state','MANUAL')]:

@@ -14,7 +14,8 @@ def plan(candidate, *, gate_validator, unique_identity, current_history_clear,
             raise ValueError(reason)
     m = candidate['meta']; v = candidate['values']; r = candidate['raw']; a = candidate['main']
     h = m.get('handoff', {}); event = candidate.get('event', [])
-    require(unique_identity and current_history_clear and newer_protection_clear, 'CURRENT_PROTECTION_NOT_CLEAR')
+    require(all(proof is True for proof in (unique_identity, current_history_clear,
+                newer_protection_clear)), 'CURRENT_PROTECTION_NOT_CLEAR')
     require(candidate['number'] % 2 == 1 and a[1] == '未接触', 'NOT_UNCONTACTED_B_ROW')
     require(v[18:20] == ['DRAFT_READY', '承認済み'] and v[20] in (True, 'TRUE') and v[31] == '停止', 'READY_PROJECTION_CONFLICT')
     require(m.get('record_origin') == 'FORMNEXT_RAW' and m.get('review_required') is False and not m.get('review_reasons'), 'IMPORT_SCOPE_CONFLICT')
