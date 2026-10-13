@@ -13,6 +13,26 @@ from urllib.parse import urlparse
 
 import form_persistence as fp
 
+
+def test_new_downstream_claim_requires_unchanged_saved_handoff_copy():
+    handoff = {'source': 'DRAFT_READY_HANDOFF', 'task_id': '6ac5b018a72c81919b80cf3daa6d3cc5',
+               'verified_at': '2026-10-13T03:10:00Z', 'email_sha256': 'saved-source-hash'}
+    row = {'fields': {'営業メール件名': 'Saved subject', '営業メール本文': 'Saved body'},
+           'meta': {'handoff': handoff}}
+    packet = {'subject': 'Saved subject', 'form_message': 'Saved body', 'draft_ready_handoff': copy.deepcopy(handoff),
+              'scheduler_context': {'task_id': fp.FORM_TASK_ID, 'origin': 'SCHEDULED_AUTOMATION',
+                                    'run_id': 'real-run', 'invoked_at': '2026-10-13T03:19:00Z',
+                                    'nominal_slot': '2026-10-13T03:18:00Z', 'claim_event_id': 'claim'}}
+    fp.require_saved_ready_copy(row, packet)
+    changed = copy.deepcopy(packet)
+    changed['form_message'] = 'Shortened or newly generated body'
+    with unittest.TestCase().assertRaisesRegex(ValueError, 'FORM_SAVED_READY_COPY_CHANGED'):
+        fp.require_saved_ready_copy(row, changed)
+    changed = copy.deepcopy(packet)
+    changed.pop('draft_ready_handoff')
+    with unittest.TestCase().assertRaisesRegex(ValueError, 'FORM_DRAFT_READY_HANDOFF_REQUIRED'):
+        fp.require_saved_ready_copy(row, changed)
+
 EVENT_HEADERS = ('event_id','occurred_at','date','source_row','company_key','company_name',
  'from_status','to_status','action_type','source','recorded_at','lead_id','previous_status',
  'new_status','writer','reason','evidence','timestamp','code_version','idempotency_key',
@@ -588,3 +608,4 @@ class BrowserSubmissionBoundaryTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+

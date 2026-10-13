@@ -172,6 +172,26 @@ def scheduled_claim(packet):
     return context
 
 
+def require_saved_ready_copy(row, packet):
+    """Bind new downstream form claims to Handoff's exact stored customer copy."""
+    invoked = datetime.fromisoformat(str(scheduled_claim(packet)["invoked_at"]).replace("Z", "+00:00"))
+    if invoked < datetime(2026, 10, 13, 3, 18, 12, tzinfo=timezone.utc):
+        return  # Historical claims retain their original reconciliation contract.
+    fields = row["fields"]
+    handoff = row["meta"].get("handoff") or {}
+    if (handoff.get("task_id") != "6ac5b018a72c81919b80cf3daa6d3cc5"
+            or handoff.get("source") != "DRAFT_READY_HANDOFF"
+            or not handoff.get("verified_at") or not handoff.get("email_sha256")
+            or packet.get("draft_ready_handoff") != handoff):
+        raise ValueError("FORM_DRAFT_READY_HANDOFF_REQUIRED")
+    subject = fields.get("営業メール件名")
+    body = fields.get("営業メール本文")
+    if not isinstance(subject, str) or not subject or not isinstance(body, str) or not body:
+        raise ValueError("FORM_SAVED_READY_COPY_MISSING")
+    if packet.get("subject") != subject or packet.get("form_message") != body:
+        raise ValueError("FORM_SAVED_READY_COPY_CHANGED")
+
+
 def merge_owned(fresh, requested):
     """Only deterministic form-owned keys; preserve unrelated EC and hard holds."""
     merged = copy.deepcopy(fresh)
@@ -346,6 +366,7 @@ class FormPersistence:
         meta = current["meta"]
         packet = meta.get("form_submission_packet_v1") or {}
         scheduler = scheduled_claim(packet)
+        require_saved_ready_copy(current, packet)
         claim_rows = self.existing_events(scheduler["claim_event_id"])
         if len(claim_rows) != 1:
             raise ValueError("FORM_SCHEDULER_CLAIM_RECEIPT_UNRESOLVED")
@@ -514,3 +535,4 @@ class FormPersistence:
         merged = self.commit(number, fresh, {"form_executor_attempt": attempt}, event, require_start=True)
         fresh["meta"] = merged
         return fresh
+

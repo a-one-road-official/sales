@@ -211,6 +211,7 @@ def compact_form_result(result: dict | None) -> dict:
             for key in (
                 "index", "key", "label", "type", "required", "action",
                 "maxlength", "final_value", "error", "available_choices",
+                "phone_country", "phone_country_verified",
             )
             if key in item
         }
@@ -426,11 +427,14 @@ def main() -> None:
                     company_name=company,
                     subject=subject,
                     message=message,
-                    compact_message=str(packet.get("approved_compact_form_message") or ""),
+                    compact_message=("" if packet.get("draft_ready_handoff") else
+                                     str(packet.get("approved_compact_form_message") or "")),
                 )
                 if preview.get("ready") and preview.get("form_url"):
                     recovered_url = str(preview["form_url"])
                     recovered_message = str(preview.get("message") or message)
+                    if packet.get("draft_ready_handoff") and recovered_message != message:
+                        raise ValueError("FORM_SAVED_READY_COPY_CHANGED")
                     packet = dict(packet)
                     packet["form_url"] = recovered_url
                     packet["form_message"] = recovered_message
@@ -513,3 +517,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
