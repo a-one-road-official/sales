@@ -82,12 +82,17 @@ class FormGateRevalidationTests(unittest.TestCase):
             validator=lambda *args: self.live, recompute=lambda _: None)
         self.assertNotIn("_form_document_revalidation", result)
 
-    def test_blank_version_requires_full_revalidation(self):
-        require_form_gate_projection(self.validate(),
-            dict(LF_screening_status="PASS", LF_gate_version=""), "V1")
-        with self.assertRaises(ValueError):
-            require_form_gate_projection(self.live,
-                dict(LF_screening_status="PASS", LF_gate_version=""), "V1")
+    def test_blank_version_requires_physical_projection(self):
+        for result in (self.validate(), self.live):
+            with self.subTest(rebound="_form_document_revalidation" in result), \
+                    self.assertRaisesRegex(ValueError, "FORM_GATE_PROJECTION_MISSING"):
+                require_form_gate_projection(result,
+                    dict(LF_screening_status="PASS", LF_gate_version=""), "V1")
+
+    def test_matching_physical_projection_passes(self):
+        for result in (self.validate(), self.live):
+            require_form_gate_projection(result,
+                dict(LF_screening_status="PASS", LF_gate_version="V1"), "V1")
 
     def test_populated_conflicting_projection_remains_blocked(self):
         for fields in (
@@ -100,3 +105,4 @@ class FormGateRevalidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

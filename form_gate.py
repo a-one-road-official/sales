@@ -63,10 +63,14 @@ def validate_form_gate(record, receipt, handoff, *, validator=None, recompute=No
 def require_form_gate_projection(result, fields, policy_version):
     version = fields.get("LF_gate_version")
     rebound = result.get("_form_document_revalidation")
-    # A missing display version may use the freshly reproduced full receipt;
-    # contradictory populated versions are always rejected.
     if (result.get("decision") != "PASS"
-            or fields.get("LF_screening_status") != "PASS"
-            or (version != policy_version and not (not version and rebound))
-            or (rebound and result.get("policy_version") != policy_version)):
+            or fields.get("LF_screening_status") != "PASS"):
         raise ValueError("FORM_CURRENT_GATE_NOT_PASS")
+    # A reproduced saved receipt proves only the immutable decision lineage.
+    # It never supplies or repairs a missing mandatory physical projection.
+    if not version:
+        raise ValueError("FORM_GATE_PROJECTION_MISSING")
+    if (version != policy_version
+            or (rebound and result.get("policy_version") != policy_version)):
+        raise ValueError("FORM_CURRENT_GATE_PROJECTION_MISMATCH")
+
