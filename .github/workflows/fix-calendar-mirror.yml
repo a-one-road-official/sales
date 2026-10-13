@@ -11,6 +11,10 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: calendar-mirror-scoped-patch
+  cancel-in-progress: false
+
 jobs:
   patch-live-apps-script:
     runs-on: ubuntu-latest
@@ -22,6 +26,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Test exact-instance mirror exceptions
+        run: node apps-script/test_calendar_override.cjs
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
         with:
@@ -29,103 +36,109 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Enable required APIs
-        run: |
-          gcloud services enable script.googleapis.com iamcredentials.googleapis.com --project=${{ secrets.GCP_PROJECT_ID }} || true
-
-      - name: Patch live Apps Script recursion bug
+      - name: Patch live mirror query while preserving all other source and triggers
         run: |
           python -m pip install --quiet google-api-python-client google-auth requests
           python - <<'PY'
-          import os, time, requests
+          import copy
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import time
+          import requests
           import google.auth
           from googleapiclient.discovery import build
           from googleapiclient.errors import HttpError
           from google.oauth2.credentials import Credentials
 
           SCRIPT_ID = '14pzapk5hUf1W7dTB4v7yv-tv1YHtRPZyUSSlqM_OMb5D5PRobVPXZbqa'
-          MARK = 'A1_CALENDAR_TIME_MIN_FIX_V4'
           SCOPE = 'https://www.googleapis.com/auth/script.projects'
+          MARK = 'A1_CALENDAR_EVENT_OVERRIDE_V6'
+          helper = Path('apps-script/calendar_override.gs').read_text(encoding='utf-8')
+          if MARK not in helper or 'function a1MirrorFreebusyQueryV6_' not in helper:
+              raise SystemExit('HELPER_SOURCE_INVALID_NO_WRITE')
 
           base_creds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/cloud-platform'])
+          def service(creds):
+              return build('script', 'v1', credentials=creds, cache_discovery=False)
 
-          def apps_script_service(creds):
-            return build('script', 'v1', credentials=creds, cache_discovery=False)
-
-          # First try the WIF service account directly. If the standalone Apps Script is
-          # owned by the Workspace user, use domain-wide delegation via IAM signJwt.
+          # Preserve the existing mirror deployment's authentication path and scopes.
+          # No permission, policy, calendar sharing, or credential configuration changes.
           try:
-            direct = apps_script_service(base_creds)
-            project = direct.projects().getContent(scriptId=SCRIPT_ID).execute()
-            svc = direct
-            print('AUTH_MODE=service-account-direct')
+              svc = service(base_creds)
+              project = svc.projects().getContent(scriptId=SCRIPT_ID).execute()
+              print('AUTH_MODE=service-account-direct')
           except HttpError as e:
-            if e.resp.status != 403:
-              raise
-            sa = os.environ['TARGET_SA']
-            admin = os.environ['GOOGLE_ADMIN_USER']
-            now = int(time.time())
-            payload = {
-              'iss': sa,
-              'sub': admin,
-              'scope': SCOPE,
-              'aud': 'https://oauth2.googleapis.com/token',
-              'iat': now,
-              'exp': now + 3600,
-            }
-            iam = build('iamcredentials', 'v1', credentials=base_creds, cache_discovery=False)
-            signed = iam.projects().serviceAccounts().signJwt(
-              name=f'projects/-/serviceAccounts/{sa}', body={'payload': __import__('json').dumps(payload)}
-            ).execute()['signedJwt']
-            tok = requests.post('https://oauth2.googleapis.com/token', data={
-              'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-              'assertion': signed,
-            }, timeout=30)
-            tok.raise_for_status()
-            user_creds = Credentials(token=tok.json()['access_token'])
-            svc = apps_script_service(user_creds)
-            project = svc.projects().getContent(scriptId=SCRIPT_ID).execute()
-            print('AUTH_MODE=workspace-admin-delegation')
+              if e.resp.status != 403:
+                  raise
+              sa = os.environ['TARGET_SA']
+              now = int(time.time())
+              payload = {
+                  'iss': sa, 'sub': os.environ['GOOGLE_ADMIN_USER'], 'scope': SCOPE,
+                  'aud': 'https://oauth2.googleapis.com/token', 'iat': now, 'exp': now + 3600,
+              }
+              iam = build('iamcredentials', 'v1', credentials=base_creds, cache_discovery=False)
+              signed = iam.projects().serviceAccounts().signJwt(
+                  name=f'projects/-/serviceAccounts/{sa}', body={'payload': json.dumps(payload)}
+              ).execute()['signedJwt']
+              token = requests.post('https://oauth2.googleapis.com/token', data={
+                  'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer', 'assertion': signed,
+              }, timeout=30)
+              token.raise_for_status()
+              svc = service(Credentials(token=token.json()['access_token']))
+              project = svc.projects().getContent(scriptId=SCRIPT_ID).execute()
+              print('AUTH_MODE=workspace-admin-delegation')
 
-          files = project.get('files', [])
-          target = None
-          for f in files:
-            src = f.get('source', '')
-            if ('syncBusyCalendar' in src or 'syncBusyToAdmin' in src) and 'timeMin' in src:
-              target = f
-              break
-          if not target:
-            raise SystemExit('CALENDAR_SOURCE_NOT_FOUND')
+          def editable_files(value):
+              files = [{k: f[k] for k in ('name', 'type', 'source')} for f in value.get('files', [])]
+              if not files or len({f['name'] for f in files}) != len(files):
+                  raise SystemExit('PROJECT_FILES_INVALID_NO_WRITE')
+              return files
 
-          src = target.get('source', '')
-          print('target_file=', target.get('name'))
-          for line in src.splitlines():
-            if 'timeMin' in line or 'existingMirrors' in line or 'syncBusy' in line:
-              print(line[:240])
+          def digest(files):
+              text = json.dumps(sorted(files, key=lambda f: f['name']), sort_keys=True, ensure_ascii=False)
+              return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
-          if MARK not in src:
-            if 'const now = new Date();' in src and 'timeMin: now.toISOString()' in src:
-              src = src.replace(
-                'const now = new Date();',
-                "const now = new Date();\n  // A1_CALENDAR_TIME_MIN_FIX_V4\n  const freeBusyStart = new Date(now);\n  freeBusyStart.setHours(0, 0, 0, 0);",
-                1,
-              )
-              src = src.replace('timeMin: now.toISOString()', 'timeMin: freeBusyStart.toISOString()', 1)
-            elif 'const now = new Date()' in src and 'timeMin: now.toISOString()' in src:
-              src = src.replace(
-                'const now = new Date()',
-                "const now = new Date()\n  // A1_CALENDAR_TIME_MIN_FIX_V4\n  const freeBusyStart = new Date(now)\n  freeBusyStart.setHours(0, 0, 0, 0)",
-                1,
-              )
-              src = src.replace('timeMin: now.toISOString()', 'timeMin: freeBusyStart.toISOString()', 1)
-            else:
-              raise SystemExit('EXPECTED_TIME_MIN_PATTERN_NOT_FOUND')
-            target['source'] = src
-            svc.projects().updateContent(scriptId=SCRIPT_ID, body={'files': files}).execute()
+          original = editable_files(project)
+          files = copy.deepcopy(original)
+          targets = [f for f in files if f['type'] == 'SERVER_JS' and
+                     'MIRROR_SYNC_V1' in f['source'] and
+                     ('syncBusyToAdmin' in f['source'] or 'syncBusyCalendar' in f['source'])]
+          if len(targets) != 1:
+              raise SystemExit('EXACT_MIRROR_SOURCE_NOT_FOUND_NO_WRITE')
+          target = targets[0]
+          source = target['source']
+          if '16ec099z@gmail.com' not in source or 'admin@a1-road.com' not in source:
+              raise SystemExit('MIRROR_ACCOUNT_SCOPE_MISMATCH_NO_WRITE')
+          installed = [f for f in files if MARK in f['source']]
+          if installed:
+              if len(installed) != 1 or helper.strip() not in installed[0]['source']:
+                  raise SystemExit('DIFFERENT_OVERRIDE_VERSION_NO_WRITE')
+              if 'a1MirrorFreebusyQueryV6_({' not in source:
+                  raise SystemExit('OVERRIDE_NOT_BOUND_NO_WRITE')
+          else:
+              old = 'Calendar.Freebusy.query('
+              calls = source.count(old)
+              if not 1 <= calls <= 3:
+                  raise SystemExit('EXPECTED_MIRROR_QUERY_NOT_FOUND_NO_WRITE')
+              # Patch only the provider call and append the tested helper. In particular,
+              # preserve the actual installed daily/other cadence, chunking, locks,
+              # source/destination settings, manifest, and every other project file.
+              target['source'] = source.replace(old, 'a1MirrorFreebusyQueryV6_(') + '\n\n' + helper
+              subprocess.run(['node', '-e', 'new(require("node:vm").Script)(require("node:fs").readFileSync(0,"utf8"))'],
+                             input=target['source'], text=True, check=True)
+              fresh = editable_files(svc.projects().getContent(scriptId=SCRIPT_ID).execute())
+              if digest(fresh) != digest(original):
+                  raise SystemExit('CONCURRENT_PROJECT_EDIT_NO_WRITE')
+              svc.projects().updateContent(scriptId=SCRIPT_ID, body={'files': files}).execute()
 
-          verify = svc.projects().getContent(scriptId=SCRIPT_ID).execute()
-          merged = '\n'.join(f.get('source', '') for f in verify.get('files', []))
-          if MARK not in merged or 'timeMin: freeBusyStart.toISOString()' not in merged:
-            raise SystemExit('LIVE_PATCH_VERIFY_FAILED')
+          verified = editable_files(svc.projects().getContent(scriptId=SCRIPT_ID).execute())
+          if digest(verified) != digest(files):
+              raise SystemExit('LIVE_PATCH_READBACK_MISMATCH')
           print('LIVE_PATCH_VERIFY_OK')
+          print('PROJECT_SHA256=' + digest(verified))
+          print('TRIGGER_CODE_PRESERVED=1 INSTALL_NOT_EXECUTED=1 CALENDAR_WRITES=0')
+          print('Private exception rules are read only from destination-owned solo calendar events.')
           PY
