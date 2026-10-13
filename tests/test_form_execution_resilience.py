@@ -1,4 +1,5 @@
 from playwright.sync_api import sync_playwright
+import pytest
 
 from form_execution import (
     _choose_form,
@@ -11,7 +12,55 @@ from form_execution import (
     _form_page_allowed,
     _verify_identity_dom,
     _reveal_contact_form,
+    _verify_phone_dom,
+    _select_phone_country,
+    _value_for,
 )
+
+
+@pytest.mark.parametrize('value,country,valid', [
+    ('+81 80-4870-5690', None, True),
+    ('08048705690', 'JP', True),
+    ('8048705690', 'JP', True),
+    ('08048705690', None, False),
+    ('+818048705690', 'US', False),
+    ('+818048705691', 'JP', False),
+    ('', 'JP', False),
+])
+def test_phone_readback_checks_number_and_actual_country(value, country, valid):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        selector = '<select class="PhoneInputCountrySelect"><option value="US">United States</option><option value="JP">Japan</option></select>' if country else ''
+        page.set_content('<form><div class="PhoneInput">' + selector + '<input type="tel" name="phone"></div></form>')
+        if country:
+            page.locator('select').select_option(country)
+        page.locator('input').fill(value)
+        audit = [{'index': 1 if country else 0, 'key': 'phone', 'action': 'FILLED'}]
+        if valid:
+            _verify_phone_dom(page.locator('form'), audit)
+            assert audit[0]['final_value'] == value
+        else:
+            with pytest.raises(ValueError, match='FORM_PHONE_'):
+                _verify_phone_dom(page.locator('form'), audit)
+        browser.close()
+
+
+def test_native_phone_widget_selects_and_verifies_japan():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content('<form><div class="PhoneInput"><select class="PhoneInputCountrySelect"><option value="US">United States</option><option value="JP">Japan</option></select><input type="tel"></div></form>')
+        assert _select_phone_country(page.locator('input'), page) == (True, True)
+        assert page.locator('select').input_value() == 'JP'
+        browser.close()
+
+
+def test_sender_fields_use_verified_sender_instead_of_target_company():
+    assert _value_for('first_name', '', subject='', message='') == 'Kazuma'
+    assert _value_for('last_name', '', subject='', message='') == 'Tamura'
+    assert _value_for('phone', '', subject='', message='') == '+818048705690'
+    assert _value_for('website', '', subject='', message='') == 'https://a-oneroad.com/'
 
 
 def test_choose_form_finds_spa_container_without_form_tag():
@@ -238,3 +287,4 @@ def test_wix_style_topic_and_country_dropdown_markers_are_classified():
 
 def test_this_field_is_required_is_explicit_validation_error():
     assert VALIDATION_ERROR_RE.search("This field is required.")
+

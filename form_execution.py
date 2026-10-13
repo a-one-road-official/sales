@@ -492,7 +492,7 @@ def _value_for(key: str, marker: str, *, subject: str, message: str, overrides: 
     if key == "address":
         return "〒220-0072 神奈川県横浜市西区浅間町1丁目4-3 ウィザードビル402"
     if key == "website":
-        return "https://a1-road.com"
+        return "https://a-oneroad.com/"
     if key == "subject":
         return subject
     if key == "message":
@@ -757,6 +757,16 @@ def _select_custom_option(el, key: str, context=None, override_tokens=()) -> tup
 def _select_phone_country(el, context=None) -> tuple[bool, bool]:
     """Set Japan in a phone widget when the site exposes a country picker."""
     try:
+        native = el.locator("xpath=ancestor::*[contains(@class, 'PhoneInput') or contains(concat(' ', normalize-space(@class), ' '), ' iti ')][1]").locator("select.PhoneInputCountrySelect, select[class*='country' i]")
+        if native.count():
+            picker = native.first
+            options = picker.locator("option")
+            for index in range(options.count()):
+                option = options.nth(index)
+                if str(option.get_attribute("value") or "").upper() == "JP" or re.search(r"\bJapan\b|日本", option.inner_text(), re.I):
+                    picker.select_option(value=option.get_attribute("value"))
+                    return True, _phone_country_code(el) == "JP"
+            return True, False
         root = el.locator(
             "xpath=ancestor::*[contains(@class, 'PhoneInput')][1]"
         )
@@ -823,6 +833,51 @@ def _current_value(el) -> str:
         return str(el.input_value() or "")
     except Exception:
         return ""
+
+
+def _phone_country_code(el) -> str:
+    """Read actual selected widget country; option clicks alone are not evidence."""
+    return str(el.evaluate("""el => {
+        const root = el.closest('.PhoneInput, .iti');
+        if (!root) return '';
+        const select = root.querySelector('select.PhoneInputCountrySelect, select[class*="country" i]');
+        if (select) {
+            const option = select.selectedOptions[0];
+            if (/^(jp|japan)$/i.test(select.value) || /\\bJapan\\b|日本/i.test(option?.textContent || '')) return 'JP';
+            return select.value.toUpperCase();
+        }
+        const selected = root.querySelector('.iti__selected-flag, .iti__selected-country, [class*="PhoneInput__FlagAndCaret"]');
+        const flag = selected?.querySelector('[data-country-code], .iti__flag, img') || selected;
+        const code = flag?.getAttribute('data-country-code') || '';
+        if (code) return code.toUpperCase();
+        const evidence = [selected?.getAttribute('title'), selected?.getAttribute('aria-label'), flag?.getAttribute('alt'), flag?.className].join(' ');
+        if (/\\bJapan\\b|日本|iti__jp/i.test(evidence)) return 'JP';
+        if (selected) return 'UNKNOWN';
+        return '';
+    }""") or "")
+
+
+def _verify_phone_dom(form, field_audit):
+    controls = form.locator("input:not([type=hidden]), textarea, select")
+    for item in field_audit:
+        if item.get("key") != "phone" or item.get("action") != "FILLED":
+            continue
+        index = item.get("index")
+        if not isinstance(index, int) or not 0 <= index < controls.count():
+            raise ValueError("FORM_PHONE_CONTROL_MISSING")
+        el = controls.nth(index)
+        value = _current_value(el).strip()
+        digits = re.sub(r"[\s().-]", "", value)
+        country = _phone_country_code(el)
+        if country and country != "JP":
+            raise ValueError("FORM_PHONE_COUNTRY_UNVERIFIED:" + country)
+        valid = digits == "+818048705690" or (country == "JP" and digits in {"08048705690", "8048705690"})
+        if not valid:
+            raise ValueError("FORM_PHONE_VALUE_MISMATCH")
+        if not el.evaluate("el => !el.validity || el.validity.valid"):
+            raise ValueError("FORM_PHONE_INPUT_INVALID")
+        item["final_value"] = value
+        item["phone_country_verified"] = country or "E164_JAPAN"
 
 
 CAPTCHA_WIDGET_SELECTORS = (
@@ -1821,10 +1876,7 @@ class PublicContactFormExecutor:
                                         "UNSET" if picker_present else "NOT_AVAILABLE"
                                     )
                                     if picker_present and not phone_country_ok:
-                                        # The value remains unambiguous E.164 even when
-                                        # the widget's flag menu has no selectable label.
-                                        fill_value = "+818048705690"
-                                        item["phone_country"] = "Japan (E.164 prefix)"
+                                        raise ValueError("FORM_PHONE_COUNTRY_UNVERIFIED")
                                 el.fill(fill_value)
                                 item["action"] = "FILLED"
                                 item["final_value"] = _current_value(el) or fill_value
@@ -2082,6 +2134,7 @@ class PublicContactFormExecutor:
                     if submit is None:
                         return result_payload("FORM_FAILED", reason="SUBMIT_CONTROL_NOT_FOUND")
                     _verify_identity_dom(form, field_audit)
+                    _verify_phone_dom(form, field_audit)
                     control_label = _control_label(submit)
                     if re.search(r"\bnext\b", control_label, re.I):
                         before_click_signature = _visible_step_signature(form)
@@ -2132,6 +2185,7 @@ class PublicContactFormExecutor:
                 if contact_policy_blocked(page.locator("body").inner_text()):
                     return result_payload("BLOCKED", reason="CONTACT_POLICY_RESTRICTS_OUTREACH")
                 _verify_identity_dom(form, field_audit)
+                _verify_phone_dom(form, field_audit)
                 if preview_only:
                     return result_payload("FORM_PREVIEW_READY", reason="PREVIEW_NO_SUBMISSION", submitted_message=matching_messages[0])
                 # Capture visible rejection text immediately before this submit.
@@ -2198,3 +2252,4 @@ class PublicContactFormExecutor:
                     browser.close()
                 except Exception:
                     pass
+
