@@ -1,5 +1,5 @@
 FORM_PRODUCTION_TRIGGER
-requested_at=2026-10-13T11:23:20.000Z
+requested_at=2026-10-13T12:32:10.000Z
 claims=1
 source=chatgpt-outbound-c-form-only
 claim_ids=formc-9384-20261013103019
@@ -8,13 +8,14 @@ canonical_domains=lotactree.com
 reason=FORM_PRODUCTION_SCHEDULED_RECONCILE_QUEUED_CLAIM
 claim_event_id=form-submit-requested:formc-9384-20261013103019
 email_failure_evidence_event_id=form-email-failure-verified:lotactree.com:1a12be4134ff6605:1a12be41bd283960
-prior_workflow_run_id=38383988385
+prior_workflow_run_id=38389663296
 prior_execution_started=false
 prior_submission_attempted=false
 prior_customer_actions=0
-repair_commit=af8e025209d2d7ced48442179ceb57ff61ff5b25
-run_id=formc-20261013T111738Z-6ab3aacf
+repair_commit=3c8bda20e61ec1848b51b9ab17d077024eb1d39f
+run_id=formc-20261013T122250Z-6ab3aacf
 pipeline_revision=drive-version:91:2026-10-13T05:26:15.643Z
+policy_revision=drive-version:29:2026-10-07T02:39:04.643Z
 handoff_event_id=DRAFT_READY_HANDOFF_20261011T081544140Z:DRAFT_READY:raw611:main9384
 task_id=6ab3aacf782c819187278ca4be5d4751
 origin=SCHEDULED_AUTOMATION
