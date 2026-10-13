@@ -296,7 +296,7 @@ class FormRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'CLAIM_RECEIPT_UNRESOLVED'):self.runtime.assert_admission(8972,'c-1')
     def test_current_gate_failure_blocks(self):
         self.svc.cells[1,8972,102]='OLD_VERSION'
-        with self.assertRaisesRegex(ValueError,'CURRENT_GATE_NOT_PASS'):self.runtime.assert_admission(8972,'c-1')
+        with self.assertRaisesRegex(ValueError,'FORM_CURRENT_GATE_PROJECTION_MISMATCH'):self.runtime.assert_admission(8972,'c-1')
     def test_reconcile_health_requires_an_evidenced_positive_token(self):
         for health in ('','HEALTHY','WARN','RECONCILE_REQUIRED','STAGED_NOT_VERIFIED','arbitrary','ERROR:broken','PASSIVE'):
             with self.subTest(health=health):
