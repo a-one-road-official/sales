@@ -66,10 +66,17 @@ def require_form_gate_projection(result, fields, policy_version):
     if (result.get("decision") != "PASS"
             or fields.get("LF_screening_status") != "PASS"):
         raise ValueError("FORM_CURRENT_GATE_NOT_PASS")
-    # A reproduced saved receipt proves only the immutable decision lineage.
-    # It never supplies or repairs a missing mandatory physical projection.
+    # A blank display projection is tolerated only after the narrow,
+    # document-only revalidation above reproduced the complete immutable
+    # decision and original scheduled Handoff.  The exception never applies
+    # to a strict/current receipt, a contradictory populated projection, or a
+    # revalidated receipt whose semantic policy version differs.
     if not version:
-        raise ValueError("FORM_GATE_PROJECTION_MISSING")
+        if not rebound:
+            raise ValueError("FORM_GATE_PROJECTION_MISSING")
+        if result.get("policy_version") != policy_version:
+            raise ValueError("FORM_CURRENT_GATE_PROJECTION_MISMATCH")
+        return
     if (version != policy_version
             or (rebound and result.get("policy_version") != policy_version)):
         raise ValueError("FORM_CURRENT_GATE_PROJECTION_MISMATCH")

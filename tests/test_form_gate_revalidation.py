@@ -82,12 +82,19 @@ class FormGateRevalidationTests(unittest.TestCase):
             validator=lambda *args: self.live, recompute=lambda _: None)
         self.assertNotIn("_form_document_revalidation", result)
 
-    def test_blank_version_requires_physical_projection(self):
-        for result in (self.validate(), self.live):
-            with self.subTest(rebound="_form_document_revalidation" in result), \
-                    self.assertRaisesRegex(ValueError, "FORM_GATE_PROJECTION_MISSING"):
-                require_form_gate_projection(result,
-                    dict(LF_screening_status="PASS", LF_gate_version=""), "V1")
+    def test_blank_version_is_allowed_only_for_exact_document_revalidation(self):
+        require_form_gate_projection(self.validate(),
+            dict(LF_screening_status="PASS", LF_gate_version=""), "V1")
+        with self.assertRaisesRegex(ValueError, "FORM_GATE_PROJECTION_MISSING"):
+            require_form_gate_projection(self.live,
+                dict(LF_screening_status="PASS", LF_gate_version=""), "V1")
+
+    def test_blank_version_revalidation_with_changed_semantic_version_is_blocked(self):
+        result = self.validate()
+        result["policy_version"] = "OTHER"
+        with self.assertRaisesRegex(ValueError, "FORM_CURRENT_GATE_PROJECTION_MISMATCH"):
+            require_form_gate_projection(result,
+                dict(LF_screening_status="PASS", LF_gate_version=""), "V1")
 
     def test_matching_physical_projection_passes(self):
         for result in (self.validate(), self.live):
