@@ -4,6 +4,7 @@
  * DESTINATION: admin@a1-road.com
  *
  * CREATE-only contract: never edit/delete existing calendar events.
+ * Include calendar_override.gs in the same Apps Script project.
  */
 
 const CONFIG = Object.freeze({
@@ -75,7 +76,7 @@ function syncBusyCalendar() {
 }
 
 function getSourceBusy_(timeMin, timeMax) {
-  const response = Calendar.Freebusy.query({
+  const response = a1MirrorFreebusyQueryV6_({
     timeMin: timeMin.toISOString(),
     timeMax: timeMax.toISOString(),
     items: [{ id: CONFIG.SOURCE_CALENDAR_ID }],
