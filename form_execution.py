@@ -305,6 +305,20 @@ def _field_key(el, label: str) -> str:
     marker = _marker(el, label)
     typ = (el.get_attribute("type") or "text").lower()
     tag = (el.evaluate("el => el.tagName.toLowerCase()") or "").lower()
+    # Actual input semantics and visible labels outrank stale builder IDs.
+    # A historical tel control named form_fields[email] received an email.
+    if typ in {"tel", "phone"}:
+        return "phone"
+    if typ == "email":
+        return "email"
+    if re.search(r"\b(phone|telephone|tel|mobile|telefon|telefono)\b|電話", label, re.I) and not re.search(r"e[- ]?mail", label, re.I):
+        return "phone"
+    if re.search(r"\be[- ]?mail\b", label, re.I):
+        return "email"
+    if re.search(r"\b(?:state|province|prefecture)\b|都道府県", label, re.I):
+        return "state"
+    if re.fullmatch(r"\s*(?:company(?:\s+name)?|campany|firma|会社名)\s*\*?\s*", label, re.I):
+        return "company"
     if tag == "input" and typ in {"text", ""}:
         identity_key = identity_field_key(marker, el.get_attribute("autocomplete") or "")
         if identity_key:
@@ -378,7 +392,7 @@ def _field_key(el, label: str) -> str:
             if 'japan' not in options and re.search(r'\bapac\b|asia[- ]pacific', options):
                 return 'region'
         return "country"
-    if re.search(r"\bregion\b", marker):
+    if re.search(r"\bregion\b", marker) and not re.search(r"\b(state|province|prefecture)\b", marker):
         return "region"
     if re.search(r"industry(?:_|$)|\bindustry\b|業種", marker):
         return "industry"
@@ -2224,8 +2238,9 @@ class PublicContactFormExecutor:
                     el = fields.nth(index)
                     if el.is_visible() and el.is_enabled() and _field_key(el, _label_for(el)) == "message":
                         actual_messages.append(_current_value(el))
-                matching_messages = [value for value in actual_messages if value.split() == message.split()]
-                if not matching_messages:
+                normalise_copy = lambda value: value.replace("\r\n", "\n").replace("\r", "\n")
+                matching_messages = [value for value in actual_messages if normalise_copy(value) == normalise_copy(message)]
+                if not matching_messages or len(matching_messages) != len(actual_messages):
                     limits = [int(item["maxlength"]) for item in field_audit
                               if item.get("key") == "message" and str(item.get("maxlength") or '').isdigit()
                               and int(item["maxlength"]) > 0]
@@ -2233,6 +2248,11 @@ class PublicContactFormExecutor:
                                           max_message_length=min(limits) if limits else None,
                                           expected_message_length=len(message),
                                           actual_message_lengths=[len(value) for value in actual_messages])
+                for index in range(fields.count()):
+                    el = fields.nth(index)
+                    if el.is_visible() and el.is_enabled() and _field_key(el, _label_for(el)) == "subject":
+                        if normalise_copy(_current_value(el)) != normalise_copy(subject):
+                            return result_payload("FORM_FAILED", reason="SUBJECT_VALUE_MISMATCH")
                 if contact_policy_blocked(page.locator("body").inner_text()):
                     return result_payload("BLOCKED", reason="CONTACT_POLICY_RESTRICTS_OUTREACH")
                 _verify_identity_dom(form, field_audit)
@@ -2290,6 +2310,8 @@ class PublicContactFormExecutor:
                     form_url=final_url,
                     confirmation=confirmation,
                     confirmation_text=(visible_text or "")[:4000],
+                    submitted_message_sha256=hashlib.sha256(normalise_copy(matching_messages[0]).encode()).hexdigest(),
+                    submitted_subject_sha256=hashlib.sha256(normalise_copy(subject).encode()).hexdigest(),
                     finished_at=datetime.now(timezone.utc).isoformat(),
                 )
                 # The batch runner owns the single verified terminal event.

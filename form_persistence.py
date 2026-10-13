@@ -9,6 +9,10 @@ import copy
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
+from pathlib import Path
+import random
+import threading
 from time import sleep as sleep_seconds, monotonic as monotonic_seconds
 import uuid
 
@@ -39,6 +43,105 @@ BLOCKED_STATUSES = {"返信あり", "アポ確定", "商談化", "商談中", "�
 
 def utcnow():
     return datetime.now(timezone.utc)
+
+
+def runtime_log(phase, **details):
+    """Preserve infrastructure and pre/post-submit evidence even if Sheets fails."""
+    record = dict(details, phase=phase, recorded_at=utcnow().isoformat(),
+        github_run_id=os.getenv("GITHUB_RUN_ID", ""),
+        shard_index=os.getenv("FORM_PRODUCTION_SHARD_INDEX", "0"))
+    line = json.dumps(record, ensure_ascii=False, default=str)
+    print(line, flush=True)
+    directory = os.getenv("OUTREACH_EVIDENCE_DIR", "")
+    if directory:
+        try:
+            root = Path(directory)
+            root.mkdir(parents=True, exist_ok=True)
+            with (root / "form-runtime-events.jsonl").open("a", encoding="utf-8") as out:
+                out.write(line + "\n")
+        except OSError as exc:
+            print(json.dumps({"phase": "LOCAL_EVIDENCE_WRITE_FAILED", "error": str(exc)}), flush=True)
+    return record
+
+
+def read_error_status(error):
+    from googleapiclient.errors import HttpError
+    if isinstance(error, HttpError):
+        return getattr(error.resp, "status", None)
+    return None
+
+
+class FormReadService:
+    """Form-only read pacing shared by all Sheets clients in one shard.
+
+    Four shards at >=5 seconds/request consume at most 48 steady-state
+    reads/minute together. Writes retain their original no-replay protocol.
+    """
+    def __init__(self, resource, *, interval=None, sleep=sleep_seconds,
+                 monotonic=monotonic_seconds, jitter=random.random, log=runtime_log):
+        self.resource = resource
+        try:
+            configured = float(os.getenv("FORM_SHEETS_READ_INTERVAL_SECONDS", "5")) if interval is None else interval
+            self.interval = max(5.0, float(configured))
+        except (ValueError, TypeError):
+            self.interval = 5.0
+        self.sleep, self.monotonic, self.jitter, self.log = sleep, monotonic, jitter, log
+        self.next_read = 0.0
+        self.lock = threading.Lock()
+        self.read_count = 0
+        self.retry_count = 0
+
+    def _read(self, request, operation):
+        for attempt in range(6):
+            with self.lock:
+                delay = max(0.0, self.next_read - self.monotonic())
+                if delay:
+                    self.sleep(delay)
+                self.next_read = self.monotonic() + self.interval
+                self.read_count += 1
+                try:
+                    # Hidden SDK retries would bypass the shared read pacing.
+                    return request.execute(num_retries=0)
+                except Exception as exc:
+                    code = read_error_status(exc)
+                    if code not in {429, 500, 502, 503, 504} or attempt == 5:
+                        self.log("FORM_SHEETS_READ_ERROR", operation=operation,
+                            provider_code=code, attempt=attempt + 1, original_error=str(exc),
+                            read_requests=self.read_count, external_action_retried=False)
+                        raise
+                    delay = max(self.interval, min(60.0, 4.0 * (2 ** attempt) + self.jitter()))
+                    try:
+                        delay = max(delay, min(60.0, float(exc.resp.get("retry-after", 0))))
+                    except (AttributeError, TypeError, ValueError):
+                        pass
+                    self.retry_count += 1
+                    self.log("FORM_SHEETS_READ_BACKOFF", operation=operation,
+                        provider_code=code, attempt=attempt + 1, delay_seconds=delay,
+                        original_error=str(exc), external_action_retried=False)
+                    self.next_read = self.monotonic() + delay
+
+    def __getattr__(self, name):
+        return getattr(_FormReadResource(self.resource, self), name)
+
+
+class _FormReadResource:
+    def __init__(self, resource, owner):
+        self.resource, self.owner = resource, owner
+
+    def __getattr__(self, name):
+        method = getattr(self.resource, name)
+        def call(*args, **kwargs):
+            result = method(*args, **kwargs)
+            if name in {"spreadsheets", "values"}:
+                return _FormReadResource(result, self.owner)
+            if name in {"get", "batchGet"}:
+                owner = self.owner
+                class ReadRequest:
+                    def execute(self, **unused):
+                        return owner._read(result, name)
+                return ReadRequest()
+            return result
+        return call
 
 
 def native_guard_rejection(error):
@@ -82,9 +185,10 @@ def strict_json(value):
     return result
 
 
-def discover(svc):
-    data = svc.spreadsheets().get(spreadsheetId=SSOT_ID,
-        fields="sheets(properties),namedRanges").execute()
+def discover(svc, data=None):
+    if data is None:
+        data = svc.spreadsheets().get(spreadsheetId=SSOT_ID,
+            fields="sheets(properties),namedRanges").execute()
     tabs = {}
     for item in data.get("sheets", []):
         p = item["properties"]
@@ -101,7 +205,8 @@ def read_controls(svc, tabs=None, *, preserve_lease_literals=False):
     tabs = tabs or discover(svc)
     end = tabs[CONFIG_TAB]["gridProperties"]["rowCount"]
     values = svc.spreadsheets().values().get(spreadsheetId=SSOT_ID,
-        range=f"'{CONFIG_TAB}'!A1:A{end}").execute().get("values", [])
+        range=f"'{CONFIG_TAB}'!A1:B{end}",
+        valueRenderOption="UNFORMATTED_VALUE").execute().get("values", [])
     rows = {}
     for number, row in enumerate(values, 1):
         key = str(row[0] if row else "").strip()
@@ -112,15 +217,10 @@ def read_controls(svc, tabs=None, *, preserve_lease_literals=False):
     keys = sorted(rows, key=rows.get)
     if not keys:
         return {}, rows
-    result = svc.spreadsheets().values().batchGet(spreadsheetId=SSOT_ID,
-        ranges=[f"'{CONFIG_TAB}'!B{rows[key]}:B{rows[key]}" for key in keys],
-        valueRenderOption="UNFORMATTED_VALUE").execute().get("valueRanges", [])
-    if len(result) != len(keys):
-        raise ValueError("CONTROL_READ_INCOMPLETE")
     controls = {}
-    for key, block in zip(keys, result):
-        val = block.get("values", [[]])
-        literal = val[0][0] if val and val[0] else ""
+    for key in keys:
+        value = values[rows[key] - 1]
+        literal = value[1] if len(value) > 1 else ""
         controls[key] = literal if preserve_lease_literals and key in {
             "OUTBOUND_PACING_LEASE_OWNER", "OUTBOUND_PACING_LEASE_TOKEN", "OUTBOUND_PACING_LEASE_UNTIL"
         } else str(literal).strip()
@@ -181,7 +281,7 @@ def require_saved_ready_copy(row, packet, historical_handoff=None):
     handoff = row["meta"].get("handoff") or historical_handoff or {}
     original_source = (handoff.get("origin") == "SCHEDULED_AUTOMATION"
                        and handoff.get("phase") == "DRAFT_READY_HANDOFF"
-                       and handoff.get("run_id") and handoff.get("decision_id")) if historical_handoff else (
+                       and handoff.get("run_id") and handoff.get("decision_id")) or (
         handoff.get("task_id") == "6ac5b018a72c81919b80cf3daa6d3cc5"
         and handoff.get("source") == "DRAFT_READY_HANDOFF" and handoff.get("verified_at"))
     if (not original_source or not handoff.get("email_sha256")
@@ -344,8 +444,9 @@ class FormPersistence:
             valueRenderOption="UNFORMATTED_VALUE").execute().get("values", [])
 
     def guard_observation(self, *, require_start=False):
-        before = self.svc.spreadsheets().get(spreadsheetId=SSOT_ID, fields="namedRanges").execute()
-        controls, rows = read_controls(self.svc, preserve_lease_literals=True)
+        before = self.svc.spreadsheets().get(spreadsheetId=SSOT_ID,
+            fields="sheets(properties),namedRanges").execute()
+        controls, rows = read_controls(self.svc, discover(self.svc, before), preserve_lease_literals=True)
         after = self.svc.spreadsheets().get(spreadsheetId=SSOT_ID, fields="namedRanges").execute()
         if not isinstance(before, dict) or not isinstance(after, dict):
             raise ValueError("FORM_GUARD_METADATA_READ_INVALID")
@@ -388,21 +489,32 @@ class FormPersistence:
             "business_segment": "Factory/BPO", "industry": "", "crm_payload": payload, "crm_result": "RECORDED"}
 
     def existing_events(self, identity):
+        return self.existing_events_many([identity]).get(identity, [])
+
+    def existing_events_many(self, identities):
+        identities = set(identities)
         tabs = discover(self.svc)
         end = tabs[EVENT_TAB]["gridProperties"]["rowCount"]
         col = column_label(self.layout.event_headers.index("event_id") + 1)
         hits = []
-        # A full single-column read preserves duplicate detection across the
-        # entire ledger without one quota-consuming RPC per 2,000 grid rows.
-        # Read afresh on every call; a cached absence cannot authorize a claim.
+        # IDs only: ~44k cells in one read rather than 23 separate calls.
         values = self.values(f"'{EVENT_TAB}'!{col}2:{col}{end}") if end >= 2 else []
         for offset, value in enumerate(values):
-            if value and str(value[0]) == identity:
-                hits.append(2 + offset)
-        out = []
+            if value and str(value[0]) in identities:
+                hits.append((str(value[0]), 2 + offset))
+        out = {identity: [] for identity in identities}
         last_col = column_label(len(self.layout.event_headers))
-        for number in hits:
-            out.extend(self.values(f"'{EVENT_TAB}'!A{number}:{last_col}{number}"))
+        if hits and len(identities) == 1:
+            for identity, number in hits:
+                out[identity].extend(self.values(f"'{EVENT_TAB}'!A{number}:{last_col}{number}"))
+        elif hits:
+            blocks = self.svc.spreadsheets().values().batchGet(spreadsheetId=SSOT_ID,
+                ranges=[f"'{EVENT_TAB}'!A{number}:{last_col}{number}" for _, number in hits],
+                valueRenderOption="UNFORMATTED_VALUE").execute().get("valueRanges", [])
+            if len(blocks) != len(hits):
+                raise ValueError("FORM_EVENT_READ_INCOMPLETE")
+            for (identity, _), block in zip(hits, blocks):
+                out[identity].extend(block.get("values", []))
         return out
 
     def assert_admission(self, number, expected_claim, *, allow_started=False, peers=()):
@@ -415,9 +527,19 @@ class FormPersistence:
         scheduler = scheduled_claim(packet)
         historical_handoff = None
         recovery = packet.get("email_failure_recovery")
+        lineage = packet.get("recovery") or {}
+        if (lineage.get("original_handoff_event_id") and (recovery or {}).get("original_handoff_event_id")
+                and lineage["original_handoff_event_id"] != recovery["original_handoff_event_id"]):
+            raise ValueError("FORM_ORIGINAL_HANDOFF_ID_CONFLICT")
+        historical_id = lineage.get("original_handoff_event_id") or (recovery or {}).get("original_handoff_event_id")
+        receipt_ids = [scheduler["claim_event_id"]]
+        if recovery:
+            receipt_ids.append(recovery.get("evidence_event_id"))
+            if not meta.get("handoff") and historical_id:
+                receipt_ids.append(historical_id)
+        receipts = self.existing_events_many(receipt_ids)
         if recovery and not meta.get("handoff"):
-            event_id = recovery.get("original_handoff_event_id") if isinstance(recovery, dict) else None
-            rows = self.existing_events(event_id) if event_id else []
+            rows = receipts.get(historical_id, []) if historical_id else []
             if len(rows) != 1:
                 raise ValueError("FORM_ORIGINAL_HANDOFF_RECEIPT_UNRESOLVED")
             record = dict(zip(self.layout.event_headers, rows[0]))
@@ -431,10 +553,13 @@ class FormPersistence:
                     or record.get("company_name") != current["company"]
                     or historical_handoff.get("main_row") != number
                     or historical_handoff.get("origin") != "SCHEDULED_AUTOMATION"
-                    or historical_handoff.get("phase") != "DRAFT_READY_HANDOFF"):
+                    or not historical_handoff.get("run_id")
+                    or not (hp.get("phase") == "DRAFT_READY_HANDOFF"
+                        or (historical_handoff.get("source") == "DRAFT_READY_HANDOFF"
+                            and historical_handoff.get("task_id") == "6ac5b018a72c81919b80cf3daa6d3cc5"))):
                 raise ValueError("FORM_ORIGINAL_HANDOFF_RECEIPT_MISMATCH")
         require_saved_ready_copy(current, packet, historical_handoff)
-        claim_rows = self.existing_events(scheduler["claim_event_id"])
+        claim_rows = receipts.get(scheduler["claim_event_id"], [])
         if len(claim_rows) != 1:
             raise ValueError("FORM_SCHEDULER_CLAIM_RECEIPT_UNRESOLVED")
         receipt_row = dict(zip(self.layout.event_headers, claim_rows[0]))
@@ -459,7 +584,7 @@ class FormPersistence:
             evidence_id = recovery.get("evidence_event_id") if isinstance(recovery, dict) else None
             if not evidence_id:
                 raise ValueError("FORM_EMAIL_FAILURE_PROOF_REQUIRED")
-            evidence_rows = self.existing_events(evidence_id)
+            evidence_rows = receipts.get(evidence_id, [])
             if len(evidence_rows) != 1:
                 raise ValueError("FORM_EMAIL_FAILURE_RECEIPT_UNRESOLVED")
             failed_delivery = confirmed_email_failure(current, packet,
@@ -600,8 +725,8 @@ class FormPersistence:
                     self.svc.spreadsheets().batchUpdate(spreadsheetId=SSOT_ID,
                         body={"requests": release_requests(self.layout, lease)}).execute()
                 except Exception as cleanup_error:
-                    print(json.dumps({"phase": "OWN_GUARD_CLEANUP_FAILED", "error": str(cleanup_error),
-                        "owner": lease.owner, "token": lease.token}, ensure_ascii=False))
+                    runtime_log("OWN_GUARD_CLEANUP_FAILED", original_error=str(cleanup_error),
+                        owner=lease.owner, token=lease.token, external_action_retried=False)
 
     def begin(self, number, row, peers=()):
         packet = row["meta"].get("form_submission_packet_v1") or {}

@@ -232,6 +232,40 @@ class FormRecoveryTests(unittest.TestCase):
         controls,rows=fp.read_controls(self.svc)
         self.assertEqual(rows['AUMS_MASTER_RUN_STATE'],12149)
         self.assertEqual(controls['AUMS_MASTER_RUN_STATE'],'START')
+
+    def test_recovery_reads_historical_id_from_original_packet_lineage(self):
+        for nested in (False, True):
+            with self.subTest(nested=nested):
+                handoff={'run_id':'original-handoff', 'origin':'SCHEDULED_AUTOMATION',
+                    'phase':'DRAFT_READY_HANDOFF', 'main_row':8972, 'decision_id':'original-decision',
+                    'email_sha256':'original-hash'}
+                if nested:
+                    handoff.pop('phase')
+                    handoff.update(source='DRAFT_READY_HANDOFF',
+                        task_id='6ac5b018a72c81919b80cf3daa6d3cc5', verified_at='2026-10-13T03:30:00Z')
+                meta=self.svc.get_meta()
+                packet=meta['form_submission_packet_v1']
+                packet['scheduler_context']['invoked_at']='2026-10-13T04:13:40Z'
+                packet.update(subject='Saved subject', form_message='Saved body',
+                    draft_ready_handoff=copy.deepcopy(handoff),
+                    recovery={'original_handoff_event_id':'original-handoff-event'},
+                    email_failure_recovery={'evidence_event_id':'original-dsn'})
+                self.runtime.header.update({'営業メール件名':113,'営業メール本文':114})
+                self.svc.cells[1,8972,113]='Saved subject'
+                self.svc.cells[1,8972,114]='Saved body'
+                self.svc.set_meta(meta)
+                event={'event_id':'original-handoff-event','source_row':'8972',
+                    'company_name':'Example Manufacturing','source':'DRAFT_READY_HANDOFF',
+                    'action_type':'DRAFT_READY','to_status':'DRAFT_READY','occurred_at':'2026-10-13T03:30:00Z',
+                    'crm_payload':json.dumps({'handoff':handoff} if nested else handoff)}
+                for col,key in enumerate(EVENT_HEADERS,1): self.svc.cells[3,3,col]=event.get(key,'')
+                for col,key in enumerate(EVENT_HEADERS,1): self.svc.cells[3,4,col]= 'original-dsn' if key=='event_id' else ''
+                self.svc.tabs[fp.EVENT_TAB]=(3,4,26)
+                with patch('form_persistence.confirmed_email_failure',return_value=True):
+                    self.runtime.assert_admission(8972,'c-1')
+                    self.svc.cells[3,3,EVENT_HEADERS.index('source')+1]='MANUAL'
+                    with self.assertRaisesRegex(ValueError,'HANDOFF_RECEIPT_MISMATCH'):
+                        self.runtime.assert_admission(8972,'c-1')
     def test_master_stop_blocks(self):
         self.svc.set_control('AUMS_MASTER_RUN_STATE','STOP')
         with self.assertRaisesRegex(ValueError,'FORM_CONTROL_BLOCK'):self.runtime.assert_admission(8972,'c-1')

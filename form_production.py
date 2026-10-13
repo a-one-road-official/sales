@@ -27,6 +27,7 @@ from sheets_repo import SheetsRepo
 from form_persistence import (FormPersistence, discover, read_controls, policy_from_drive,
     require_form_start, execution_pending, strict_json, column_label, classify_form_result,
     canonical_domain, execution_payload, packet_digest)
+from form_persistence import FormReadService, runtime_log, read_error_status
 
 _RUNTIME = None
 
@@ -193,6 +194,7 @@ def compact_form_result(result: dict | None) -> dict:
         "submitted_at", "finished_at", "submission_attempted", "missing_required",
         "core_unfilled", "filled_field_count", "field_status", "http_status",
         "explicit_negative_confirmation", "discovery_candidates", "recovered_form_url",
+        "submitted_message_sha256", "submitted_subject_sha256", "screenshots",
     ):
         if key in result:
             value = result.get(key)
@@ -277,8 +279,10 @@ def mark_terminal(
         meta["email_fallback_allowed"] = False
         meta["channel_router_state"] = "FORM_AMBIGUOUS"
     elif state == "FORM_FAILED":
-        meta["email_fallback_allowed"] = True
-        meta["channel_router_state"] = "EMAIL_FALLBACK_ALLOWED"
+        # A terminal DSN never authorizes another attempt at that email address.
+        meta["email_fallback_allowed"] = not bool(packet.get("email_failure_recovery"))
+        meta["channel_router_state"] = ("FORM_FAILED_EMAIL_RETRY_BLOCKED"
+            if packet.get("email_failure_recovery") else "EMAIL_FALLBACK_ALLOWED")
     elif state == "FORM_SUPPRESSED":
         meta["email_fallback_allowed"] = False
         meta["channel_router_state"] = "GLOBAL_SUPPRESSED"
@@ -304,14 +308,13 @@ def main() -> None:
         raise RuntimeError("EXISTING_GITHUB_FORM_WORKFLOW_CONTEXT_REQUIRED")
     creds, _ = default(scopes=["https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive.readonly"])
-    svc = build("sheets", "v4", credentials=creds, cache_discovery=False)
+    svc = FormReadService(build("sheets", "v4", credentials=creds, cache_discovery=False))
     drive = build("drive", "v3", credentials=creds, cache_discovery=False)
     config = get_config(svc)
     try:
         require_form_start(config)
     except ValueError as exc:
-        print(json.dumps({"status": "DEFERRED", "phase": "CONTROL_READ",
-            "reason": str(exc), "customer_actions": 0}, ensure_ascii=False))
+        runtime_log("CONTROL_READ", status="DEFERRED", reason=str(exc), customer_actions=0)
         return
     drift = {key: config.get(key) for key in ("CHATGPT_FORM_RUN_STATE", "FORM_EXECUTOR_RUN_STATE")
              if config.get(key) != config["AUMS_MASTER_RUN_STATE"]}
@@ -321,7 +324,7 @@ def main() -> None:
     _RUNTIME = FormPersistence(svc, lambda: policy_from_drive(drive))
 
     try:
-        global_batch = max(1, min(200, int(config.get("FORM_PRODUCTION_BATCH_SIZE", "40") or 40)))
+        global_batch = max(1, min(40, int(config.get("FORM_PRODUCTION_BATCH_SIZE", "40") or 40)))
     except ValueError:
         global_batch = 40
     try:
@@ -329,7 +332,7 @@ def main() -> None:
         shard_index = max(0, min(shard_count - 1, int(os.getenv("FORM_PRODUCTION_SHARD_INDEX", "0") or 0)))
     except ValueError:
         shard_count, shard_index = 1, 0
-    limit = max(1, (global_batch + shard_count - 1) // shard_count)
+    limit = global_batch // shard_count + int(shard_index < global_batch % shard_count)
 
     index = load_index(svc)
     blocked_domains = domain_suppression(index)
@@ -341,10 +344,14 @@ def main() -> None:
         shard_index=shard_index,
     )
     if not queue:
-        print(json.dumps({"status": "NO_QUEUED_JOBS", "processed": 0}, ensure_ascii=False))
+        runtime_log("FORM_RUN_END", status="NO_QUEUED_JOBS", processed=0,
+            form_sent=0, customer_actions=0, sheets_read_requests=svc.read_count,
+            sheets_read_retries=svc.retry_count)
         return
 
     sheets = SheetsRepo(SSOT_ID)
+    # Executor history/suppression reads share the very same per-shard pacer.
+    sheets.svc = svc
     executor = PublicContactFormExecutor(
         sheets=sheets,
         authorization=None,
@@ -394,8 +401,14 @@ def main() -> None:
         except Exception as exc:
             # No browser action after a failed admission or write. Keep the same
             # claim for evidence-based recovery; expose the original error.
+            runtime_log("FORM_ADMISSION_ERROR", row=row_number, claim_id=packet.get("claim_id"),
+                original_error=str(exc), provider_code=read_error_status(exc),
+                external_action_attempted=False, claim_preserved=True)
             results.append({"row": row_number, "status": "DEFERRED", "phase": "FORM_ADMISSION",
-                "reason": str(exc), "external_action_attempted": False})
+                "reason": str(exc), "provider_code": read_error_status(exc),
+                "external_action_attempted": False})
+            if read_error_status(exc) in {429, 500, 502, 503, 504}:
+                break  # Preserve remaining claims for the next genuine scheduled run.
             continue
         meta = row["meta"]
         packet = meta["form_submission_packet_v1"]
@@ -405,6 +418,8 @@ def main() -> None:
         form_url, website, company, subject, message = (payload[key]
             for key in ("form_url", "website", "company_name", "subject", "message"))
         result = execute_claimed_form(executor, row_number, row, peers)
+        runtime_log("FORM_BROWSER_RESULT", row=row_number, claim_id=claim_id,
+            result=compact_form_result(result), external_action_retried=False)
 
         # Stored URLs go stale. Recover only when the first attempt provably made
         # no customer submission, then use GET-only discovery + read-only preview
@@ -480,6 +495,9 @@ def main() -> None:
                     result = best_attempt
 
         state, reason = classify_form_result(result)
+        runtime_log("FORM_RESULT_BEFORE_COMMIT", row=row_number, claim_id=claim_id,
+            terminal_state=state, result=compact_form_result(result),
+            external_action_retried=False)
         if state == "FORM_SENT":
             sent_domains.add(domain)
 
@@ -487,10 +505,10 @@ def main() -> None:
             mark_terminal(svc, row_number, row, state=state, reason=reason, result=result)
         except Exception as exc:
             # Durable STARTED remains replay-blocked if terminal commit is denied.
-            print(json.dumps({"row": row_number, "phase": "FORM_RESULT_COMMIT",
-                "original_error": str(exc), "claim_id": claim_id, "result": compact_form_result(result),
-                "external_action_may_have_occurred": bool(result.get("submission_attempted")),
-                "retry_external_action": False}, ensure_ascii=False))
+            runtime_log("FORM_RESULT_COMMIT_ERROR", row=row_number,
+                original_error=str(exc), claim_id=claim_id, result=compact_form_result(result),
+                external_action_may_have_occurred=bool(result.get("submission_attempted")),
+                retry_external_action=False)
             raise
         results.append({
             "row": row_number,
@@ -510,10 +528,16 @@ def main() -> None:
         "form_unconfirmed": sum(1 for item in results if item["status"] == "FORM_UNCONFIRMED"),
         "form_suppressed": sum(1 for item in results if item["status"] == "FORM_SUPPRESSED"),
         "email_sends": 0,
+        "deferred": sum(1 for item in results if item["status"] == "DEFERRED"),
+        "sheets_read_requests": svc.read_count,
+        "sheets_read_retries": svc.retry_count,
         "results": results,
         "finished_at": now_iso(),
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))
+    runtime_log("FORM_RUN_END", **summary)
+    if any(item.get("provider_code") in {429, 500, 502, 503, 504} for item in results):
+        raise RuntimeError("FORM_INFRASTRUCTURE_DEFERRED_CLAIMS_PRESERVED")
 
 
 if __name__ == "__main__":

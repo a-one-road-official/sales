@@ -26,7 +26,8 @@ jobs:
     env:
       GOOGLE_CLOUD_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
       GCP_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
-      LEAD_FACTORY_SHEETS_READ_MIN_INTERVAL_SECONDS: "0.25"
+      LEAD_FACTORY_SHEETS_READ_MIN_INTERVAL_SECONDS: "5"
+      FORM_SHEETS_READ_INTERVAL_SECONDS: "5"
       LEAD_FACTORY_SHEETS_WRITE_MIN_INTERVAL_SECONDS: "0.25"
       OUTREACH_FORM_ACTION_TIMEOUT_MS: "12000"
       FORM_PRODUCTION_SHARD_COUNT: "4"
@@ -77,8 +78,8 @@ jobs:
 
       - name: Form resilience tests
         run: |
-          python -m compileall form_execution.py form_production.py form_runtime_entrypoint.py
-          pytest -q tests/test_form_execution_resilience.py tests/test_form_runtime_entrypoint.py
+          python -m compileall form_execution.py form_persistence.py form_production.py form_runtime_entrypoint.py
+          pytest -q tests/test_form_execution_resilience.py tests/test_form_runtime_entrypoint.py tests/test_form_production_recovery.py tests/test_form_sender_inputs.py tests/test_form_read_resilience.py
 
       - name: Execute ChatGPT-claimed form jobs
         run: python form_runtime_entrypoint.py

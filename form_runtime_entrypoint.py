@@ -106,7 +106,13 @@ def main() -> None:
     install_runtime_patch()
     from form_production import main as production_main
 
-    production_main()
+    try:
+        production_main()
+    except Exception as exc:
+        from form_persistence import runtime_log, read_error_status
+        runtime_log("FORM_RUNTIME_ERROR", original_error=str(exc),
+            provider_code=read_error_status(exc), external_action_retried=False)
+        raise
 
 
 if __name__ == "__main__":
