@@ -523,7 +523,8 @@ class FormPersistence:
     def assert_admission(self, number, expected_claim, *, allow_started=False, peers=()):
         require_form_start(read_controls(self.svc)[0])
         context = self.policy_loader()
-        from lead_generator.policy import validate_receipt, policy_context
+        from lead_generator.policy import policy_context
+        from form_gate import validate_form_gate, require_form_gate_projection
         current = self.row(number)
         meta = current["meta"]
         packet = meta.get("form_submission_packet_v1") or {}
@@ -623,12 +624,16 @@ class FormPersistence:
         receipt = gate.get("admission_result") or gate.get("result") or {}
         if gate.get("admission_result") and gate.get("result") and gate["admission_result"] != gate["result"]:
             raise ValueError("CONFLICTING_FORM_GATE_RECEIPTS")
-        result = validate_receipt(gate.get("admission_packet") or {}, receipt)
+        result = validate_form_gate(gate.get("admission_packet") or {}, receipt,
+            historical_handoff or meta.get("handoff"))
         if result.get("domain") != packet.get("canonical_domain"):
             raise ValueError("FORM_CANONICAL_DOMAIN_MISMATCH")
         fields = current["fields"]
-        if result.get("decision") != "PASS" or fields["LF_screening_status"] != "PASS" or fields["LF_gate_version"] != context["policy_version"]:
-            raise ValueError("FORM_CURRENT_GATE_NOT_PASS")
+        require_form_gate_projection(result, fields, context["policy_version"])
+        if result.get("_form_document_revalidation"):
+            current["form_gate_audit"] = result["_form_document_revalidation"]
+            runtime_log("FORM_GATE_PROVENANCE_REVALIDATED", row=number,
+                claim_id=expected_claim, evidence=current["form_gate_audit"])
         if fields["LF_error"]:
             raise ValueError("FORM_CURRENT_GATE_ERROR")
         if fields["営業判定"] != policy_context()["policy"]["output"]["PASS"]:
