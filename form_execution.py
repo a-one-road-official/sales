@@ -928,6 +928,36 @@ def _phone_country_code(el) -> str:
     }""") or "")
 
 
+def _international_digits_constraint(el) -> bool:
+    """Observed native pattern may require the SAME international digits sans '+'."""
+    return bool(el.evaluate("""el => {
+        if (!el.getAttribute('pattern')) return false;
+        const clone = el.cloneNode(false);
+        const lengthOK = value => {
+            const min = el.getAttribute('minlength'), max = el.getAttribute('maxlength');
+            return (!min || value.length >= Number(min)) && (!max || value.length <= Number(max));
+        };
+        clone.value = '+818048705690';
+        const plusRejectedByPattern = clone.validity.patternMismatch;
+        clone.value = '818048705690';
+        return plusRejectedByPattern && clone.validity.valid && lengthOK(clone.value);
+    }"""))
+
+
+def _fill_verified_phone(el, *, japan_widget, item):
+    """Adapt display punctuation only; never change digits/country/constraints."""
+    if japan_widget and _phone_country_code(el) != 'JP':
+        raise ValueError('FORM_PHONE_COUNTRY_UNVERIFIED')
+    value = '08048705690' if japan_widget else '+818048705690'
+    item['phone_input_format'] = 'JAPAN_WIDGET_NATIONAL' if japan_widget else 'E164'
+    if not japan_widget and _phone_country_code(el) == '' and _international_digits_constraint(el):
+        value = '818048705690'
+        item['phone_input_format'] = 'INTERNATIONAL_DIGITS'
+        item['phone_pattern'] = el.get_attribute('pattern')
+    el.fill(value)
+    return value
+
+
 def _verify_phone_dom(form, field_audit):
     controls = form.locator("input:not([type=hidden]), textarea, select")
     for item in field_audit:
@@ -943,6 +973,11 @@ def _verify_phone_dom(form, field_audit):
         if country and country != "JP":
             raise ValueError("FORM_PHONE_COUNTRY_UNVERIFIED:" + country)
         valid = digits == "+818048705690" or (country == "JP" and digits in {"08048705690", "8048705690"})
+        if (digits == '818048705690' and country == ''
+                and item.get('phone_input_format') == 'INTERNATIONAL_DIGITS'
+                and item.get('phone_pattern') == el.get_attribute('pattern')
+                and _international_digits_constraint(el)):
+            valid = True
         if not valid:
             raise ValueError("FORM_PHONE_VALUE_MISMATCH")
         if not el.evaluate("el => !el.validity || el.validity.valid"):
@@ -2039,9 +2074,10 @@ class PublicContactFormExecutor:
                                     )
                                     if picker_present and not phone_country_ok:
                                         raise ValueError("FORM_PHONE_COUNTRY_UNVERIFIED")
-                                    if picker_present:
-                                        fill_value = "08048705690"
-                                el.fill(fill_value)
+                                    fill_value = _fill_verified_phone(el,
+                                        japan_widget=picker_present, item=item)
+                                else:
+                                    el.fill(fill_value)
                                 item["action"] = "FILLED"
                                 item["final_value"] = _current_value(el) or fill_value
                         except Exception as exc:

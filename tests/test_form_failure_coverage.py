@@ -252,3 +252,35 @@ def test_full_browser_local_receipt_requires_actual_saved_request(monkeypatch,pl
     assert len(received)==1
     assert verified_form_success(result)
     assert result['submission_evidence']['message_sha256']==text_hash('Exact saved\nbody')
+
+
+def test_observed_contact_digits_phone_gets_exact_payload_bound_receipt(monkeypatch,playwright_runtime):
+    """Anonymized actual native pattern; every GET/POST is intercepted locally."""
+    from urllib.parse import parse_qs
+    original=execution._new_browser_context;received=[]
+    def context(browser):
+        ctx=original(browser)
+        def mock(route):
+            if route.request.method=='POST':
+                received.append(parse_qs(route.request.post_data))
+                route.fulfill(status=200,content_type='text/html',body='<p>Thank you for contacting us. Your message has been received.</p>')
+            else:
+                route.fulfill(status=200,content_type='text/html',body='<form method="post" action="/contact">'
+                    '<label>Name<input name="contact[Name]" autocomplete="name"></label>'
+                    '<label>Email<input required type="email" name="contact[email]" autocomplete="email"></label>'
+                    '<label>Phone<input type="tel" name="contact[Phone number]" autocomplete="tel" pattern="[0-9\\-]*"></label>'
+                    '<label>Your message<textarea name="contact[Your message]"></textarea></label>'
+                    '<button type="submit">Send</button></form>')
+        ctx.route('**/*',mock);return ctx
+    monkeypatch.setattr(execution,'_new_browser_context',context)
+    monkeypatch.setattr(execution,'sync_playwright',lambda:nullcontext(playwright_runtime))
+    executor=execution.PublicContactFormExecutor(explicit_source_rows={'fixture'})
+    result=executor.execute(form_url='https://fixture.invalid/contact',website='https://fixture.invalid',
+        message='Exact saved\nbody',subject='Saved subject',company_name='Local fixture',
+        idempotency_key='local-phone-pattern',source_row='fixture')
+    assert result['status']=='FORM_SENT',json.dumps(result,ensure_ascii=False)
+    assert verified_form_success(result) and len(received)==1
+    assert received[0]['contact[Phone number]']==['818048705690']
+    assert received[0]['contact[Name]']==['Kazuma Tamura']
+    assert received[0]['contact[email]']==['admin@a1-road.com']
+    assert received[0]['contact[Your message]'][0].replace('\r\n','\n')=='Exact saved\nbody'

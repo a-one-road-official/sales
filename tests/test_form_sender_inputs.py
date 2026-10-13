@@ -2,7 +2,7 @@
 import pytest
 from playwright.sync_api import sync_playwright
 from form_execution import (_verify_identity_dom, _verify_phone_dom,
-    _verify_sender_contact_dom, _value_for, _field_key)
+    _verify_sender_contact_dom, _value_for, _field_key, _fill_verified_phone)
 
 
 @pytest.mark.parametrize('html,label,expected', [
@@ -64,4 +64,44 @@ def test_missing_identity_control_is_not_silently_skipped():
         page.set_content('<form></form>')
         with pytest.raises(ValueError, match='FORM_IDENTITY_CONTROL_MISSING'):
             _verify_identity_dom(page.locator('form'), [{'index':0,'key':'name','action':'FILLED'}])
+        browser.close()
+
+
+def test_observed_digits_hyphen_pattern_preserves_exact_international_number():
+    with sync_playwright() as p:
+        browser=p.chromium.launch(headless=True);page=browser.new_page()
+        page.set_content('<form><label>Phone<input type="tel" name="contact[Phone number]" autocomplete="tel" pattern="[0-9\\-]*"></label></form>')
+        el=page.locator('input');audit={'index':0,'key':'phone','action':'FILLED'}
+        el.fill('+818048705690')
+        with pytest.raises(ValueError,match='FORM_PHONE_INPUT_INVALID'):_verify_phone_dom(page.locator('form'),[audit])
+        assert _fill_verified_phone(el,japan_widget=False,item=audit)=='818048705690'
+        assert el.get_attribute('pattern')=='[0-9\\-]*'
+        _verify_phone_dom(page.locator('form'),[audit])
+        assert audit['phone_country_verified']=='E164_JAPAN'
+        el.fill('000-0000-0000')
+        with pytest.raises(ValueError,match='FORM_PHONE_VALUE_MISMATCH'):_verify_phone_dom(page.locator('form'),[audit])
+        browser.close()
+
+
+def test_international_digits_require_observed_constraint_and_unchanged_number():
+    with sync_playwright() as p:
+        browser=p.chromium.launch(headless=True);page=browser.new_page()
+        page.set_content('<form><input type="tel" pattern="[0-9\\-]*"></form>')
+        el=page.locator('input');audit={'index':0,'key':'phone','action':'FILLED'}
+        el.fill('818048705690')
+        with pytest.raises(ValueError):_verify_phone_dom(page.locator('form'),[audit])
+        _fill_verified_phone(el,japan_widget=False,item=audit)
+        el.evaluate("el=>el.removeAttribute('pattern')")
+        with pytest.raises(ValueError):_verify_phone_dom(page.locator('form'),[audit])
+        browser.close()
+
+
+@pytest.mark.parametrize('pattern',['[0-9]{10}', '[0-9]{11}'])
+def test_domestic_pattern_never_authorizes_unverified_japan_national_number(pattern):
+    with sync_playwright() as p:
+        browser=p.chromium.launch(headless=True);page=browser.new_page()
+        page.set_content(f'<form><input type="tel" pattern="{pattern}"></form>')
+        audit={'index':0,'key':'phone','action':'FILLED'};el=page.locator('input')
+        assert _fill_verified_phone(el,japan_widget=False,item=audit)=='+818048705690'
+        with pytest.raises(ValueError):_verify_phone_dom(page.locator('form'),[audit])
         browser.close()
