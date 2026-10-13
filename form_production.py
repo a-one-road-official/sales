@@ -212,6 +212,7 @@ def compact_form_result(result: dict | None) -> dict:
                 "index", "key", "label", "type", "required", "action",
                 "maxlength", "final_value", "error", "available_choices",
                 "phone_country", "phone_country_verified",
+                "sender_contact_verified",
             )
             if key in item
         }

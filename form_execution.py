@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse, urldefrag
 import time
 import hashlib
+import unicodedata
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -447,7 +448,10 @@ def _field_override(marker: str, overrides: dict | None) -> dict | None:
 
 def _value_for(key: str, marker: str, *, subject: str, message: str, overrides: dict | None = None) -> str | None:
     override = _field_override(marker, overrides)
-    if override and override.get("value"):
+    sender_keys = {"name", "first_name", "last_name", "company", "email", "phone",
+                   "country", "region", "postal_code", "state", "city", "address", "website", "role",
+                   "subject", "message"}
+    if override and override.get("value") and key not in sender_keys:
         return str(override["value"])
     if key == "email":
         return "admin@a1-road.com"
@@ -1468,17 +1472,19 @@ def _verify_identity_dom(form, field_audit=None):
                 continue
             try:
                 index = int(item.get("index"))
-            except Exception:
-                continue
+            except (TypeError, ValueError):
+                raise ValueError("FORM_IDENTITY_CONTROL_MISSING:" + key)
             if index < 0 or index >= controls.count():
-                continue
+                raise ValueError("FORM_IDENTITY_CONTROL_MISSING:" + key)
             el = controls.nth(index)
             try:
                 if not el.is_visible() or not el.is_enabled():
-                    continue
+                    raise ValueError("FORM_IDENTITY_CONTROL_UNAVAILABLE:" + key)
                 observed.append({"key": key, "final_value": _current_value(el)})
-            except Exception:
-                continue
+            except ValueError:
+                raise
+            except Exception as exc:
+                raise ValueError("FORM_IDENTITY_READBACK_FAILED:" + key) from exc
     else:
         for index in range(controls.count()):
             el = controls.nth(index)
@@ -1488,6 +1494,48 @@ def _verify_identity_dom(form, field_audit=None):
             if key in identity_keys:
                 observed.append({"key": key, "final_value": _current_value(el)})
     validate_identity_fields(observed)
+
+
+def _contact_normal(value):
+    return re.sub(r"[\s〒-]+", "", unicodedata.normalize("NFKC", str(value or ""))).casefold()
+
+
+def _verify_sender_contact_dom(form, field_audit):
+    """Verify submitted business-address/profile values against known sender facts."""
+    aliases = {
+        "country": ("Japan", "日本", "JP", "JPN"),
+        "region": ("Asia Pacific", "APAC", "Asia-Pacific", "Asia", "アジア太平洋"),
+        "state": ("Kanagawa", "Kanagawa Prefecture", "神奈川", "神奈川県", "JP-14"),
+        "city": ("Yokohama", "横浜", "横浜市"),
+        "role": ("Founder & CEO", "CEO", "Founder", "Chief Executive Officer", "代表取締役"),
+    }
+    keys = {"country", "region", "state", "city", "postal_code", "address", "website", "role"}
+    controls = form.locator("input:not([type=hidden]), textarea, select")
+    for item in field_audit:
+        key = item.get("key")
+        if key not in keys or item.get("action") not in {"FILLED", "SELECTED"}:
+            continue
+        index = item.get("index")
+        if not isinstance(index, int) or not 0 <= index < controls.count():
+            raise ValueError("FORM_SENDER_CONTACT_CONTROL_MISSING:" + key)
+        el = controls.nth(index)
+        if not el.is_visible() or not el.is_enabled():
+            raise ValueError("FORM_SENDER_CONTACT_CONTROL_UNAVAILABLE:" + key)
+        value = _current_value(el)
+        if el.evaluate("el => el.tagName.toLowerCase()") == "select":
+            value = str(el.evaluate("el => Array.from(el.selectedOptions).map(o => o.textContent.trim()).join(' ')") or "")
+        expected = _value_for(key, "", subject="", message="")
+        allowed = aliases.get(key, (expected,))
+        if key == "website":
+            valid = value.rstrip("/").casefold() == expected.rstrip("/").casefold()
+        else:
+            valid = _contact_normal(value) in {_contact_normal(v) for v in allowed}
+        if not valid:
+            raise ValueError("FORM_SENDER_CONTACT_VALUE_MISMATCH:" + key)
+        if not el.evaluate("el => !el.validity || el.validity.valid"):
+            raise ValueError("FORM_SENDER_CONTACT_INPUT_INVALID:" + key)
+        item["final_value"] = value
+        item["sender_contact_verified"] = True
 
 
 class PublicContactFormExecutor:
@@ -2137,6 +2185,7 @@ class PublicContactFormExecutor:
                         return result_payload("FORM_FAILED", reason="SUBMIT_CONTROL_NOT_FOUND")
                     _verify_identity_dom(form, field_audit)
                     _verify_phone_dom(form, field_audit)
+                    _verify_sender_contact_dom(form, field_audit)
                     control_label = _control_label(submit)
                     if re.search(r"\bnext\b", control_label, re.I):
                         before_click_signature = _visible_step_signature(form)
@@ -2188,6 +2237,7 @@ class PublicContactFormExecutor:
                     return result_payload("BLOCKED", reason="CONTACT_POLICY_RESTRICTS_OUTREACH")
                 _verify_identity_dom(form, field_audit)
                 _verify_phone_dom(form, field_audit)
+                _verify_sender_contact_dom(form, field_audit)
                 if preview_only:
                     return result_payload("FORM_PREVIEW_READY", reason="PREVIEW_NO_SUBMISSION", submitted_message=matching_messages[0])
                 # Capture visible rejection text immediately before this submit.
@@ -2254,4 +2304,5 @@ class PublicContactFormExecutor:
                     browser.close()
                 except Exception:
                     pass
+
 
