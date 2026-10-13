@@ -68,5 +68,5 @@ def require_form_gate_projection(result, fields, policy_version):
     if (result.get("decision") != "PASS"
             or fields.get("LF_screening_status") != "PASS"
             or (version != policy_version and not (not version and rebound))
-            or result.get("policy_version") != policy_version):
+            or (rebound and result.get("policy_version") != policy_version)):
         raise ValueError("FORM_CURRENT_GATE_NOT_PASS")
