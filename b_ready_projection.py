@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+from urllib.parse import urlparse
 
 FLAGS = dict(dd_status='PENDING_DD', outbound_status='OUTBOUND_BLOCKED',
              outbound_allowed=False, automation_enabled=False, human_release_required=True)
@@ -22,18 +23,22 @@ def plan(candidate, *, gate_validator, unique_identity, current_history_clear,
     require(len(baselines) == 1, 'IMPORT_BASELINE_NOT_UNIQUE')
     baseline = baselines[0]; original = baseline.get('original_evidence', {})
     require(baseline.get('main_row') == candidate['number'] and baseline.get('ai_state') == '停止', 'BASELINE_IDENTITY_CONFLICT')
-    require(original.get('applied_at') == m.get('applied_at') and bool(m.get('applied_at')) and all(original.get(k) == val for k,val in FLAGS.items()), 'BASELINE_FLAGS_CONFLICT')
+    require(original.get('applied_at') == m.get('applied_at') and bool(m.get('applied_at')) and all(original.get(k) == val for k,val in FLAGS.items()) and original.get('review_required') is False and not original.get('review_reasons'), 'BASELINE_FLAGS_CONFLICT')
+    require(m.get('state') == 'DRAFT_READY' and baseline.get('captured_at') == h.get('verified_at'), 'BASELINE_HANDOFF_CONFLICT')
     require(h.get('normalization') == 'SCOPED_FORMNEXT_INITIAL_IMPORT_ONLY' and h.get('identity_join') == 'ACTUAL_RAW_F_MAIN_J_COMPANY_DOMAIN_UNIQUE', 'HANDOFF_SCOPE_CONFLICT')
     require(h.get('source') == 'DRAFT_READY_HANDOFF' and h.get('origin') == 'SCHEDULED_AUTOMATION' and h.get('task_id') == '6ac5b018a72c81919b80cf3daa6d3cc5', 'HANDOFF_OWNER_CONFLICT')
     require(h.get('main_row') == candidate['number'] and a[0] == r[1] and a[9] == r[5] == h.get('source_record_url'), 'SOURCE_IDENTITY_CONFLICT')
     require(len(event) == 26 and event[0] == h.get('event_id') and str(event[3]) == str(candidate['number']) and event[5] == a[0] and event[8] == 'DRAFT_READY', 'IMMUTABLE_EVENT_CONFLICT')
     payload = json.loads(event[24])
-    require(payload.get('origin') == h['origin'] and payload.get('task_id') == h['task_id'] and payload.get('run_id') == h.get('run_id') and payload.get('decision_id') == h.get('decision_id'), 'EVENT_OWNER_CONFLICT')
+    require(payload.get('origin') == h['origin'] and payload.get('task_id') == h['task_id'] and payload.get('run_id') == h.get('run_id') and payload.get('decision_id') == h.get('decision_id') and payload.get('phase') == 'DRAFT_READY_COMMIT', 'EVENT_OWNER_CONFLICT')
     require(payload.get('source_lineage') and all(h.get(k) == val for k,val in payload['source_lineage'].items()), 'EVENT_LINEAGE_CONFLICT')
     gate = m.get('common_gate', {}); raw = json.loads(r[13])
     require(gate == raw.get('common_gate'), 'RAW_GATE_CONFLICT')
     result = gate_validator(gate['admission_packet'], gate['admission_result'])
     require(result.get('decision') == 'PASS' and result.get('decision_id') == h.get('decision_id'), 'CURRENT_GATE_CONFLICT')
+    require(urlparse(a[6]).hostname.removeprefix('www.') == urlparse(r[2]).hostname.removeprefix('www.') == result.get('domain') and result.get('company_name') == a[0], 'DOMAIN_CONFLICT')
+    require(v[13] == m.get('recipient', {}).get('email') == payload.get('recipient'), 'RECIPIENT_CONFLICT')
+    require(all(h.get(k) == r[i] for k,i in [('copy_source_id',16),('copy_source_revision',17),('copy_source_sha256',18),('generated_at',19),('input_sha256',20),('generation_run_id',22)]), 'RAW_LINEAGE_CONFLICT')
     require(v[0] == 'PASS' and v[2] == result.get('policy_version'), 'CURRENT_GATE_PROJECTION_CONFLICT')
     digest = hashlib.sha256((v[14]+'\n'+v[15].replace('\r\n','\n')).encode()).hexdigest()
     require(v[14:16] == r[14:16] and digest == h.get('email_sha256') == r[21], 'COPY_CONFLICT')
