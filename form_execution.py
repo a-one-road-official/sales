@@ -2342,6 +2342,8 @@ class PublicContactFormExecutor:
                         before_click_signature = _visible_step_signature(form)
                         def authorize_next():
                             if before_submit is not None: before_submit()
+                            if _captcha_present([page] + list(page.frames[1:])):
+                                raise ValueError('FORM_CAPTCHA_PRESENT_BEFORE_ACTION')
                             _verify_identity_dom(form,field_audit)
                             _verify_phone_dom(form,field_audit)
                             _verify_sender_contact_dom(form,field_audit)
@@ -2410,6 +2412,9 @@ class PublicContactFormExecutor:
                 _verify_identity_dom(form, field_audit)
                 _verify_phone_dom(form, field_audit)
                 _verify_sender_contact_dom(form, field_audit)
+                if _captcha_present([page] + list(page.frames[1:])):
+                    return result_payload('FORM_UNCONFIRMED' if partial_transmission else 'FORM_FAILED',
+                                          reason='CAPTCHA_PRESENT_BEFORE_SUBMIT')
                 if preview_only:
                     return result_payload("FORM_PREVIEW_READY", reason="PREVIEW_NO_SUBMISSION", submitted_message=matching_messages[0])
                 # Capture visible rejection text immediately before this submit.
@@ -2422,6 +2427,9 @@ class PublicContactFormExecutor:
                 capture("before-submit")
                 if before_submit is not None:
                     before_submit()
+                if _captcha_present([page] + list(page.frames[1:])):
+                    return result_payload('FORM_UNCONFIRMED' if partial_transmission else 'FORM_FAILED',
+                                          reason='CAPTCHA_PRESENT_BEFORE_SUBMIT')
                 _verify_identity_dom(form,field_audit)
                 _verify_phone_dom(form,field_audit)
                 _verify_sender_contact_dom(form,field_audit)

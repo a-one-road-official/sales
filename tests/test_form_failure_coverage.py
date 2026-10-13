@@ -284,3 +284,28 @@ def test_observed_contact_digits_phone_gets_exact_payload_bound_receipt(monkeypa
     assert received[0]['contact[Name]']==['Kazuma Tamura']
     assert received[0]['contact[email]']==['admin@a1-road.com']
     assert received[0]['contact[Your message]'][0].replace('\r\n','\n')=='Exact saved\nbody'
+
+
+def test_late_visible_captcha_after_guard_read_blocks_click_and_request(monkeypatch,playwright_runtime):
+    original=execution._new_browser_context;state={};received=[]
+    def context(browser):
+        ctx=original(browser)
+        def mock(route):
+            if route.request.method=='POST':received.append(route.request.post_data)
+            route.fulfill(status=200,content_type='text/html',body='<form method="post" action="/contact">'
+                '<label>Name<input name="name"></label><label>Email<input required name="email" type="email"></label>'
+                '<label>Message<textarea name="message"></textarea></label><button>Send</button></form>')
+        ctx.route('**/*',mock);state['context']=ctx;return ctx
+    def delayed_challenge():
+        state['context'].pages[0].evaluate("""() => {
+            const widget=document.createElement('div');widget.className='h-captcha';
+            widget.textContent='Verify you are human';document.body.appendChild(widget);
+        }""")
+    monkeypatch.setattr(execution,'_new_browser_context',context)
+    monkeypatch.setattr(execution,'sync_playwright',lambda:nullcontext(playwright_runtime))
+    executor=execution.PublicContactFormExecutor(explicit_source_rows={'fixture'})
+    result=executor.execute(form_url='https://fixture.invalid/contact',website='https://fixture.invalid',
+        message='Exact saved\nbody',subject='Saved subject',company_name='Local fixture',
+        idempotency_key='late-challenge',source_row='fixture',before_submit=delayed_challenge)
+    assert result['status']=='FORM_FAILED' and result['reason']=='CAPTCHA_PRESENT_BEFORE_SUBMIT'
+    assert result['submission_attempted'] is False and received==[]
