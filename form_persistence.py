@@ -392,11 +392,13 @@ class FormPersistence:
         end = tabs[EVENT_TAB]["gridProperties"]["rowCount"]
         col = column_label(self.layout.event_headers.index("event_id") + 1)
         hits = []
-        for start in range(2, end + 1, 2000):
-            values = self.values(f"'{EVENT_TAB}'!{col}{start}:{col}{min(end,start+1999)}")
-            for offset, value in enumerate(values):
-                if value and str(value[0]) == identity:
-                    hits.append(start + offset)
+        # A full single-column read preserves duplicate detection across the
+        # entire ledger without one quota-consuming RPC per 2,000 grid rows.
+        # Read afresh on every call; a cached absence cannot authorize a claim.
+        values = self.values(f"'{EVENT_TAB}'!{col}2:{col}{end}") if end >= 2 else []
+        for offset, value in enumerate(values):
+            if value and str(value[0]) == identity:
+                hits.append(2 + offset)
         out = []
         last_col = column_label(len(self.layout.event_headers))
         for number in hits:
