@@ -272,7 +272,55 @@ def scheduled_claim(packet):
     return context
 
 
-def require_saved_ready_copy(row, packet, historical_handoff=None):
+def legacy_handoff_event_id(handoff):
+    """Original evidence-column Handoff format; no inferred readiness."""
+    if (handoff.get('source') == 'DRAFT_READY_HANDOFF'
+            and handoff.get('origin') == 'SCHEDULED_AUTOMATION'
+            and not handoff.get('task_id') and not handoff.get('phase')
+            and handoff.get('run_id') and handoff.get('verified_at')
+            and isinstance(handoff.get('raw_row'), int)
+            and isinstance(handoff.get('main_row'), int)):
+        return (f"{handoff['run_id']}:DRAFT_READY:raw{handoff['raw_row']}"
+                f":main{handoff['main_row']}")
+    return None
+
+
+def require_legacy_handoff_receipt(row, packet, handoff, receipt):
+    """Validate actual immutable legacy evidence against unchanged saved copy."""
+    evidence = strict_json(receipt.get('evidence'))
+    identity = handoff.get('identity') or {}
+    fields = row['fields']
+    subject, body = fields.get('営業メール件名'), fields.get('営業メール本文')
+    keys = ('run_id', 'origin', 'raw_row', 'main_row', 'generation_run_id',
+            'copy_source_id', 'copy_source_revision', 'copy_source_sha256',
+            'input_sha256', 'email_sha256', 'decision_id')
+    valid = (legacy_handoff_event_id(handoff)
+        and receipt.get('event_id') == legacy_handoff_event_id(handoff)
+        and receipt.get('source') == 'DRAFT_READY_HANDOFF'
+        and receipt.get('writer') == 'SCHEDULED_AUTOMATION'
+        and receipt.get('to_status') == receipt.get('action_type') == 'DRAFT_READY'
+        and receipt.get('occurred_at') == handoff.get('verified_at')
+        and str(receipt.get('source_row')) == str(packet.get('source_row'))
+        and handoff.get('main_row') == packet.get('source_row')
+        and receipt.get('company_name') == row.get('company') == evidence.get('company')
+        and evidence.get('domain') == packet.get('canonical_domain')
+        and all(handoff.get(k) and evidence.get(k) == handoff[k] for k in keys)
+        and evidence.get('customer_actions') == 0
+        and all((evidence.get('identity') or {}).get(k) is True
+                for k in ('source_exact', 'company_exact', 'domain_exact'))
+        and all(identity.get(k) is True for k in
+                ('source_record_url_exact', 'company_name_exact', 'official_domain_exact'))
+        and evidence.get('source_record_url')
+        == identity.get('raw_source_record_url') == identity.get('main_source_record_url')
+        and isinstance(subject, str) and isinstance(body, str))
+    if valid:
+        actual = hashlib.sha256((subject + '\n' + body.replace('\r\n', '\n')).encode()).hexdigest()
+        valid = actual == handoff.get('email_sha256')
+    if not valid:
+        raise ValueError('FORM_LEGACY_HANDOFF_RECEIPT_MISMATCH')
+
+
+def require_saved_ready_copy(row, packet, historical_handoff=None, *, legacy_receipt=None):
     """Bind new downstream form claims to Handoff's exact stored customer copy."""
     invoked = datetime.fromisoformat(str(scheduled_claim(packet)["invoked_at"]).replace("Z", "+00:00"))
     if invoked < datetime(2026, 10, 13, 3, 18, 12, tzinfo=timezone.utc):
@@ -284,6 +332,9 @@ def require_saved_ready_copy(row, packet, historical_handoff=None):
                        and handoff.get("run_id") and handoff.get("decision_id")) or (
         handoff.get("task_id") == "6ac5b018a72c81919b80cf3daa6d3cc5"
         and handoff.get("source") == "DRAFT_READY_HANDOFF" and handoff.get("verified_at"))
+    if legacy_receipt is not None:
+        require_legacy_handoff_receipt(row, packet, handoff, legacy_receipt)
+        original_source = True
     if (not original_source or not handoff.get("email_sha256")
             or packet.get("draft_ready_handoff") != handoff):
         raise ValueError("FORM_DRAFT_READY_HANDOFF_REQUIRED")
@@ -537,6 +588,9 @@ class FormPersistence:
             raise ValueError("FORM_ORIGINAL_HANDOFF_ID_CONFLICT")
         historical_id = lineage.get("original_handoff_event_id") or (recovery or {}).get("original_handoff_event_id")
         receipt_ids = [scheduler["claim_event_id"]]
+        legacy_id = legacy_handoff_event_id(meta.get('handoff') or {})
+        if legacy_id:
+            receipt_ids.append(legacy_id)
         if recovery:
             receipt_ids.append(recovery.get("evidence_event_id"))
             if not meta.get("handoff") and historical_id:
@@ -562,7 +616,14 @@ class FormPersistence:
                         or (historical_handoff.get("source") == "DRAFT_READY_HANDOFF"
                             and historical_handoff.get("task_id") == "6ac5b018a72c81919b80cf3daa6d3cc5"))):
                 raise ValueError("FORM_ORIGINAL_HANDOFF_RECEIPT_MISMATCH")
-        require_saved_ready_copy(current, packet, historical_handoff)
+        legacy_receipt = None
+        if legacy_id:
+            legacy_rows = receipts.get(legacy_id, [])
+            if len(legacy_rows) != 1:
+                raise ValueError('FORM_LEGACY_HANDOFF_RECEIPT_UNRESOLVED')
+            legacy_receipt = dict(zip(self.layout.event_headers, legacy_rows[0]))
+        require_saved_ready_copy(current, packet, historical_handoff,
+                                legacy_receipt=legacy_receipt)
         claim_rows = receipts.get(scheduler["claim_event_id"], [])
         if len(claim_rows) != 1:
             raise ValueError("FORM_SCHEDULER_CLAIM_RECEIPT_UNRESOLVED")
@@ -749,4 +810,5 @@ class FormPersistence:
         merged = self.commit(number, fresh, {"form_executor_attempt": attempt}, event, require_start=True)
         fresh["meta"] = merged
         return fresh
+
 

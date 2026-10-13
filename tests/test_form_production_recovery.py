@@ -83,6 +83,61 @@ def test_historical_handoff_keeps_exact_source_payload_without_main_rewrite():
     changed['draft_ready_handoff']['email_sha256'] = 'invented-new-hash'
     with unittest.TestCase().assertRaisesRegex(ValueError, 'FORM_DRAFT_READY_HANDOFF_REQUIRED'):
         fp.require_saved_ready_copy(row, changed, historical)
+def legacy_handoff_fixture():
+    import hashlib
+    digest = hashlib.sha256(b'Saved subject\nSaved body').hexdigest()
+    h = dict(source='DRAFT_READY_HANDOFF', origin='SCHEDULED_AUTOMATION',
+        run_id='original-run', raw_row=12, main_row=9000, verified_at='2026-10-11T08:23:05Z',
+        generation_run_id='original-generation', copy_source_id='doc', copy_source_revision='rev',
+        copy_source_sha256='source-hash', input_sha256='input-hash', email_sha256=digest,
+        decision_id='original-decision', identity=dict(source_record_url_exact=True,
+        company_name_exact=True, official_domain_exact=True,
+        raw_source_record_url='https://source.invalid/exhibitor',
+        main_source_record_url='https://source.invalid/exhibitor'))
+    row = dict(company='Example', meta={'handoff':h},
+        fields={'営業メール件名':'Saved subject','営業メール本文':'Saved body'})
+    packet = dict(source_row=9000, canonical_domain='example.invalid', subject='Saved subject',
+        form_message='Saved body', draft_ready_handoff=copy.deepcopy(h),
+        scheduler_context=dict(task_id=fp.FORM_TASK_ID,origin='SCHEDULED_AUTOMATION',run_id='c-run',
+            invoked_at='2026-10-13T11:18:00Z',nominal_slot='2026-10-13T11:18:00Z',claim_event_id='claim'))
+    evidence = {k:copy.deepcopy(v) for k,v in h.items() if k not in ('identity','verified_at','source')}
+    evidence.update(company='Example',domain='example.invalid',customer_actions=0,
+        source_record_url='https://source.invalid/exhibitor',
+        identity=dict(source_exact=True,company_exact=True,domain_exact=True))
+    receipt = dict(event_id=fp.legacy_handoff_event_id(h),source='DRAFT_READY_HANDOFF',
+        writer='SCHEDULED_AUTOMATION',to_status='DRAFT_READY',action_type='DRAFT_READY',
+        occurred_at=h['verified_at'],source_row='9000',company_name='Example',evidence=json.dumps(evidence))
+    return row,packet,receipt
+
+
+class LegacyHandoffTests(unittest.TestCase):
+    def test_exact_legacy_event_column_format_preserves_original(self):
+        row,packet,receipt=legacy_handoff_fixture();before=copy.deepcopy((row,packet,receipt))
+        with self.assertRaisesRegex(ValueError,'FORM_DRAFT_READY_HANDOFF_REQUIRED'):
+            fp.require_saved_ready_copy(row,packet)
+        fp.require_saved_ready_copy(row,packet,legacy_receipt=receipt)
+        self.assertEqual((row,packet,receipt),before)
+
+    def test_missing_conflicting_source_owner_and_evidence_remain_blocked(self):
+        for key,val in [('event_id','invented'),('source_row','other'),('company_name','other'),
+                ('source','other'),('writer','INTERACTIVE'),('occurred_at','later'),('evidence','{}')]:
+            row,packet,receipt=legacy_handoff_fixture();receipt[key]=val
+            with self.subTest(key=key),self.assertRaises(ValueError):
+                fp.require_saved_ready_copy(row,packet,legacy_receipt=receipt)
+        for key,val in [('email_sha256','altered'),('input_sha256','altered'),
+                ('decision_id','altered'),('origin','INTERACTIVE'),('customer_actions',1),
+                ('domain','other.invalid'),('identity',{'source_exact':True})]:
+            row,packet,receipt=legacy_handoff_fixture();e=json.loads(receipt['evidence']);e[key]=val;receipt['evidence']=json.dumps(e)
+            with self.subTest(key=key),self.assertRaises(ValueError):
+                fp.require_saved_ready_copy(row,packet,legacy_receipt=receipt)
+
+    def test_changed_saved_or_packet_copy_remains_blocked(self):
+        row,packet,receipt=legacy_handoff_fixture();row['fields']['営業メール本文']='Different body'
+        with self.assertRaises(ValueError):fp.require_saved_ready_copy(row,packet,legacy_receipt=receipt)
+        row,packet,receipt=legacy_handoff_fixture();packet['draft_ready_handoff']['email_sha256']='invented'
+        with self.assertRaises(ValueError):fp.require_saved_ready_copy(row,packet,legacy_receipt=receipt)
+
+
 EVENT_HEADERS = ('event_id','occurred_at','date','source_row','company_key','company_name',
  'from_status','to_status','action_type','source','recorded_at','lead_id','previous_status',
  'new_status','writer','reason','evidence','timestamp','code_version','idempotency_key',
