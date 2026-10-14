@@ -444,7 +444,7 @@ def _field_key(el, label: str) -> str:
         return "discovery_source"
     if re.search(r"category[_ -]?|main\s+category|商品カテゴリ|カテゴリー", marker):
         return "category"
-    if re.search(r"\b(subject|件名)\b", marker):
+    if re.search(r"\b(subject|betreff|件名)\b", marker):
         return "subject"
     if tag == "textarea":
         return "message"

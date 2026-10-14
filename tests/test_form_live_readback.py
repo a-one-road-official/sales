@@ -62,6 +62,17 @@ def test_german_name_without_visible_given_name_remains_full_name(form_page):
     assert _field_key(field, _label_for(field)) == 'name'
 
 
+def test_observed_betreff_control_receives_exact_original_subject(form_page):
+    form_page.set_content('<form><label for="subject">Betreff</label>'
+                          '<input id="subject" name="betreff" placeholder="z. B. Support"></form>')
+    field = form_page.locator('#subject')
+    key = _field_key(field, _label_for(field))
+    original = 'Japan validation for polymer prototyping'
+    assert key == 'subject'
+    field.fill(_value_for(key, '', subject=original, message='immutable body'))
+    assert field.input_value() == original
+
+
 def test_live_sender_anchor_survives_inserted_same_key_control(form_page):
     form_page.set_content('<form><input id="extra" name="first_name" value="">'
                           '<input id="filled" name="first_name" value="Kazuma"></form>')
