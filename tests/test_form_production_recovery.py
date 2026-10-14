@@ -636,6 +636,26 @@ class FormRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'CONCURRENT_FORM_FIELD_CHANGE'):
             self.runtime.commit(8972,row,{'form_url':'https://example.com/stale'},event)
         self.assertEqual(self.svc.get_meta()['form_url'],'https://example.com/newer')
+    def test_recovered_url_and_exploration_progress_use_distinct_events(self):
+        tree=ast.parse((Path(__file__).resolve().parents[1]/'form_production.py').read_text())
+        function=next(node for node in tree.body
+            if isinstance(node,ast.FunctionDef) and node.name=='write_meta')
+        namespace={'_RUNTIME':self.runtime,'packet_digest':fp.packet_digest}
+        exec(compile(ast.Module(body=[function],type_ignores=[]),
+            'form_production_write_meta','exec'),namespace)
+        write_meta=namespace['write_meta']
+        row=self.runtime.row(8972)
+        recovered=copy.deepcopy(row['meta'])
+        recovered['form_url']='https://example.com/recovered-contact'
+        row['meta']=write_meta(self.svc,8972,recovered,expected_row=row,
+            reason='Verified GET-only official contact page recovery')
+        progress=copy.deepcopy(row['meta'])
+        progress['form_recovery_progress']={'claim_id':'c-1','saved_copy_changed':False}
+        row['meta']=write_meta(self.svc,8972,progress,expected_row=row,
+            reason='Preserve official-form exploration frontier and actual blockers',
+            action='FORM_EXPLORATION_PROGRESS_SAVED')
+        self.assertEqual(self.svc.get_meta()['form_recovery_progress']['claim_id'],'c-1')
+
     def test_partial_multistep_transmission_remains_ambiguous(self):
         state,_=fp.classify_form_result({'status':'FORM_FAILED','reason':'MULTI_STEP_NOT_ADVANCED',
             'submission_attempted':True})

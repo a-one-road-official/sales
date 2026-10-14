@@ -170,9 +170,10 @@ def read_full_row(svc, row_number: int) -> dict:
     return _RUNTIME.row(row_number)
 
 
-def write_meta(svc, row_number: int, meta: dict, *, expected_row: dict, reason: str) -> dict:
+def write_meta(svc, row_number: int, meta: dict, *, expected_row: dict, reason: str,
+               action: str = "FORM_CLAIM_URL_RECOVERED") -> dict:
     claim_id = str((expected_row["meta"].get("form_submission_packet_v1") or {}).get("claim_id") or "")
-    event = _RUNTIME.event(row_number, expected_row, "FORM_CLAIM_URL_RECOVERED", reason,
+    event = _RUNTIME.event(row_number, expected_row, action, reason,
         {"claim_id": claim_id, "form_url": (meta.get("form_submission_packet_v1") or {}).get("form_url"),
          "packet_sha256": packet_digest(meta.get("form_submission_packet_v1"))}, claim_id)
     changes = {key: value for key, value in meta.items() if value != expected_row["meta"].get(key)}
@@ -513,7 +514,8 @@ def main() -> None:
                 claim_id=claim_id,result=compact_form_result(result),progress=progress)
             try:
                 row['meta']=write_meta(svc,row_number,requested,expected_row=row,
-                    reason='Preserve official-form exploration frontier and actual blockers')
+                    reason='Preserve official-form exploration frontier and actual blockers',
+                    action='FORM_EXPLORATION_PROGRESS_SAVED')
             except Exception as exc:
                 runtime_log('FORM_EXPLORATION_COMMIT_ERROR',row=row_number,claim_id=claim_id,
                     original_error=str(exc),result=compact_form_result(result),
