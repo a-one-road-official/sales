@@ -1,6 +1,8 @@
 name: Form production executor
 
 on:
+  schedule:
+    - cron: '35 * * * *'
   push:
     branches: [main]
     paths:
