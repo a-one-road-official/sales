@@ -1,6 +1,6 @@
 import pytest
 from playwright.sync_api import sync_playwright
-from form_execution import _verify_identity_dom, _settle_identity_dom, _verify_phone_dom, _capture_browser_failure
+from form_execution import _verify_identity_dom, _settle_identity_dom, _verify_phone_dom, _capture_browser_failure, _field_key, _label_for, _value_for
 
 
 @pytest.fixture
@@ -35,6 +35,31 @@ def test_actual_failed_page_is_captured_before_driver_shutdown(tmp_path):
 
     assert captures[0][:2] == ('exception', 'Tamura')
     assert captures[0][2].read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
+
+
+def test_observed_german_surname_given_name_pair_uses_distinct_sender_parts(form_page):
+    form_page.set_content('<section><div><label for="surname">Name *</label>'
+                          '<input id="surname" name="name" placeholder="z. B. Mustermann"></div>'
+                          '<div><label for="given">Vorname *</label>'
+                          '<input id="given" name="vorname" placeholder="z. B. Max"></div></section>')
+    items = []
+    for ident in ('surname', 'given'):
+        field = form_page.locator('#' + ident)
+        key = _field_key(field, _label_for(field))
+        field.fill(_value_for(key, '', subject='', message=''))
+        items.append(audit(key, ident))
+    assert [item['key'] for item in items] == ['last_name', 'first_name']
+    assert form_page.locator('#surname').input_value() == 'Tamura'
+    assert form_page.locator('#given').input_value() == 'Kazuma'
+    _verify_identity_dom(form_page.locator('section'), items)
+
+
+def test_german_name_without_visible_given_name_remains_full_name(form_page):
+    form_page.set_content('<form><label for="name">Name *</label>'
+                          '<input id="name" name="name" placeholder="z. B. Mustermann">'
+                          '<input name="vorname" style="display:none"></form>')
+    field = form_page.locator('#name')
+    assert _field_key(field, _label_for(field)) == 'name'
 
 
 def test_live_sender_anchor_survives_inserted_same_key_control(form_page):

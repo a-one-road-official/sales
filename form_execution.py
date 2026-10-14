@@ -347,6 +347,32 @@ def _field_key(el, label: str) -> str:
             return known[token]
     if typ in {'text',''} and re.fullmatch(r'\s*(?:first|last)\s*\*?\s*',label,re.I):
         return 'first_name' if label.strip(' *').lower()=='first' else 'last_name'
+    # German Name/Vorname pairs use Name for the surname. Require both
+    # the actual surname example and a visible paired Vorname control;
+    # a generic Name field alone still receives the full sender name.
+    if (tag == 'input' and typ in {'text', ''}
+            and re.fullmatch(r'\s*Name\s*\*?\s*', label, re.I)
+            and re.fullmatch(r'\s*(?:z\.?\s*B\.?\s*)?Mustermann\s*',
+                             el.get_attribute('placeholder') or '', re.I)
+            and el.evaluate("""el => {
+                const visible = node => !!(node.getClientRects().length &&
+                    getComputedStyle(node).visibility !== 'hidden');
+                let parent = el.parentElement;
+                for (let depth = 0; parent && depth < 8; depth++, parent = parent.parentElement) {
+                    const fields = [...parent.querySelectorAll('input:not([type=hidden]), textarea, select')]
+                        .filter(visible);
+                    if (fields.length > 10) return false;
+                    const given = fields.filter(node => node !== el &&
+                        node.tagName === 'INPUT' &&
+                        /^(?:text)?$/i.test(node.getAttribute('type') || '') &&
+                        /^vorname$/i.test(node.getAttribute('name') || ''));
+                    if (given.length === 1) return true;
+                    if (given.length > 1) return false;
+                    if (parent.tagName === 'FORM') return false;
+                }
+                return false;
+            }""")):
+        return 'last_name'
     # An isolated Title may mean Dr./Prof.; a business role is not evidence
     # of an academic qualification. Only explicit job/role semantics map CEO.
     if re.fullmatch(r'\s*(?:title|academic title|honorific|titel)\s*\*?\s*', label, re.I):
