@@ -1,6 +1,6 @@
 import pytest
 from playwright.sync_api import sync_playwright
-from form_execution import _verify_identity_dom, _settle_identity_dom, _verify_phone_dom, _capture_browser_failure, _field_key, _label_for, _value_for
+from form_execution import _verify_identity_dom, _settle_identity_dom, _verify_phone_dom, _capture_browser_failure, _field_key, _label_for, _value_for, _observe_browser_diagnostics
 
 
 @pytest.fixture
@@ -71,6 +71,27 @@ def test_observed_betreff_control_receives_exact_original_subject(form_page):
     assert key == 'subject'
     field.fill(_value_for(key, '', subject=original, message='immutable body'))
     assert field.input_value() == original
+
+
+def test_native_validation_dialog_and_client_error_are_retained_without_accepting(form_page):
+    diagnostics = {'dialogs': [], 'page_errors': []}
+    attempted = False
+    _observe_browser_diagnostics(form_page, diagnostics, lambda: attempted)
+    form_page.set_content('<button id="validation" onclick="alert(\'Please put the name!\')">Validate</button>'
+                          '<button id="confirm" onclick="document.body.dataset.accepted=confirm(\'Proceed?\')">Confirm</button>'
+                          '<button id="error" onclick="throw new TypeError(\'Broken named form collection\')">Error</button>')
+    form_page.locator('#validation').click()
+    assert diagnostics['dialogs'][0]['message'] == 'Please put the name!'
+    assert diagnostics['dialogs'][0]['after_click'] is False
+    attempted = True
+    form_page.locator('#confirm').click()
+    assert form_page.locator('body').get_attribute('data-accepted') == 'false'
+    assert diagnostics['dialogs'][1]['type'] == 'confirm'
+    assert diagnostics['dialogs'][1]['after_click'] is True
+    form_page.locator('#error').click()
+    assert 'Broken named form collection' in diagnostics['page_errors'][0]['error']
+    assert diagnostics['page_errors'][0]['after_click'] is True
+    assert diagnostics['page_errors'][0]['observed_at']
 
 
 def test_live_sender_anchor_survives_inserted_same_key_control(form_page):

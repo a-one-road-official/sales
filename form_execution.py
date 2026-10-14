@@ -33,6 +33,34 @@ def _capture_browser_failure(manager, capture):
             raise
 
 
+def _observe_browser_diagnostics(page, diagnostics, attempted):
+    """Record native client failures without changing submission or receipt gates."""
+    def dialog_seen(dialog):
+        if len(diagnostics['dialogs']) < 32:
+            diagnostics['dialogs'].append({
+                'type': dialog.type,
+                'message': dialog.message[:2000],
+                'after_click': bool(attempted()),
+                'observed_at': datetime.now(timezone.utc).isoformat(),
+            })
+        # Preserve Playwright's existing default: dismiss, never accept.
+        try:
+            dialog.dismiss()
+        except Exception as exc:
+            page_error(f'DIALOG_DISMISS_FAILED:{type(exc).__name__}:{exc}')
+
+    def page_error(error):
+        if len(diagnostics['page_errors']) < 32:
+            diagnostics['page_errors'].append({
+                'error': str(error)[:2000],
+                'after_click': bool(attempted()),
+                'observed_at': datetime.now(timezone.utc).isoformat(),
+            })
+
+    page.on('dialog', dialog_seen)
+    page.on('pageerror', page_error)
+
+
 CAPTCHA_RE = re.compile(r"captcha|recaptcha|hcaptcha|turnstile", re.I)
 SUCCESS_RE = re.compile(
     r"thank\s+you(?:\s+for\s+reaching\s+out)?|thanks\s+for\s+(?:contacting|reaching\s+out|your\s+interest)|"
@@ -1875,6 +1903,7 @@ class PublicContactFormExecutor:
         page = None
         screenshots = {}
         screenshot_capture_errors = []
+        browser_diagnostics = {'dialogs': [], 'page_errors': []}
         network = None
         completed_steps = []
 
@@ -1909,6 +1938,9 @@ class PublicContactFormExecutor:
                 "submission_attempted": submission_attempted,
                 "screenshots": dict(screenshots),
                 "screenshot_capture_errors": list(screenshot_capture_errors),
+                "browser_diagnostics": {
+                    key: list(value) for key, value in browser_diagnostics.items()
+                },
                 "completed_steps":list(completed_steps),
                 "field_status": dict(field_status),
                 "missing_required": list(missing_required),
@@ -1967,6 +1999,8 @@ class PublicContactFormExecutor:
                 browser = playwright.chromium.launch(headless=True)
                 browser_context = _new_browser_context(browser)
                 page = browser_context.new_page()
+                _observe_browser_diagnostics(page, browser_diagnostics,
+                                             lambda: submission_attempted)
                 if not preview_only:
                     network = SubmissionEvidence(message, lambda url: _form_action_allowed(url,website))
                     browser_context.route('**/*', network.route)
