@@ -971,9 +971,9 @@ def _verify_phone_dom(form, field_audit):
         if item.get("key") != "phone" or item.get("action") != "FILLED":
             continue
         index = item.get("index")
-        if not isinstance(index, int) or not 0 <= index < controls.count():
+        if not isinstance(index, int) or index < 0:
             raise ValueError("FORM_PHONE_CONTROL_MISSING")
-        el = controls.nth(index)
+        el = _audited_control(form, item)
         value = _current_value(el).strip()
         digits = re.sub(r"[\s().-]", "", value)
         country = _phone_country_code(el)
@@ -1586,9 +1586,16 @@ def _audited_control(form, item):
         raise ValueError('FORM_AUDITED_CONTROL_MISSING:'+str(item.get('key')))
     controls = form.locator(_CUSTOM_FIELD_SELECTOR if index>=10000 else 'input:not([type=hidden]), textarea, select')
     position=index-10000 if index>=10000 else index
-    if position>=controls.count():
-        raise ValueError('FORM_AUDITED_CONTROL_MISSING:'+str(item.get('key')))
-    el=controls.nth(position)
+    identity = (item.get('html_semantics') or {}).get('id')
+    if identity:
+        anchored = form.locator('[id=' + json.dumps(str(identity), ensure_ascii=False) + ']')
+        if anchored.count() != 1:
+            raise ValueError('FORM_AUDITED_CONTROL_MISSING:'+str(item.get('key')))
+        el = anchored.first
+    else:
+        if position>=controls.count():
+            raise ValueError('FORM_AUDITED_CONTROL_MISSING:'+str(item.get('key')))
+        el=controls.nth(position)
     if item.get('marker') or item.get('label'):
         if _field_key(el,_label_for(el)) != item.get('key'):
             raise ValueError('FORM_AUDITED_CONTROL_CHANGED:'+str(item.get('key')))
@@ -1617,13 +1624,21 @@ def _verify_identity_dom(form, field_audit=None):
                 index = int(item.get("index"))
             except (TypeError, ValueError):
                 raise ValueError("FORM_IDENTITY_CONTROL_MISSING:" + key)
-            if index < 0 or (index < 10000 and index >= controls.count()):
+            if index < 0:
                 raise ValueError("FORM_IDENTITY_CONTROL_MISSING:" + key)
-            el = _audited_control(form,item)
+            try:
+                el = _audited_control(form,item)
+            except ValueError as exc:
+                if str(exc).startswith('FORM_AUDITED_CONTROL_MISSING:'):
+                    raise ValueError('FORM_IDENTITY_CONTROL_MISSING:' + key) from exc
+                raise
             try:
                 if not el.is_visible() or not el.is_enabled():
                     raise ValueError("FORM_IDENTITY_CONTROL_UNAVAILABLE:" + key)
-                observed.append({"key": key, "final_value": _current_value(el)})
+                value = _current_value(el)
+                item['final_value'] = value
+                item['identity_readback_verified'] = False
+                observed.append({"key": key, "final_value": value})
             except ValueError:
                 raise
             except Exception as exc:
@@ -1637,6 +1652,38 @@ def _verify_identity_dom(form, field_audit=None):
             if key in identity_keys:
                 observed.append({"key": key, "final_value": _current_value(el)})
     validate_identity_fields(observed)
+    for item in field_audit or []:
+        if isinstance(item, dict) and item.get('key') in identity_keys and item.get('action') in {'FILLED', 'SELECTED'}:
+            item['identity_readback_verified'] = True
+
+
+def _settle_identity_dom(form, field_audit):
+    """Settle normal UI events; refill only a known filled control reset to empty.
+
+    This runs before any Next/submit. Wrong nonempty sender values still fail.
+    No guessed facts, source copy changes, validation bypass or customer retry.
+    """
+    form.page.wait_for_timeout(150)
+    for item in field_audit:
+        key = item.get('key')
+        if key not in {'name', 'first_name', 'last_name', 'company', 'email'} or item.get('action') != 'FILLED':
+            continue
+        el = _audited_control(form, item)
+        if not el.is_visible() or not el.is_enabled():
+            raise ValueError('FORM_IDENTITY_CONTROL_UNAVAILABLE:' + key)
+        if el.evaluate('el => el.tagName.toLowerCase()') not in {'input', 'textarea'}:
+            continue
+        try:
+            value = el.input_value()
+        except Exception as exc:
+            raise ValueError('FORM_IDENTITY_READBACK_FAILED:' + key) from exc
+        if not value:
+            expected = _value_for(key, '', subject='', message='')
+            el.fill(expected)
+            item['empty_control_refill_count'] = 1
+        el.press('Tab')
+    form.page.wait_for_timeout(150)
+    _verify_identity_dom(form, field_audit)
 
 
 def _contact_normal(value):
@@ -1659,7 +1706,7 @@ def _verify_sender_contact_dom(form, field_audit):
         if key not in keys or item.get("action") not in {"FILLED", "SELECTED"}:
             continue
         index = item.get("index")
-        if not isinstance(index, int) or index<0 or (index<10000 and index>=controls.count()):
+        if not isinstance(index, int) or index<0:
             raise ValueError("FORM_SENDER_CONTACT_CONTROL_MISSING:" + key)
         el = _audited_control(form,item)
         if not el.is_visible() or not el.is_enabled():
@@ -2337,7 +2384,7 @@ class PublicContactFormExecutor:
                     submit = _submit_control(form_context, form)
                     if submit is None:
                         return result_payload("FORM_FAILED", reason="SUBMIT_CONTROL_NOT_FOUND")
-                    _verify_identity_dom(form, field_audit)
+                    _settle_identity_dom(form, field_audit)
                     _verify_phone_dom(form, field_audit)
                     _verify_sender_contact_dom(form, field_audit)
                     control_label = _control_label(submit)
@@ -2505,5 +2552,6 @@ class PublicContactFormExecutor:
                     browser.close()
                 except Exception:
                     pass
+
 
 
