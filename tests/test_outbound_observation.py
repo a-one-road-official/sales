@@ -33,7 +33,8 @@ def test_any_original_payload_discrepancy_blocks_verified_save(field):
 
 
 def receipt():
-    m=message('ack','person@target.invalid','admin@example.invalid',date='2000',extra=[
+    m=message('ack','person@target.invalid','admin@example.invalid',
+        body='Thank you for contacting us. We have received your message.',date='2000',extra=[
         {'name':'References','value':'<original@example.invalid>'},
         {'name':'Auto-Submitted','value':'auto-generated'},
         {'name':'Authentication-Results','value':'mx.google.com; dkim=pass header.i=@target.invalid; dmarc=pass header.from=target.invalid'}])
@@ -71,6 +72,21 @@ def test_missing_message_identity_and_unsent_original_remain_unverified():
     assert not audit_gmail_saved(m,expected)['gmail_saved_exact']
     m=message();m['label_ids']=['DRAFT']
     assert not linked_auto_receipt(m,receipt())['recipient_receipt_verified']
+
+
+@pytest.mark.parametrize('body',[
+    'Thank you for contacting us. Your message was rejected. Action: failed; Status: 5.7.0',
+    'Thank you for contacting us. Do not contact this address again.'])
+def test_authenticated_linked_failure_or_refusal_is_not_positive_receipt(body):
+    ack=receipt();ack['payload']['body']['content']=body
+    assert not linked_auto_receipt(message(),ack)['recipient_receipt_verified']
+
+
+def test_authenticated_report_or_unrecognized_text_needs_classification():
+    ack=receipt();ack['payload']['mime_type']='multipart/report'
+    assert not linked_auto_receipt(message(),ack)['recipient_receipt_verified']
+    ack=receipt();ack['payload']['body']['content']='Unrecognized automatic message'
+    assert not linked_auto_receipt(message(),ack)['recipient_receipt_verified']
 
 
 def test_old_form_label_with_unconfirmed_raw_result_is_not_verified_acceptance():

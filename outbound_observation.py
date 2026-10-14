@@ -27,6 +27,16 @@ def payload_hash(subject, body):
     return hashlib.sha256((subject+'\n'+body.replace('\r\n','\n')).encode()).hexdigest()
 
 
+def plain_parts(payload):
+    text=[]
+    if payload.get('mime_type')=='text/plain':
+        value=(payload.get('body') or {}).get('content')
+        if isinstance(value,str):text.append(value)
+    for part in payload.get('parts') or []:
+        text.extend(plain_parts(part))
+    return text
+
+
 def audit_gmail_saved(message, expected):
     """Verify connected Gmail's saved exact payload; recipient receipt is separate."""
     body=(message.get('payload') or {}).get('body') or {}
@@ -64,6 +74,15 @@ def linked_auto_receipt(sent, receipt):
         r'\bdkim=pass\b[^;]*\bheader\.(?:i=@|d=)'+escaped+r'(?=[\s;]|$)',auth,re.I))
     aligned_dmarc=bool(domain and re.search(
         r'\bdmarc=pass\b[^;]*\bheader\.from='+escaped+r'(?=[\s;]|$)',auth,re.I))
+    text='\n'.join(plain_parts(receipt.get('payload') or {}))
+    positive=bool(re.search(r'thank(?:s|\s+you)\s+for\s+contacting|'
+        r'we\s+have\s+received\s+your\s+(?:message|email|inquiry)|'
+        r'(?:i[\x27’]m|i\s+am)\s+(?:on\s+vacation|out\s+of\s+(?:the\s+)?office)',text,re.I))
+    negative=bool(re.search(r'\bundeliverable\b|delivery\s+(?:failed|failure)|'
+        r'(?:message|email).{0,35}(?:rejected|could\s+not\s+be\s+delivered)|'
+        r'address\s+(?:is\s+)?unknown|\baction\s*:\s*failed\b|'
+        r'\bstatus\s*:\s*5\.\d\.\d\b|do\s+not\s+contact|stop\s+emailing',text,re.I))
+    failure_report=(receipt.get('payload') or {}).get('mime_type')=='multipart/report'
     try:
         later=int(receipt['internal_date'])>=int(sent['internal_date'])
     except (KeyError,TypeError,ValueError):
@@ -76,13 +95,15 @@ def linked_auto_receipt(sent, receipt):
         'receipt_after_original':later,
         'receiving_gmail_dkim_dmarc':aligned_dkim and aligned_dmarc,
         'automatic':one_header(receipt,'Auto-Submitted').casefold() in {'auto-generated','auto-replied'},
+        'positive_receipt_text':positive,
+        'not_failure_or_refusal':not negative and not failure_report,
     }
     verified=all(checks.values())
     return {'recipient_receipt_verified':verified,
             'evidence_level':'RECIPIENT_AUTO_ACK' if verified else 'UNVERIFIED_LINKED_RECEIPT',
             'checks':checks,'original_message_id':sent.get('id'),
             'receipt_message_id':receipt.get('id'),'original_rfc822_message_id':original,
-            'human_reply':False,'appointment_confirmed':False,
+            'human_reply':False if verified else None,'appointment_confirmed':False,
             'customer_action_authorized':False}
 
 
