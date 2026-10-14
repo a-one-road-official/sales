@@ -15,10 +15,22 @@ import time
 import hashlib
 import unicodedata
 from pathlib import Path
+from contextlib import contextmanager
 
 from playwright.sync_api import sync_playwright
 from customer_care import identity_field_key, validate_identity_fields
 from form_safety import dom_preflight, failure_plan, SubmissionEvidence, text_hash
+
+
+@contextmanager
+def _capture_browser_failure(manager, capture):
+    """Retain the actual failed page before Playwright shuts down its driver."""
+    with manager as playwright:
+        try:
+            yield playwright
+        except Exception:
+            capture("exception")
+            raise
 
 
 CAPTCHA_RE = re.compile(r"captcha|recaptcha|hcaptcha|turnstile", re.I)
@@ -1836,6 +1848,7 @@ class PublicContactFormExecutor:
         initial_success_texts = set()
         page = None
         screenshots = {}
+        screenshot_capture_errors = []
         network = None
         completed_steps = []
 
@@ -1850,11 +1863,15 @@ class PublicContactFormExecutor:
                 path = root / f"{key}-{stage}.png"
                 page.screenshot(path=str(path), timeout=5000)
                 screenshots[stage] = str(path)
-            except Exception:
-                pass
+            except Exception as exc:
+                screenshot_capture_errors.append({
+                    "stage": stage,
+                    "error": f"{type(exc).__name__}:{exc}"[:500],
+                })
 
         def result_payload(status: str, *, reason: str = "", **extra) -> dict:
-            capture("outcome")
+            if "exception" not in screenshots:
+                capture("outcome")
             payload = {
                 "status": status,
                 "company_name": company_name,
@@ -1865,6 +1882,7 @@ class PublicContactFormExecutor:
                 "checkbox_audit": checkbox_audit,
                 "submission_attempted": submission_attempted,
                 "screenshots": dict(screenshots),
+                "screenshot_capture_errors": list(screenshot_capture_errors),
                 "completed_steps":list(completed_steps),
                 "field_status": dict(field_status),
                 "missing_required": list(missing_required),
@@ -1919,7 +1937,7 @@ class PublicContactFormExecutor:
 
         browser = None
         try:
-            with sync_playwright() as playwright:
+            with _capture_browser_failure(sync_playwright(), capture) as playwright:
                 browser = playwright.chromium.launch(headless=True)
                 browser_context = _new_browser_context(browser)
                 page = browser_context.new_page()
