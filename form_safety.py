@@ -240,9 +240,44 @@ class SubmissionEvidence:
 
 
 def verified_form_success(result):
+    if not isinstance(result, dict):
+        return False
     proof=result.get('submission_evidence') or {}
+    if not isinstance(proof, dict):
+        return False
+    digest=result.get('submitted_message_sha256')
+    responses=proof.get('responses')
+    navigation=proof.get('navigation_responses') or []
+    count=proof.get('request_count')
+    if (type(count) is not int or count < 1 or not isinstance(responses,list)
+            or not responses or not isinstance(navigation,list)
+            or not isinstance(digest,str) or not re.fullmatch(r'[0-9a-f]{64}',digest)):
+        return False
+    # Inspect the retained browser response, not its top-level summary flags.
+    # Every response belongs to an actually observed exact-payload request.
+    for response in responses:
+        if not isinstance(response,dict):
+            return False
+        status=response.get('status')
+        try:
+            url=urlparse(str(response.get('url') or ''))
+        except ValueError:
+            return False
+        if (type(status) is not int or not 200 <= status < 400
+                or url.scheme not in {'http','https'} or not url.hostname
+                or url.username or url.password
+                or response.get('message_bound') is not True
+                or response.get('message_sha256') != digest
+                or response.get('provider_rejected')
+                or response.get('invalid_fields')):
+            return False
+    if navigation:
+        last=navigation[-1]
+        if (not isinstance(last,dict) or type(last.get('status')) is not int
+                or not 200 <= last['status'] < 400):
+            return False
     return bool(result.get('submission_attempted') is True and
         proof.get('version')=='FORM_NETWORK_PROOF_V1' and proof.get('message_bound') is True and
         not proof.get('confirmation_blocked') and not proof.get('provider_rejected') and
-        proof.get('message_sha256')==result.get('submitted_message_sha256') and
+        proof.get('message_sha256')==digest and
         result.get('confirmation') in {'SUCCESS_TEXT','THANK_YOU_URL','PROVIDER_RECEIPT'})

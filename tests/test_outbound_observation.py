@@ -109,7 +109,56 @@ def test_payload_verified_form_receipt_is_bound_to_original_message():
        'form_result':{'status':'FORM_SENT','submission_attempted':True,
            'confirmation':'SUCCESS_TEXT','submitted_message_sha256':digest,
            'submission_evidence':{'version':'FORM_NETWORK_PROOF_V1','message_bound':True,
-                                 'message_sha256':digest}}}
+                 'message_sha256':digest,'request_count':1,'responses':[{
+                     'status':200,'url':'https://fixture.invalid/contact',
+                     'message_bound':True,'message_sha256':digest}]}}}
     assert audit_form_state(m)['verified_acceptance']
     m['form_submission_packet_v1']['form_message']='Changed body'
+    assert not audit_form_state(m)['verified_acceptance']
+
+
+def form_receipt():
+    digest=hashlib.sha256(b'Original body').hexdigest()
+    return {'form_state':'FORM_SENT','form_submission_packet_v1':{'form_message':'Original body'},
+        'form_result':{'status':'FORM_SENT','submission_attempted':True,
+            'confirmation':'SUCCESS_TEXT','submitted_message_sha256':digest,
+            'submission_evidence':{'version':'FORM_NETWORK_PROOF_V1','message_bound':True,
+                'message_sha256':digest,'request_count':1,'responses':[{
+                    'status':200,'url':'https://fixture.invalid/contact',
+                    'message_bound':True,'message_sha256':digest}]}}}
+
+
+@pytest.mark.parametrize('count,responses', [(0,[]),(1,[]),(None,None),(True,[]),(-1,[])])
+def test_summary_flags_without_retained_actual_request_response_never_count(count,responses):
+    m=form_receipt();p=m['form_result']['submission_evidence']
+    p['request_count']=count;p['responses']=responses
+    assert not audit_form_state(m)['verified_acceptance']
+
+
+@pytest.mark.parametrize('field,value', [('status',403),('status',500),('status','200'),
+    ('status',True),('url',''),('url','https://'),('url','https://['),('url','javascript:fake'),
+    ('url','https://user:secret@fixture.invalid/contact'),('message_bound',False),
+    ('message_sha256','another-payload'),('provider_rejected',True),
+    ('invalid_fields',[{'field':'email','message':'invalid'}])])
+def test_actual_negative_or_wrong_payload_response_outweighs_success_summary(field,value):
+    m=form_receipt();m['form_result']['submission_evidence']['responses'][0][field]=value
+    assert not audit_form_state(m)['verified_acceptance']
+
+
+def test_real_confirmation_403_cannot_be_hidden_by_false_summary_flag():
+    m=form_receipt();p=m['form_result']['submission_evidence']
+    p['confirmation_blocked']=False
+    p['navigation_responses']=[{'status':403,'url':'https://fixture.invalid/thanks'}]
+    assert not audit_form_state(m)['verified_acceptance']
+
+
+def test_a_failed_response_cannot_hide_beside_a_successful_response():
+    m=form_receipt();p=m['form_result']['submission_evidence']
+    bad=copy.deepcopy(p['responses'][0]);bad['status']=403;p['responses'].append(bad)
+    assert not audit_form_state(m)['verified_acceptance']
+
+
+@pytest.mark.parametrize('proof', ['corrupt', ['corrupt'], 1])
+def test_corrupt_wire_evidence_is_unverified_not_a_whole_observer_crash(proof):
+    m=form_receipt();m['form_result']['submission_evidence']=proof
     assert not audit_form_state(m)['verified_acceptance']
