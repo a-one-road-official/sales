@@ -790,6 +790,17 @@ class FormRecoveryTests(unittest.TestCase):
             normalize.assert_called_once_with('https://sales.example.co.uk')
 
 
+def test_read_only_exploration_preserves_actual_wire_result():
+    source=(Path(__file__).resolve().parents[1]/'form_production.py').read_text()
+    assert 'result = best_attempt' not in source
+    assert 'result["exploration_preview"] = compact_form_result(best_attempt)' in source
+    assert "'next_action':failure_plan(progress_basis)['action']" in source
+    # The compact terminal receipt must retain both actual network proof and
+    # the separately labelled GET-only discovery diagnostic.
+    assert '"submission_evidence"' in source
+    assert '"exploration_preview"' in source
+
+
 class BrowserSubmissionBoundaryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
