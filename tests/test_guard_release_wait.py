@@ -231,7 +231,7 @@ class GuardReleaseWaitTests(unittest.TestCase):
     def test_fresh_phase_requires_exact_prior_commit_release_readback(self):
         lease = sp.Lease("run:phase-one", "phase-one-token", NOW,
                          NOW + timedelta(seconds=120))
-        with self.assertRaisesRegex(sp.PersistenceError, "prior_phase_event_not_verified"):
+        with self.assertRaisesRegex(sp.PersistenceError, "prior_phase_commit_readback_unverified"):
             sp.require_completed_guard_release(
                 LAYOUT, lease, observation(""), dict(verified=False))
         with self.assertRaisesRegex(sp.PersistenceError, "prior_phase_guard_not_released"):
