@@ -28,6 +28,17 @@ def rejection(**changes):
     return sp.GuardAcquireRejection(**values)
 
 
+def verified_release_event():
+    return {
+        "verified": True,
+        "status": "VERIFIED",
+        "retry_external_action": False,
+        "missing": [],
+        "conflicting": [],
+        "duplicated": [],
+    }
+
+
 class Clock:
     def __init__(self):
         self.elapsed = 0.0
@@ -216,6 +227,50 @@ class GuardReleaseWaitTests(unittest.TestCase):
         self.assertEqual(clock.elapsed, 180)
         self.assertEqual(reads, [0, 30, 60, 90, 120, 150])
         self.assertEqual(acquired, [])
+
+    def test_fresh_phase_requires_exact_prior_commit_release_readback(self):
+        lease = sp.Lease("run:phase-one", "phase-one-token", NOW,
+                         NOW + timedelta(seconds=120))
+        with self.assertRaisesRegex(sp.PersistenceError, "prior_phase_event_not_verified"):
+            sp.require_completed_guard_release(
+                LAYOUT, lease, observation(""), dict(verified=False))
+        with self.assertRaisesRegex(sp.PersistenceError, "prior_phase_guard_not_released"):
+            sp.require_completed_guard_release(
+                LAYOUT, lease, observation("phase-one-token",
+                                           owner="run:phase-one"),
+                verified_release_event())
+        boundary = sp.require_completed_guard_release(
+            LAYOUT, lease, observation(""), verified_release_event())
+        self.assertTrue(boundary["guard_released"])
+        self.assertTrue(boundary["new_episode_required"])
+        self.assertEqual(boundary["previous_owner"], "run:phase-one")
+        self.assertEqual(boundary["previous_token"], "phase-one-token")
+
+    def test_separate_successful_phases_get_separate_wait_episodes(self):
+        first_clock, first_calls = Clock(), []
+        first = self.orchestrate(
+            first_clock,
+            lambda: observation("phase-one-owner")
+            if first_clock.elapsed < 150 else observation(""),
+            lambda lease, now: first_calls.append((lease, now)))
+        self.assertEqual(first_clock.elapsed, 150)
+        self.assertEqual(first_clock.delays, [30, 30, 30, 30, 30])
+        self.assertEqual(len(first_calls), 1)
+
+        boundary = sp.require_completed_guard_release(
+            LAYOUT, first, observation(""), verified_release_event())
+        self.assertTrue(boundary["new_episode_required"])
+
+        second_clock, second_calls = Clock(), []
+        second_clock.utc = first_clock.utc
+        second = self.orchestrate(
+            second_clock, lambda: observation(""),
+            lambda lease, now: second_calls.append((lease, now)))
+        self.assertEqual(second_clock.elapsed, 0)
+        self.assertEqual(second_clock.delays, [])
+        self.assertEqual(len(second_calls), 1)
+        self.assertEqual(second.acquired_at, first_clock.utc)
+        self.assertEqual(second.token, "fresh-token")
 
 
 if __name__ == "__main__":
