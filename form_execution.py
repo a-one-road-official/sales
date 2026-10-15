@@ -1787,6 +1787,22 @@ def _verify_sender_contact_dom(form, field_audit):
         else:
             valid = _contact_normal(value) in {_contact_normal(v) for v in allowed}
         if not valid:
+            # Some optional US-style ZIP widgets rewrite a truthful Japanese
+            # postal code into a masked/truncated value (for example
+            # 22000-72__). Never submit that altered sender fact: remove it
+            # through the normal UI and retain the field as intentionally blank.
+            if key == "postal_code" and item.get("required") is False:
+                el.fill("")
+                el.press("Tab")
+                form.page.wait_for_timeout(50)
+                if _current_value(el):
+                    raise ValueError("FORM_SENDER_CONTACT_VALUE_MISMATCH:" + key)
+                if not el.evaluate("el => !el.validity || el.validity.valid"):
+                    raise ValueError("FORM_SENDER_CONTACT_INPUT_INVALID:" + key)
+                item["action"] = "OPTIONAL_UNMAPPED"
+                item["final_value"] = ""
+                item["optional_sender_value_omitted_due_to_site_mask"] = True
+                continue
             raise ValueError("FORM_SENDER_CONTACT_VALUE_MISMATCH:" + key)
         if not el.evaluate("el => !el.validity || el.validity.valid"):
             raise ValueError("FORM_SENDER_CONTACT_INPUT_INVALID:" + key)
