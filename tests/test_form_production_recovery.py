@@ -122,6 +122,8 @@ class LegacyHandoffTests(unittest.TestCase):
         row,packet,receipt=legacy_handoff_fixture()
         handoff=row['meta']['handoff'];ids=fp.legacy_handoff_event_ids(handoff)
         self.assertEqual(len(ids),2)
+        handoff['identity']['resolved_official_domain']='example.invalid'
+        packet['draft_ready_handoff']['identity']['resolved_official_domain']='example.invalid'
         receipt['event_id']=ids[1]
         receipt['writer']=handoff['run_id']
         evidence={k:copy.deepcopy(v) for k,v in handoff.items()
