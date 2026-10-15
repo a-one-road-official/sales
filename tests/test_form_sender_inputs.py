@@ -48,9 +48,6 @@ def test_mutated_sender_value_stops_before_submit(key, valid, bad):
         browser.close()
 
 
-@pytest.mark.parametrize('key,bad', [('name','Tamura Tamura'), ('phone','000-0000-0000'),
-                                    ('address','123 Fake Street'), ('postal_code','000-0000'),
-                                    ('message','New shortened message')])
 def test_optional_postal_mask_is_cleared_instead_of_submitting_altered_sender_fact():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -66,6 +63,9 @@ def test_optional_postal_mask_is_cleared_instead_of_submitting_altered_sender_fa
         browser.close()
 
 
+@pytest.mark.parametrize('key,bad', [('name','Tamura Tamura'), ('phone','000-0000-0000'),
+                                    ('address','123 Fake Street'), ('postal_code','000-0000'),
+                                    ('message','New shortened message')])
 def test_field_override_cannot_replace_sender_facts_or_saved_copy(key, bad):
     expected = _value_for(key, 'specific_field', subject='Saved subject', message='Saved body')
     assert _value_for(key, 'specific_field', subject='Saved subject', message='Saved body',
