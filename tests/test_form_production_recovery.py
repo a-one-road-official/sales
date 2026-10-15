@@ -118,6 +118,13 @@ class LegacyHandoffTests(unittest.TestCase):
         fp.require_saved_ready_copy(row,packet,legacy_receipt=receipt)
         self.assertEqual((row,packet,receipt),before)
 
+    def test_original_draft_ready_writer_event_id_is_accepted_without_reconstruction(self):
+        row,packet,receipt=legacy_handoff_fixture()
+        ids=fp.legacy_handoff_event_ids(row['meta']['handoff'])
+        self.assertEqual(len(ids),2)
+        receipt['event_id']=ids[1]
+        fp.require_saved_ready_copy(row,packet,legacy_receipt=receipt)
+
     def test_missing_conflicting_source_owner_and_evidence_remain_blocked(self):
         for key,val in [('event_id','invented'),('source_row','other'),('company_name','other'),
                 ('source','other'),('writer','INTERACTIVE'),('occurred_at','later'),('evidence','{}')]:
