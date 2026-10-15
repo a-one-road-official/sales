@@ -329,12 +329,19 @@ def retry_after_guard_rejection(state, rejection):
 def acquire_with_release_wait(layout, *, observe, make_lease, acquire, rejection_from_error,
                               now, monotonic, sleep, require_start=True,
                               remaining_budget_seconds=None, on_wait=None):
-    """Orchestrate the same pure planner using existing caller-owned clients.
+    """Run exactly one logical guard-acquisition episode.
 
     No client/backend is created. ``observe`` supplies actual bracketed native
     reads; ``acquire`` executes one atomic attempt. All callbacks, including the
     clock/sleep, are explicit for deterministic tests. The 180-second deadline
     includes observation latency and never resets across owners or rejections.
+
+    A successful return permanently ends this episode. Callers must not carry its
+    start time, attempts, owners, or any GuardWaitState into a later phase. A later
+    REFINE/HANDOFF/RESERVATION/form-bookkeeping phase starts a new invocation only
+    after its previous commit/release and exact released-guard readback pass
+    :func:`require_completed_guard_release`. A deferred, failed, or unresolved
+    episode has no such boundary and cannot be reset through this function.
     """
     start = monotonic()
     state = GuardWaitState(now())
@@ -498,6 +505,34 @@ def release_requests(layout: Layout, lease: Lease) -> list[dict]:
     """
     return [_fence(layout, lease.token), *_lease_values(layout),
             {"deleteNamedRange": {"namedRangeId": lease.token}}]
+
+
+def require_completed_guard_release(layout: Layout, lease: Lease,
+                                    released_observation: GuardObservation,
+                                    event_readback: Mapping[str, Any]) -> dict:
+    """Verify the only boundary that permits a later phase to use a fresh episode.
+
+    This supplies no acquisition, lease extension, cleanup, or customer-action
+    authority. It accepts only an exact successful commit/event readback plus
+    native metadata and all three lease cells proving the prior owned guard is
+    already absent. Early release is valid; expiry alone is irrelevant.
+    """
+    if not isinstance(lease, Lease):
+        raise PersistenceError("prior_phase_lease_required")
+    if (not isinstance(event_readback, Mapping)
+            or event_readback.get("verified") is not True
+            or event_readback.get("status") != "VERIFIED"
+            or event_readback.get("retry_external_action") is not False
+            or event_readback.get("missing") not in ([], ())
+            or event_readback.get("conflicting") not in ([], ())
+            or event_readback.get("duplicated") not in ([], ())):
+        raise PersistenceError("prior_phase_commit_readback_unverified")
+    owner = _observed_guard_owner(layout, released_observation)
+    if owner is not None:
+        raise PersistenceError("prior_phase_guard_not_released")
+    return {"verified": True, "previous_owner": lease.owner,
+            "previous_token": lease.token, "guard_released": True,
+            "new_episode_required": True}
 
 
 def expired_cleanup_requests(layout: Layout, named_range: Mapping[str, Any],
