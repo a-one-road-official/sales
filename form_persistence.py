@@ -295,7 +295,7 @@ def legacy_handoff_event_id(handoff):
 
 
 def require_legacy_handoff_receipt(row, packet, handoff, receipt):
-    """Validate actual immutable legacy evidence against unchanged saved copy."""
+    """Validate either exact immutable legacy writer format against unchanged saved copy."""
     evidence = strict_json(receipt.get('evidence'))
     identity = handoff.get('identity') or {}
     fields = row['fields']
@@ -304,31 +304,46 @@ def require_legacy_handoff_receipt(row, packet, handoff, receipt):
             'copy_source_id', 'copy_source_revision', 'copy_source_sha256',
             'input_sha256', 'email_sha256', 'decision_id')
     event_ids = legacy_handoff_event_ids(handoff)
-    valid = (event_ids
+    identity_valid = (
+        all(identity.get(k) is True for k in
+            ('source_record_url_exact', 'company_name_exact', 'official_domain_exact'))
+        and identity.get('raw_source_record_url')
+        and identity.get('raw_source_record_url') == identity.get('main_source_record_url')
+    )
+    common_valid = (event_ids
         and receipt.get('event_id') in event_ids
         and receipt.get('source') == 'DRAFT_READY_HANDOFF'
-        and receipt.get('writer') == 'SCHEDULED_AUTOMATION'
         and receipt.get('to_status') == receipt.get('action_type') == 'DRAFT_READY'
         and receipt.get('occurred_at') == handoff.get('verified_at')
         and str(receipt.get('source_row')) == str(packet.get('source_row'))
         and handoff.get('main_row') == packet.get('source_row')
-        and receipt.get('company_name') == row.get('company') == evidence.get('company')
-        and evidence.get('domain') == packet.get('canonical_domain')
+        and receipt.get('company_name') == row.get('company')
         and all(handoff.get(k) and evidence.get(k) == handoff[k] for k in keys)
         and evidence.get('customer_actions') == 0
+        and identity_valid
+        and isinstance(subject, str) and isinstance(body, str))
+    rich_evidence_valid = (
+        receipt.get('writer') == 'SCHEDULED_AUTOMATION'
+        and receipt.get('company_name') == evidence.get('company')
+        and evidence.get('domain') == packet.get('canonical_domain')
         and all((evidence.get('identity') or {}).get(k) is True
                 for k in ('source_exact', 'company_exact', 'domain_exact'))
-        and all(identity.get(k) is True for k in
-                ('source_record_url_exact', 'company_name_exact', 'official_domain_exact'))
-        and evidence.get('source_record_url')
-        == identity.get('raw_source_record_url') == identity.get('main_source_record_url')
-        and isinstance(subject, str) and isinstance(body, str))
+        and evidence.get('source_record_url') == identity.get('raw_source_record_url'))
+    # The original draft-ready writer stored its run id in the writer column and
+    # kept identity in the saved Handoff, while the immutable event evidence
+    # contains the exact copy/source hashes plus the guarded-commit marker.
+    original_writer_valid = (
+        receipt.get('event_id') == event_ids[1]
+        and receipt.get('writer') == handoff.get('run_id')
+        and packet.get('canonical_domain') == identity.get('resolved_official_domain')
+        and evidence.get('gate_decision') == 'PASS'
+        and evidence.get('last_completed_phase') == 'GUARDED_COMMIT')
+    valid = common_valid and (rich_evidence_valid or original_writer_valid)
     if valid:
         actual = hashlib.sha256((subject + '\n' + body.replace('\r\n', '\n')).encode()).hexdigest()
         valid = actual == handoff.get('email_sha256')
     if not valid:
         raise ValueError('FORM_LEGACY_HANDOFF_RECEIPT_MISMATCH')
-
 
 def require_saved_ready_copy(row, packet, historical_handoff=None, *, legacy_receipt=None):
     """Bind new downstream form claims to Handoff's exact stored customer copy."""
