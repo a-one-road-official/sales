@@ -51,6 +51,21 @@ def test_mutated_sender_value_stops_before_submit(key, valid, bad):
 @pytest.mark.parametrize('key,bad', [('name','Tamura Tamura'), ('phone','000-0000-0000'),
                                     ('address','123 Fake Street'), ('postal_code','000-0000'),
                                     ('message','New shortened message')])
+def test_optional_postal_mask_is_cleared_instead_of_submitting_altered_sender_fact():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content('<form><input name="postal" value="22000-72__"><button type="submit">Send</button></form>')
+        audit = [{'index': 0, 'key': 'postal_code', 'action': 'FILLED',
+                  'required': False, 'final_value': '22000-72__'}]
+        _verify_sender_contact_dom(page.locator('form'), audit)
+        assert page.locator('input').input_value() == ''
+        assert audit[0]['action'] == 'OPTIONAL_UNMAPPED'
+        assert audit[0]['final_value'] == ''
+        assert audit[0]['optional_sender_value_omitted_due_to_site_mask'] is True
+        browser.close()
+
+
 def test_field_override_cannot_replace_sender_facts_or_saved_copy(key, bad):
     expected = _value_for(key, 'specific_field', subject='Saved subject', message='Saved body')
     assert _value_for(key, 'specific_field', subject='Saved subject', message='Saved body',
