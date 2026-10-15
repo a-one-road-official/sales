@@ -70,3 +70,50 @@ def runtime_checkpoint(*, run_id, started_at, now, deadline=None,
     else:
         result['reason'] = 'OBSERVED_DEADLINE_HAS_MEASURED_ROOM'
     return result
+
+
+def ramp_checkpoint(*, run_id, earned_limit, claims, ledger_complete,
+                    rolling_remaining, candidate_claim_id=None):
+    """Count durable reservations before admitting another claim or transport.
+
+    Callers supply a complete fresh same-run ledger under their existing owner
+    fence. A reservation consumes capacity even after a no-send, failure, or
+    unknown outcome. Accepted messages do not consume a second slot. This pure
+    check neither sends nor clears any existing incident or protection.
+    """
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError('RAMP_RUN_ID_REQUIRED')
+    if type(earned_limit) is not int or earned_limit not in (3, 10, 20):
+        raise ValueError('RAMP_EARNED_LIMIT_INVALID')
+    if type(rolling_remaining) is not int or rolling_remaining < 0:
+        raise ValueError('RAMP_ROLLING_CAPACITY_INVALID')
+    if ledger_complete is not True:
+        raise ValueError('RAMP_LEDGER_INCOMPLETE')
+    unique, companies = {}, {}
+    for claim in claims:
+        if not isinstance(claim, Mapping) or claim.get('run_id') != run_id:
+            raise ValueError('RAMP_CLAIM_RUN_MISMATCH')
+        key, company = claim.get('claim_id'), claim.get('company_key')
+        if not isinstance(key, str) or not key.strip() or not isinstance(company, str) or not company.strip():
+            raise ValueError('RAMP_CLAIM_IDENTITY_REQUIRED')
+        if key in unique and unique[key] != company:
+            raise ValueError('RAMP_CLAIM_IDENTITY_CONFLICT')
+        if company in companies and companies[company] != key:
+            raise ValueError('RAMP_DUPLICATE_COMPANY_CLAIMS')
+        unique[key], companies[company] = company, key
+    used = len(unique)
+    remaining = max(0, earned_limit - used)
+    if candidate_claim_id is None:
+        fits = remaining > 0 and rolling_remaining > 0
+        action = 'CONTINUE_ORIGINAL_ADMISSION_CHECKS' if fits else 'FINALIZE_NO_NEW_CLAIM'
+    else:
+        if not isinstance(candidate_claim_id, str) or candidate_claim_id not in unique:
+            raise ValueError('RAMP_TRANSPORT_CLAIM_NOT_RESERVED')
+        # The existing reservation already occupies its slot. The existing
+        # no-replay barrier must independently prove it has never transmitted.
+        fits = used <= earned_limit and rolling_remaining > 0
+        action = 'CONTINUE_ORIGINAL_TRANSPORT_CHECKS' if fits else 'FINALIZE_NO_NEW_TRANSPORT'
+    return {'run_id': run_id, 'earned_limit': earned_limit,
+            'durable_reserved': used, 'remaining_run_slots': remaining,
+            'overrun': max(0, used - earned_limit), 'action': action,
+            'customer_action_authorized': False}
