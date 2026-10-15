@@ -198,7 +198,7 @@ def compact_form_result(result: dict | None) -> dict:
         "explicit_negative_confirmation", "discovery_candidates", "recovered_form_url",
         "submitted_message_sha256", "submitted_subject_sha256", "screenshots",
         "submission_evidence", "preflight", "recovery_plan", "discovery_report",
-        "completed_steps",
+        "completed_steps", "exploration_preview",
     ):
         if key in result:
             value = result.get(key)
@@ -438,6 +438,7 @@ def main() -> None:
             tried = previous.get('tried_urls') or []
             candidates = discover_official_contact_urls(website, form_url, limit=8,exclude_urls=tried)
             result["discovery_candidates"] = candidates
+            progress_basis = result
             runtime_log('FORM_EXPLORATION_START',row=row_number,claim_id=claim_id,
                 original_reason=result.get('reason'),candidates=candidates,saved_copy_changed=False)
             if candidates:
@@ -468,6 +469,7 @@ def main() -> None:
                     result = execute_claimed_form(executor, row_number, row, peers)
                     result["discovery_candidates"] = candidates
                     result["recovered_form_url"] = recovered_url
+                    progress_basis = result
                 elif preview.get("attempts"):
                     # Persist the most informative read-only failure so ChatGPT can
                     # repair the next claim instead of seeing only the last/weakest
@@ -496,7 +498,12 @@ def main() -> None:
                     )
                     best_attempt["discovery_candidates"] = candidates
                     best_attempt["reason"] = str(best_attempt.get("reason") or "FORM_DISCOVERY_PREVIEW_FAILED")
-                    result = best_attempt
+                    # A GET-only preview is discovery evidence, not the actual
+                    # browser attempt. Preserve the original request-count and
+                    # wire evidence as the terminal result; store the preview
+                    # separately so it cannot manufacture or hide reception.
+                    result["exploration_preview"] = compact_form_result(best_attempt)
+                    progress_basis = best_attempt
                 result['discovery_report']={'candidate_count':len(candidates),
                     'attempts':[{'url':r.get('form_url'),'status':r.get('status'),
                         'reason':r.get('reason'),'missing_required':r.get('missing_required',[])}
@@ -508,7 +515,7 @@ def main() -> None:
                     [r.get('url') for r in (result.get('discovery_report') or {}).get('attempts',[]) if r.get('url')])),
                 'remaining_urls':[u for u in candidates if u not in
                     {r.get('url') for r in (result.get('discovery_report') or {}).get('attempts',[])}],
-                'next_action':failure_plan(result)['action'],'saved_copy_changed':False}
+                'next_action':failure_plan(progress_basis)['action'],'saved_copy_changed':False}
             requested=dict(row['meta'],form_recovery_progress=progress)
             runtime_log('FORM_EXPLORATION_RESULT_BEFORE_COMMIT',row=row_number,
                 claim_id=claim_id,result=compact_form_result(result),progress=progress)
