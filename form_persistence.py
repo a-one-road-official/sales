@@ -272,17 +272,26 @@ def scheduled_claim(packet):
     return context
 
 
-def legacy_handoff_event_id(handoff):
-    """Original evidence-column Handoff format; no inferred readiness."""
+def legacy_handoff_event_ids(handoff):
+    """Recognize the two immutable event IDs used by original scheduled Handoff writers."""
     if (handoff.get('source') == 'DRAFT_READY_HANDOFF'
             and handoff.get('origin') == 'SCHEDULED_AUTOMATION'
             and not handoff.get('task_id') and not handoff.get('phase')
             and handoff.get('run_id') and handoff.get('verified_at')
             and isinstance(handoff.get('raw_row'), int)
             and isinstance(handoff.get('main_row'), int)):
-        return (f"{handoff['run_id']}:DRAFT_READY:raw{handoff['raw_row']}"
-                f":main{handoff['main_row']}")
-    return None
+        run_id, raw_row, main_row = (handoff['run_id'], handoff['raw_row'], handoff['main_row'])
+        return (
+            f"{run_id}:DRAFT_READY:raw{raw_row}:main{main_row}",
+            f"draft-ready:{run_id}:main{main_row}",
+        )
+    return ()
+
+
+def legacy_handoff_event_id(handoff):
+    """Backward-compatible canonical ID; admission reads every exact original variant."""
+    ids = legacy_handoff_event_ids(handoff)
+    return ids[0] if ids else None
 
 
 def require_legacy_handoff_receipt(row, packet, handoff, receipt):
@@ -294,8 +303,9 @@ def require_legacy_handoff_receipt(row, packet, handoff, receipt):
     keys = ('run_id', 'origin', 'raw_row', 'main_row', 'generation_run_id',
             'copy_source_id', 'copy_source_revision', 'copy_source_sha256',
             'input_sha256', 'email_sha256', 'decision_id')
-    valid = (legacy_handoff_event_id(handoff)
-        and receipt.get('event_id') == legacy_handoff_event_id(handoff)
+    event_ids = legacy_handoff_event_ids(handoff)
+    valid = (event_ids
+        and receipt.get('event_id') in event_ids
         and receipt.get('source') == 'DRAFT_READY_HANDOFF'
         and receipt.get('writer') == 'SCHEDULED_AUTOMATION'
         and receipt.get('to_status') == receipt.get('action_type') == 'DRAFT_READY'
@@ -588,9 +598,8 @@ class FormPersistence:
             raise ValueError("FORM_ORIGINAL_HANDOFF_ID_CONFLICT")
         historical_id = lineage.get("original_handoff_event_id") or (recovery or {}).get("original_handoff_event_id")
         receipt_ids = [scheduler["claim_event_id"]]
-        legacy_id = legacy_handoff_event_id(meta.get('handoff') or {})
-        if legacy_id:
-            receipt_ids.append(legacy_id)
+        legacy_ids = legacy_handoff_event_ids(meta.get('handoff') or {})
+        receipt_ids.extend(legacy_ids)
         if recovery:
             receipt_ids.append(recovery.get("evidence_event_id"))
             if not meta.get("handoff") and historical_id:
@@ -617,8 +626,13 @@ class FormPersistence:
                             and historical_handoff.get("task_id") == "6ac5b018a72c81919b80cf3daa6d3cc5"))):
                 raise ValueError("FORM_ORIGINAL_HANDOFF_RECEIPT_MISMATCH")
         legacy_receipt = None
-        if legacy_id:
-            legacy_rows = receipts.get(legacy_id, [])
+        if legacy_ids:
+            legacy_rows = []
+            for legacy_id in legacy_ids:
+                rows = receipts.get(legacy_id, [])
+                if len(rows) > 1:
+                    raise ValueError('FORM_LEGACY_HANDOFF_RECEIPT_UNRESOLVED')
+                legacy_rows.extend(rows)
             if len(legacy_rows) != 1:
                 raise ValueError('FORM_LEGACY_HANDOFF_RECEIPT_UNRESOLVED')
             legacy_receipt = dict(zip(self.layout.event_headers, legacy_rows[0]))
