@@ -540,6 +540,33 @@ def _required(el) -> bool:
     return False
 
 
+def _provider_managed_captcha_checkbox(el) -> bool:
+    """Identify provider-owned hidden CAPTCHA state without touching it.
+
+    Some site builders expose an aria-hidden required checkbox whose state is
+    controlled only by their CAPTCHA runtime. It is neither a business fact nor
+    a consent choice. Never check it directly; ordinary site-owned validation
+    and the existing visible-challenge detector remain authoritative.
+    """
+    try:
+        if (el.get_attribute("type") or "").lower() != "checkbox":
+            return False
+        return bool(el.evaluate("""el => {
+            if ((el.getAttribute('aria-hidden') || '').toLowerCase() !== 'true') return false;
+            const owner = el.closest('[class*="captcha" i], [id*="captcha" i], [data-captcha]');
+            const token = [
+                el.getAttribute('class') || '',
+                el.getAttribute('id') || '',
+                el.getAttribute('name') || '',
+                owner?.getAttribute('class') || '',
+                owner?.getAttribute('id') || '',
+            ].join(' ');
+            return /captcha|recaptcha|hcaptcha|turnstile/i.test(token);
+        }"""))
+    except Exception:
+        return False
+
+
 def _normalise_override_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
 
@@ -2358,6 +2385,19 @@ class PublicContactFormExecutor:
                         label = _label_for(el)
                         marker = _marker(el, label)
                         required = _required(el)
+                        if _provider_managed_captcha_checkbox(el):
+                            checkbox_audit.append(
+                                {
+                                    "index": index,
+                                    "marker": marker,
+                                    "label": label,
+                                    "required": required,
+                                    "marketing": False,
+                                    "final_checked": bool(el.is_checked()),
+                                    "action": "PROVIDER_MANAGED_CAPTCHA_CONTROL",
+                                }
+                            )
+                            continue
                         lower = f"{marker} {label}".lower()
                         marketing = bool(
                             re.search(
