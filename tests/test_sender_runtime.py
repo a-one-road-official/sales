@@ -1,6 +1,43 @@
 """Regression for self-invented terminal windows; no customer/network calls."""
 import pytest
 from sender_runtime import runtime_checkpoint
+from sender_runtime import ramp_checkpoint
+
+
+def ramp(n, **changes):
+    args = dict(run_id='actual-run', earned_limit=20, ledger_complete=True,
+                rolling_remaining=20,
+                claims=[dict(run_id='actual-run', claim_id=f'claim-{i}',
+                             company_key=f'company-{i}') for i in range(n)])
+    args.update(changes)
+    return ramp_checkpoint(**args)
+
+
+def test_twentieth_reservation_blocks_twenty_first_even_before_acceptance():
+    assert ramp(19)['action'] == 'CONTINUE_ORIGINAL_ADMISSION_CHECKS'
+    assert ramp(20)['action'] == 'FINALIZE_NO_NEW_CLAIM'
+    assert ramp(22)['overrun'] == 2
+    assert ramp(22, candidate_claim_id='claim-21')['action'] == 'FINALIZE_NO_NEW_TRANSPORT'
+
+
+def test_last_reserved_slot_can_transport_without_double_counting():
+    assert ramp(20, candidate_claim_id='claim-19')['action'] == 'CONTINUE_ORIGINAL_TRANSPORT_CHECKS'
+    assert ramp(20, candidate_claim_id='claim-19')['customer_action_authorized'] is False
+    assert ramp(19, rolling_remaining=0)['action'] == 'FINALIZE_NO_NEW_CLAIM'
+
+
+def test_incomplete_history_unreserved_transport_and_identity_conflicts_fail_closed():
+    with pytest.raises(ValueError, match='INCOMPLETE'): ramp(0, ledger_complete=False)
+    with pytest.raises(ValueError, match='NOT_RESERVED'): ramp(0, candidate_claim_id='missing')
+    a = dict(run_id='actual-run', claim_id='a', company_key='co')
+    assert ramp(0, claims=[a, a])['durable_reserved'] == 1
+    with pytest.raises(ValueError, match='DUPLICATE_COMPANY'): ramp(0, claims=[a, dict(a, claim_id='b')])
+    with pytest.raises(ValueError, match='RUN_MISMATCH'): ramp(0, claims=[dict(a, run_id='old')])
+
+
+@pytest.mark.parametrize('limit', [0, 1, 21, True, 20.0])
+def test_unearned_ramp_limit_is_rejected(limit):
+    with pytest.raises(ValueError, match='EARNED_LIMIT_INVALID'): ramp(0, earned_limit=limit)
 
 
 def checkpoint(**changes):
