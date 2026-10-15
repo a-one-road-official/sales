@@ -16,6 +16,7 @@ from form_execution import (
     _select_phone_country,
     _value_for,
     _verify_sender_contact_dom,
+    _provider_managed_captcha_checkbox,
 )
 
 
@@ -342,3 +343,34 @@ def test_missing_identity_control_is_not_silently_skipped():
         with pytest.raises(ValueError, match='FORM_IDENTITY_CONTROL_MISSING'):
             _verify_identity_dom(page.locator('form'), [{'index':0,'key':'name','action':'FILLED'}])
         browser.close()
+
+def test_provider_managed_hidden_captcha_checkbox_is_not_a_business_fact():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content(
+            '<form><div class="Captcha3940957316">'
+            '<input class="Captcha3940957316__checkbox" type="checkbox" '
+            'required tabindex="-1" aria-hidden="true">'
+            '</div></form>'
+        )
+        checkbox = page.locator('input[type=checkbox]')
+        assert checkbox.is_visible()
+        assert _provider_managed_captcha_checkbox(checkbox)
+        assert not checkbox.is_checked()
+        browser.close()
+
+
+def test_visible_captcha_checkbox_is_never_reclassified_as_provider_hidden_state():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_content(
+            '<form><label class="captcha">I am not a robot'
+            '<input type="checkbox" required></label></form>'
+        )
+        checkbox = page.locator('input[type=checkbox]')
+        assert checkbox.is_visible()
+        assert not _provider_managed_captcha_checkbox(checkbox)
+        browser.close()
+
