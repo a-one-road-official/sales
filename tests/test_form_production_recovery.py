@@ -120,10 +120,29 @@ class LegacyHandoffTests(unittest.TestCase):
 
     def test_original_draft_ready_writer_event_id_is_accepted_without_reconstruction(self):
         row,packet,receipt=legacy_handoff_fixture()
-        ids=fp.legacy_handoff_event_ids(row['meta']['handoff'])
+        handoff=row['meta']['handoff'];ids=fp.legacy_handoff_event_ids(handoff)
         self.assertEqual(len(ids),2)
         receipt['event_id']=ids[1]
+        receipt['writer']=handoff['run_id']
+        evidence={k:copy.deepcopy(v) for k,v in handoff.items()
+            if k not in ('identity','verified_at','source')}
+        evidence.update(customer_actions=0,gate_decision='PASS',
+            last_completed_phase='GUARDED_COMMIT')
+        receipt['evidence']=json.dumps(evidence)
+        before=copy.deepcopy((row,packet,receipt))
         fp.require_saved_ready_copy(row,packet,legacy_receipt=receipt)
+        self.assertEqual((row,packet,receipt),before)
+        for key,value in [('writer','SCHEDULED_AUTOMATION'),
+                ('event_id',ids[0]),('company_name','Other')]:
+            changed=copy.deepcopy(receipt);changed[key]=value
+            with self.subTest(key=key),self.assertRaisesRegex(
+                    ValueError,'FORM_LEGACY_HANDOFF_RECEIPT_MISMATCH'):
+                fp.require_saved_ready_copy(row,packet,legacy_receipt=changed)
+        changed=copy.deepcopy(receipt);changed_evidence=json.loads(changed['evidence'])
+        changed_evidence['last_completed_phase']='PREVIEW'
+        changed['evidence']=json.dumps(changed_evidence)
+        with self.assertRaisesRegex(ValueError,'FORM_LEGACY_HANDOFF_RECEIPT_MISMATCH'):
+            fp.require_saved_ready_copy(row,packet,legacy_receipt=changed)
 
     def test_missing_conflicting_source_owner_and_evidence_remain_blocked(self):
         for key,val in [('event_id','invented'),('source_row','other'),('company_name','other'),
